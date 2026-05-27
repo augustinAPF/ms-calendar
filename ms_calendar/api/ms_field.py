@@ -5,60 +5,37 @@ from frappe.utils import get_datetime
 # ── Feedback URL lookup by department ──────────────────────────────────
 # Education: keyed by (role_lower, round_lower)
 _EDUCATION_FEEDBACK_URLS = {
-    (
-        "school teacher",
-        "recruiter round",
-    ): "https://careers.frappe.cloud/recruiter-assessment-form-feed-back-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    (
-        "school teacher",
-        "round one",
-    ): "https://careers.frappe.cloud/school-teacher-functional-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
-    (
-        "school teacher",
-        "round two",
-    ): "https://careers.frappe.cloud/demo-lesson-observation-feedback-form-feed-back-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    (
-        "school teacher",
-        "round three",
-    ): "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
-    (
-        "resource person",
-        "recruiter round",
-    ): "https://careers.frappe.cloud/recruiter-assessment-form-feed-back-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    (
-        "resource person",
-        "round one",
-    ): "https://careers.frappe.cloud/educational-capacity-interview---feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    (
-        "resource person",
-        "round two",
-    ): "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
-    (
-        "associate resource person",
-        "round two",
-    ): "https://careers.frappe.cloud/campus-associate-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    (
-        "associate resource person",
-        "round three",
-    ): "https://careers.frappe.cloud/campus-associate-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    (
-        "associate resource person",
-        "calibration process",
-    ): "https://careers.frappe.cloud/calibration-process/new?app_id={app_id}&applicant_name={applicant_name}",
+    # ── School Teacher ──────────────────────────────────────────────────
+    ("school teacher", "recruiter round"): "https://careers.frappe.cloud/recruiter-assessment-form-feed-back-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    ("school teacher", "subject round"):   "https://careers.frappe.cloud/school-teacher-functional-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
+    ("school teacher", "demo round"):      "https://careers.frappe.cloud/demo-lesson-observation-feedback-form-feed-back-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    ("school teacher", "leader round-1"):  "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
+    ("school teacher", "leader round-2"):  "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
+    # ── Resource Person ─────────────────────────────────────────────────
+    ("resource person", "recruiter round"):            "https://careers.frappe.cloud/recruiter-assessment-form-feed-back-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    ("resource person", "education capacity round"):   "https://careers.frappe.cloud/educational-capacity-interview---feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    ("resource person", "leader round-1"):             "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
+    ("resource person", "leader round-2"):             "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
+    # ── Associate Resource Person ────────────────────────────────────────
+    ("associate resource person", "leader round-1"):   "https://careers.frappe.cloud/campus-associate-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    ("associate resource person", "leader round-2"):   "https://careers.frappe.cloud/campus-associate-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    ("associate resource person", "calibration process"): "https://careers.frappe.cloud/calibration-process/new?app_id={app_id}&applicant_name={applicant_name}",
 }
 
 # Livelihood: keyed by round_lower
 _LIVELIHOOD_FEEDBACK_URLS = {
-    "recruiter round": "https://careers.frappe.cloud/livelihoods-recruiter-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    "round one": "https://careers.frappe.cloud/livelihoods-functional-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    "round two": "https://careers.frappe.cloud/livelihoods-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "recruiter round":  "https://careers.frappe.cloud/livelihoods-recruiter-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "functional round": "https://careers.frappe.cloud/livelihoods-functional-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "leader round-1":   "https://careers.frappe.cloud/livelihoods-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "leader round-2":   "https://careers.frappe.cloud/livelihoods-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
 }
 
 # Health: keyed by round_lower
 _HEALTH_FEEDBACK_URLS = {
-    "recruiter round": "https://careers.frappe.cloud/health-recruitment-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    "round one": "https://careers.frappe.cloud/health-functional-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    "round two": "https://careers.frappe.cloud/health-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "recruiter round":  "https://careers.frappe.cloud/health-recruitment-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "functional round": "https://careers.frappe.cloud/health-functional-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "leader round-1":   "https://careers.frappe.cloud/health-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "leader round-2":   "https://careers.frappe.cloud/health-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
 }
 
 
@@ -625,9 +602,19 @@ def create_interview_event(
 
     # ── Round flags ──────────────────────────────────────────────────────────
     is_recruiter_round = "recruiter" in round_raw
-    is_round1 = "round one" in round_raw or round_raw == "round 1"
-    is_round2 = "round two" in round_raw or round_raw == "round 2"
-    is_round3 = "round three" in round_raw or round_raw == "round 3"
+    # Round-1: Subject Round (ST) | Education Capacity Round (RP) | Functional Round (Health/LH)
+    is_round1 = (
+        "subject round" in round_raw
+        or "education capacity round" in round_raw
+        or ("functional round" in round_raw and "leader" not in round_raw)
+    )
+    is_round2 = (
+        "demo round" in round_raw
+        or "leader round-1" in round_raw
+    )
+    is_round3 = (
+        "leader round-2" in round_raw
+    )
     # Calibration Process + Associate Resource Person → interviewer-only email
     is_calibration_arp = (
         "calibration" in round_raw and "associate resource person" in role_raw
@@ -640,17 +627,10 @@ def create_interview_event(
         "yes",
     )
 
-    # Normalize round to written form
     _round_norm = str(Interview_round or "").strip().lower()
     _round_norm = {
-        "round 1": "round one",
-        "round1": "round one",
-        "round 2": "round two",
-        "round2": "round two",
-        "round 3": "round three",
-        "round3": "round three",
-        "round 4": "round four",
-        "round4": "round four",
+        "recruiter round select": "recruiter round",
+        "recruiter round reject": "recruiter round",
     }.get(_round_norm, _round_norm)
 
     # --- Department-based lookup (primary) ---
@@ -692,7 +672,9 @@ def create_interview_event(
                 f"?app_id={_fq(str(application_id or ''), safe='')}"
                 f"&applicant_name={_fq(str(Applicants_name or ''), safe='')}"
             )
-        elif _round_norm in ("round one", "round two", "round three"):
+        elif _round_norm in ("education capacity round", "subject round",
+                             "functional round", "demo round",
+                             "leader round-1", "leader round-2"):
             feedback_url = (
                 "https://careers.frappe.cloud/campus-associate-feedback-form/new"
                 f"?app_id={_fq(str(application_id or ''), safe='')}"
@@ -1589,7 +1571,8 @@ comments/recommendations for the calibration process and final selection decisio
                 message=f"{patch_err} — event {event_id} — response: {_patch_detail[:2000]}",
             )
 
-    # If PATCH failed, fall back to sending individual emails to each interviewer
+    # If PATCH failed after all retries, fall back to a plain email to each interviewer
+    # so they at least receive the interview details and feedback form link.
     if not _patch_ok and interviewer_list:
         _iv_send_url = f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/sendMail"
         for _iv_email in interviewer_list:
@@ -1598,15 +1581,22 @@ comments/recommendations for the calibration process and final selection decisio
                     "subject": calendar_subject,
                     "body": {"contentType": "HTML", "content": final_body},
                     "toRecipients": [{"emailAddress": {"address": _iv_email}}],
+                    "ccRecipients": [{"emailAddress": {"address": Organizer_email}}],
                 },
                 "saveToSentItems": True,
             }
+            _iv_graph_sent = False
             try:
-                requests.post(_iv_send_url, headers=headers, json=_iv_payload, timeout=30).raise_for_status()
+                _iv_res = requests.post(_iv_send_url, headers=headers, json=_iv_payload, timeout=30)
+                _iv_res.raise_for_status()
+                _iv_graph_sent = True
             except Exception:
+                pass
+            if not _iv_graph_sent:
                 try:
                     frappe.sendmail(
                         recipients=[_iv_email],
+                        cc=[Organizer_email],
                         subject=calendar_subject,
                         message=final_body,
                         delayed=False,
@@ -1905,4 +1895,871 @@ def download_assessment_template():
     return {"file_content": file_b64, "filename": "Assessment Upload Template.xlsx"}
 
 
-# testing
+# ── Field Overall Dashboard ────────────────────────────────────────────────────
+
+_FOD_STAGES = [
+    {
+        "stage": "Applications",
+        "color": "FFF2CC",
+        "rows": [
+            {"label": "Carried forward Application from last year Before April", "key": "carried_forward"},
+            {"label": "Received from April this Year", "key": "received_this_year"},
+            {"label": "Total Applications", "key": "total", "is_total": True},
+        ],
+    },
+    {
+        "stage": "CV screening",
+        "color": "C6E0B4",
+        "rows": [
+            {"label": "Shortlist", "key": "cv_shortlist"},
+            {"label": "Regret", "key": "cv_regret"},
+            {"label": "Pending", "key": "cv_pending"},
+        ],
+    },
+    {
+        "stage": "Written test",
+        "color": "BDD7EE",
+        "rows": [
+            {"label": "Select", "key": "written_select"},
+            {"label": "Regret", "key": "written_regret"},
+        ],
+    },
+    {
+        "stage": "Recruiter screening",
+        "color": "C6E0B4",
+        "rows": [
+            {"label": "Select", "key": "recruiter_select"},
+            {"label": "Regret", "key": "recruiter_regret"},
+            {"label": "Pending", "key": "recruiter_pending"},
+        ],
+    },
+    {
+        "stage": "Functional round",
+        "color": "BDD7EE",
+        "rows": [
+            {"label": "Select", "key": "functional_select"},
+            {"label": "Regret", "key": "functional_regret"},
+            {"label": "Scheduled", "key": "functional_scheduled"},
+            {"label": "Feedback Pending", "key": "functional_feedback_pending"},
+            {"label": "Pending", "key": "functional_pending"},
+        ],
+    },
+    {
+        "stage": "Final round",
+        "color": "FCE4D6",
+        "rows": [
+            {"label": "Select", "key": "final_select"},
+            {"label": "Regret", "key": "final_regret"},
+            {"label": "Scheduled", "key": "final_scheduled"},
+            {"label": "Feedback Pending", "key": "final_feedback_pending"},
+            {"label": "Pending", "key": "final_pending"},
+        ],
+    },
+    {
+        "stage": "Offers",
+        "color": "F4B942",
+        "rows": [
+            {"label": "Offer in process", "key": "offer_in_process"},
+            {"label": "Offer Made", "key": "offer_made"},
+            {"label": "Offer Accepted", "key": "offer_accepted"},
+            {"label": "Joined", "key": "joined"},
+            {"label": "Offer declined", "key": "offer_declined"},
+            {"label": "Offer Revoked", "key": "offer_revoked"},
+            {"label": "Joined in 2025-26, Offered in 2025-26", "key": "joined_offered_current"},
+            {"label": "Joined in 2025-26, Offered in 2024-25", "key": "joined_offered_prev"},
+        ],
+    },
+]
+
+_FOD_STATUS_TO_KEY = {
+    "Applied": "cv_pending",
+    "Shortlisted": "cv_shortlist",
+    "Rejected": "cv_regret",
+    "Interview Scheduled": "functional_scheduled",
+    "Selected": "joined",
+    "On Hold": "offer_in_process",
+}
+
+_FOD_ROLE_TO_COL = {
+    "School Teacher": "ST",
+    "Resource Person": "RP",
+    "District Resource Person": "RP",
+    "Cluster Resource Person": "RP",
+    "Associate Resource Person": "RP",
+}
+
+_FOD_COLS = ["RP", "ST", "HL", "LH"]
+
+_FOD_ALL_KEYS = [
+    "carried_forward", "received_this_year", "total",
+    "cv_shortlist", "cv_regret", "cv_pending",
+    "written_select", "written_regret",
+    "recruiter_select", "recruiter_regret", "recruiter_pending",
+    "functional_select", "functional_regret", "functional_scheduled",
+    "functional_feedback_pending", "functional_pending",
+    "final_select", "final_regret", "final_scheduled",
+    "final_feedback_pending", "final_pending",
+    "offer_in_process", "offer_made", "offer_accepted", "joined",
+    "offer_declined", "offer_revoked", "joined_offered_current", "joined_offered_prev",
+]
+
+
+@frappe.whitelist()
+def get_field_overall_dashboard():
+    from datetime import date
+
+    records = frappe.db.sql(
+        """
+        SELECT native_state, role, application_status, creation
+        FROM `tabField Registration Form`
+        WHERE docstatus != 2
+        """,
+        as_dict=True,
+    )
+
+    states = sorted(set(r["native_state"] for r in records if r["native_state"]))
+    april_1 = date(date.today().year, 4, 1)
+
+    all_entries = states + ["Grand Total"]
+    data = {
+        entry: {col: {k: 0 for k in _FOD_ALL_KEYS} for col in _FOD_COLS}
+        for entry in all_entries
+    }
+
+    for record in records:
+        state = record["native_state"]
+        if not state:
+            continue
+        col = _FOD_ROLE_TO_COL.get(record["role"] or "")
+        if not col:
+            continue
+
+        creation_date = record["creation"].date() if record["creation"] else date.today()
+        status_key = _FOD_STATUS_TO_KEY.get(record["application_status"] or "")
+
+        for entry in [state, "Grand Total"]:
+            data[entry][col]["total"] += 1
+            if creation_date < april_1:
+                data[entry][col]["carried_forward"] += 1
+            else:
+                data[entry][col]["received_this_year"] += 1
+            if status_key:
+                data[entry][col][status_key] += 1
+
+    return {"states": states, "data": data}
+
+
+@frappe.whitelist()
+def download_field_dashboard_excel():
+    from datetime import date as date_cls
+    import openpyxl
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    raw = get_field_overall_dashboard()
+    states = raw["states"]
+    data = raw["data"]
+
+    all_col_groups = states + ["Grand Total"]
+    SUB_COLS = _FOD_COLS + ["Total"]
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Field Dashboard"
+
+    # ── helper styles ──
+    thin = Side(style="thin", color="000000")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    def make_fill(hex_color):
+        return PatternFill("solid", fgColor=hex_color)
+
+    hdr_fill = make_fill("1F497D")
+    hdr_font = Font(bold=True, color="FFFFFF", size=10)
+    sub_hdr_fill = make_fill("4472C4")
+    stage_font = Font(bold=True, size=9)
+    data_font = Font(size=9)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    STATE_FILLS = [
+        "DDEBF7", "E2EFDA", "FFF2CC", "FCE4D6",
+        "D9E1F2", "EAF4E2", "FDE9D9", "EBE9F3",
+        "D5E8D4", "FFF9C4",
+    ]
+
+    def cell_style(ws_cell, fill=None, font=None, align=None, brd=border):
+        if fill:
+            ws_cell.fill = fill
+        if font:
+            ws_cell.font = font
+        if align:
+            ws_cell.alignment = align
+        ws_cell.border = brd
+
+    # ── Row 1: Date of Report header ──
+    ws.cell(1, 1, f"Date of Report: {date_cls.today().strftime('%d-%b-%Y')}")
+    ws.cell(1, 1).font = Font(bold=True, size=10)
+    ws.cell(1, 1).alignment = center
+
+    # ── Row 2: column headers - "Stages | Status | [State RP ST HL LH Total] ... | Grand Total RP ST HL LH Total" ──
+    ws.cell(2, 1, "Stages")
+    ws.cell(2, 2, "Status")
+    for c in [ws.cell(2, 1), ws.cell(2, 2)]:
+        cell_style(c, fill=make_fill("1F497D"), font=hdr_font, align=center)
+
+    col_cursor = 3
+    for gi, grp in enumerate(all_col_groups):
+        fill_hex = STATE_FILLS[gi % len(STATE_FILLS)]
+        grp_fill = make_fill(fill_hex)
+        # Merge state header across sub-columns
+        ws.merge_cells(
+            start_row=2, start_column=col_cursor,
+            end_row=2, end_column=col_cursor + len(SUB_COLS) - 1
+        )
+        hc = ws.cell(2, col_cursor, grp)
+        cell_style(hc, fill=grp_fill, font=Font(bold=True, size=9), align=center)
+        col_cursor += len(SUB_COLS)
+
+    # ── Row 3: sub-column headers (RP ST HL LH Total repeated per group) ──
+    ws.cell(3, 1, "Stages")
+    ws.cell(3, 2, "Status")
+    for c in [ws.cell(3, 1), ws.cell(3, 2)]:
+        cell_style(c, fill=make_fill("1F497D"), font=hdr_font, align=center)
+
+    col_cursor = 3
+    for gi, grp in enumerate(all_col_groups):
+        fill_hex = STATE_FILLS[gi % len(STATE_FILLS)]
+        sub_fill = make_fill(fill_hex)
+        for sc in SUB_COLS:
+            c = ws.cell(3, col_cursor, sc)
+            cell_style(c, fill=sub_fill, font=Font(bold=True, size=8), align=center)
+            col_cursor += 1
+
+    # ── Data rows ──
+    row_cursor = 4
+    for stage_cfg in _FOD_STAGES:
+        stage_fill = make_fill(stage_cfg["color"])
+        stage_rows = stage_cfg["rows"]
+        row_start = row_cursor
+
+        for ri, row_cfg in enumerate(stage_rows):
+            key = row_cfg["key"]
+            is_total = row_cfg.get("is_total", False)
+            row_fill = make_fill("D9D9D9") if is_total else stage_fill
+            row_font = Font(bold=True, size=9) if is_total else data_font
+
+            # Status label (col 2)
+            sc = ws.cell(row_cursor, 2, row_cfg["label"])
+            cell_style(sc, fill=row_fill, font=row_font, align=left)
+
+            # Data columns
+            col_cursor = 3
+            for grp in all_col_groups:
+                grp_data = data.get(grp, {})
+                row_total = 0
+                for sub_col in _FOD_COLS:
+                    val = grp_data.get(sub_col, {}).get(key, 0)
+                    dc = ws.cell(row_cursor, col_cursor, val if val else "")
+                    cell_style(dc, fill=row_fill, font=row_font, align=center)
+                    row_total += val
+                    col_cursor += 1
+                # Total column for this group
+                tc = ws.cell(row_cursor, col_cursor, row_total if row_total else "")
+                cell_style(tc, fill=make_fill("D9D9D9") if is_total else row_fill,
+                           font=Font(bold=True, size=9) if is_total else row_font, align=center)
+                col_cursor += 1
+
+            row_cursor += 1
+
+        # Stage label cell with rowspan (merge)
+        ws.merge_cells(
+            start_row=row_start, start_column=1,
+            end_row=row_cursor - 1, end_column=1
+        )
+        sc = ws.cell(row_start, 1, stage_cfg["stage"])
+        cell_style(sc, fill=stage_fill, font=Font(bold=True, size=9), align=center)
+
+    # ── Column widths ──
+    ws.column_dimensions["A"].width = 18
+    ws.column_dimensions["B"].width = 38
+    total_data_cols = len(all_col_groups) * len(SUB_COLS)
+    for ci in range(3, 3 + total_data_cols):
+        ws.column_dimensions[get_column_letter(ci)].width = 6
+
+    # Freeze panes after header rows and stage/status columns
+    ws.freeze_panes = "C4"
+
+    # ── Row heights ──
+    ws.row_dimensions[1].height = 20
+    ws.row_dimensions[2].height = 30
+    ws.row_dimensions[3].height = 20
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    frappe.local.response.filename = "Field_Overall_Dashboard.xlsx"
+    frappe.local.response.filecontent = output.read()
+    frappe.local.response.type = "binary"
+
+
+# ── Field Overall Dashboard Excel (Field Registration Form1) ──────────────────
+
+_FOV_STATUS_TO_KEY = {
+    "New Applicant":       "cv_pending",
+    "CV Shortlist":        "cv_shortlist",
+    "CV Reject":           "cv_regret",
+    "Test Process":        "written_select",
+    "Test Select":         "written_select",
+    "Test Reject":         "written_regret",
+    "Recruiter Round":     "recruiter_select",
+    "Recruiter Reject":    "recruiter_regret",
+    "Round One":           "functional_select",
+    "Round 1 Reject":      "functional_regret",
+    "Round Two":           "final_select",
+    "Round 2 Reject":      "final_regret",
+    "Round Three":         "final_select",
+    "Round 3 Reject":      "final_regret",
+    "Document Collection": "offer_in_process",
+    "Offer":               "offer_made",
+    "Offer Accepted":      "offer_accepted",
+    "Joined":              "joined",
+    "Offer Declined":      "offer_declined",
+    "Offer Revoked":       "offer_revoked",
+    "Applied":             "cv_pending",
+    "Shortlisted":         "cv_shortlist",
+    "Rejected":            "cv_regret",
+    "Interview Scheduled": "functional_scheduled",
+    "Selected":            "joined",
+    "On Hold":             "offer_in_process",
+}
+
+_FOV_STAGES = [
+    ("Applications", "FFF9C4", [
+        ("Carried forward Application from last year Before April", "carried_forward", False),
+        ("Received from April this Year",                           "received_this_year", False),
+        ("Total Applications",                                      "total", True),
+    ]),
+    ("CV screening", "DCEDC8", [
+        ("Shortlist", "cv_shortlist", False),
+        ("Regret",    "cv_regret",    False),
+        ("Pending",   "cv_pending",   False),
+    ]),
+    ("Written test", "BBDEFB", [
+        ("Select", "written_select", False),
+        ("Regret", "written_regret", False),
+    ]),
+    ("Recruiter screening", "DCEDC8", [
+        ("Select",  "recruiter_select",  False),
+        ("Regret",  "recruiter_regret",  False),
+        ("Pending", "recruiter_pending", False),
+    ]),
+    ("Functional round", "BBDEFB", [
+        ("Select",           "functional_select",           False),
+        ("Regret",           "functional_regret",           False),
+        ("Scheduled",        "functional_scheduled",        False),
+        ("Feedback Pending", "functional_feedback_pending", False),
+        ("Pending",          "functional_pending",          False),
+    ]),
+    ("Final round", "FFCCBC", [
+        ("Select",           "final_select",           False),
+        ("Regret",           "final_regret",           False),
+        ("Scheduled",        "final_scheduled",        False),
+        ("Feedback Pending", "final_feedback_pending", False),
+        ("Pending",          "final_pending",          False),
+    ]),
+    ("Offers", "FFE0B2", [
+        ("Offer in process",                      "offer_in_process",       False),
+        ("Offer Made",                            "offer_made",             False),
+        ("Offer Accepted",                        "offer_accepted",         False),
+        ("Joined",                                "joined",                 False),
+        ("Offer declined",                        "offer_declined",         False),
+        ("Offer Revoked",                         "offer_revoked",          False),
+        ("Joined in 2025-26, Offered in 2025-26", "joined_offered_current", False),
+        ("Joined in 2025-26, Offered in 2024-25", "joined_offered_prev",    False),
+    ]),
+]
+
+_FOV_ALL_KEYS = [
+    "carried_forward", "received_this_year", "total",
+    "cv_shortlist", "cv_regret", "cv_pending",
+    "written_select", "written_regret",
+    "recruiter_select", "recruiter_regret", "recruiter_pending",
+    "functional_select", "functional_regret", "functional_scheduled",
+    "functional_feedback_pending", "functional_pending",
+    "final_select", "final_regret", "final_scheduled",
+    "final_feedback_pending", "final_pending",
+    "offer_in_process", "offer_made", "offer_accepted", "joined",
+    "offer_declined", "offer_revoked", "joined_offered_current", "joined_offered_prev",
+]
+
+DATA_COLS = ["RP", "ST", "HL", "LH"]
+SUB_COLS  = ["RP", "ST", "HL", "LH", "Total"]
+
+
+def _fov_get_col(role, department):
+    dept = (department or "").lower().strip()
+    if dept == "health":                          return "HL"
+    if dept in ("livelihood", "livelihoods"):     return "LH"
+    if role == "School Teacher":                  return "ST"
+    if role in ("Resource Person", "District Resource Person",
+                "Cluster Resource Person", "Associate Resource Person"):
+        return "RP"
+    return None
+
+
+@frappe.whitelist()
+def download_field_overall_excel(from_date=None, to_date=None):
+    from datetime import date as date_cls
+    import openpyxl
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    # ── Query ──
+    filters = [["docstatus", "!=", "2"]]
+    if from_date:
+        filters.append(["creation", ">=", from_date + " 00:00:00"])
+    if to_date:
+        filters.append(["creation", "<=", to_date   + " 23:59:59"])
+
+    try:
+        records = frappe.db.sql(
+            """
+            SELECT native_state, role, department, location, worklocation,
+                   application_status, creation
+            FROM `tabField Registration Form1`
+            WHERE docstatus != 2
+            {date_filters}
+            """.format(
+                date_filters=(
+                    ("AND creation >= %(fd)s" if from_date else "") +
+                    (" AND creation <= %(td)s" if to_date else "")
+                )
+            ),
+            {"fd": from_date + " 00:00:00" if from_date else None,
+             "td": to_date   + " 23:59:59" if to_date   else None},
+            as_dict=True,
+        )
+    except Exception:
+        # fallback to Field Registration Form if Form1 doesn't exist
+        records = frappe.db.sql(
+            """SELECT native_state, role, department, location, worklocation,
+                      application_status, creation
+               FROM `tabField Registration Form` WHERE docstatus != 2""",
+            as_dict=True,
+        )
+
+    april_1 = date_cls(date_cls.today().year, 4, 1)
+
+    states = sorted(set(
+        (r.get("location") or r.get("worklocation") or r.get("native_state") or "Unknown").strip()
+        for r in records
+        if (r.get("location") or r.get("worklocation") or r.get("native_state"))
+    ))
+    all_entries = states + ["Grand Total"]
+
+    data = {
+        e: {c: {k: 0 for k in _FOV_ALL_KEYS} for c in DATA_COLS}
+        for e in all_entries
+    }
+
+    for rec in records:
+        state = (
+            (rec.get("location")     or "").strip() or
+            (rec.get("worklocation") or "").strip() or
+            (rec.get("native_state") or "").strip() or ""
+        )
+        if not state:
+            continue  # skip records with no state data
+        col = _fov_get_col(rec.get("role") or "", rec.get("department") or "")
+        if not col:
+            continue
+        if state not in data:
+            # add dynamically in case state wasn't in initial set
+            data[state] = {c: {k: 0 for k in _FOV_ALL_KEYS} for c in DATA_COLS}
+            if state not in all_entries:
+                all_entries.insert(-1, state)  # insert before Grand Total
+
+        creation_date = rec["creation"].date() if rec.get("creation") else date_cls.today()
+        sk = _FOV_STATUS_TO_KEY.get(rec.get("application_status") or "")
+
+        for entry in [state, "Grand Total"]:
+            data[entry][col]["total"] += 1
+            if creation_date < april_1:
+                data[entry][col]["carried_forward"] += 1
+            else:
+                data[entry][col]["received_this_year"] += 1
+            if sk:
+                data[entry][col][sk] += 1
+
+    # ── Build Excel ──
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Field Dashboard"
+
+    thin = Side(style="thin", color="AAAAAA")
+    bdr  = Border(left=thin, right=thin, top=thin, bottom=thin)
+    ctr  = Alignment(horizontal="center",  vertical="center", wrap_text=True)
+    lft  = Alignment(horizontal="left",    vertical="center", wrap_text=True)
+
+    def fill(hex_):  return PatternFill("solid", fgColor=hex_)
+    def font(bold=False, color="000000", size=9):
+        return Font(bold=bold, color=color, size=size)
+    def cell(ws_, r, c, val="", bg=None, fg="000000", bold=False, align=None):
+        cl = ws_.cell(r, c, val)
+        if bg:    cl.fill   = fill(bg)
+        cl.font   = font(bold=bold, color=fg, size=9)
+        cl.border = bdr
+        cl.alignment = align or ctr
+        return cl
+
+    HDR_BG, HDR_FG = "2C5F8A", "FFFFFF"
+    TOT_BG         = "E0E0E0"
+    RTOT_BG        = "BDBDBD"
+    GRAND_BG       = "1e3a5f"
+
+    # Row 1 – date of report
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=2)
+    cell(ws, 1, 1, f"Date of Report: {date_cls.today().strftime('%d-%b-%Y')}",
+         bg="FFFFFF", bold=True, align=lft)
+
+    # Row 2 – state headers
+    cell(ws, 2, 1, "Stages",  bg=HDR_BG, fg=HDR_FG, bold=True)
+    cell(ws, 2, 2, "Status",  bg=HDR_BG, fg=HDR_FG, bold=True)
+    col_cur = 3
+    for gi, grp in enumerate(all_entries):
+        bg = GRAND_BG if gi == len(all_entries) - 1 else ("DDEBF7" if gi % 2 == 0 else "EBF3FB")
+        fg = "FFFFFF" if gi == len(all_entries) - 1 else "1e293b"
+        ws.merge_cells(start_row=2, start_column=col_cur,
+                       end_row=2,   end_column=col_cur + len(SUB_COLS) - 1)
+        cell(ws, 2, col_cur, grp, bg=bg, fg=fg, bold=True)
+        col_cur += len(SUB_COLS)
+
+    # Row 3 – sub-column headers (RP ST HL LH Total)
+    cell(ws, 3, 1, "Stages", bg=HDR_BG, fg=HDR_FG, bold=True)
+    cell(ws, 3, 2, "Status", bg=HDR_BG, fg=HDR_FG, bold=True)
+    col_cur = 3
+    for gi in range(len(all_entries)):
+        bg = GRAND_BG if gi == len(all_entries) - 1 else ("DDEBF7" if gi % 2 == 0 else "EBF3FB")
+        fg = "FFFFFF" if gi == len(all_entries) - 1 else "374151"
+        for sc in SUB_COLS:
+            cell(ws, 3, col_cur, sc, bg=bg, fg=fg, bold=(sc == "Total"))
+            col_cur += 1
+
+    # Data rows
+    row_cur = 4
+    for stage_name, stage_hex, rows in _FOV_STAGES:
+        row_start = row_cur
+        for row_label, key, is_total in rows:
+            rbg = RTOT_BG if is_total else stage_hex
+            rfg = "000000"
+
+            cell(ws, row_cur, 2, row_label, bg=rbg, fg=rfg, align=lft)
+
+            col_cur = 3
+            for gi, grp in enumerate(all_entries):
+                is_grand = gi == len(all_entries) - 1
+                nbg = GRAND_BG if is_grand else rbg
+                nfg = "FFFFFF" if is_grand else rfg
+
+                row_total = 0
+                for dc in DATA_COLS:
+                    v = data.get(grp, {}).get(dc, {}).get(key, 0)
+                    cell(ws, row_cur, col_cur, v if v else "", bg=nbg, fg=nfg)
+                    row_total += v
+                    col_cur += 1
+
+                tot_bg = ("0a1d30" if is_total else "16304d") if is_grand else (
+                    "9E9E9E" if is_total else TOT_BG)
+                tot_fg = "FFFFFF" if is_grand else "000000"
+                cell(ws, row_cur, col_cur, row_total if row_total else "",
+                     bg=tot_bg, fg=tot_fg, bold=True)
+                col_cur += 1
+
+            row_cur += 1
+
+        # Stage label with rowspan
+        ws.merge_cells(start_row=row_start, start_column=1,
+                       end_row=row_cur - 1,  end_column=1)
+        cell(ws, row_start, 1, stage_name, bg=stage_hex, bold=True)
+
+    # Column widths
+    ws.column_dimensions["A"].width = 18
+    ws.column_dimensions["B"].width = 38
+    for ci in range(3, 3 + len(all_entries) * len(SUB_COLS)):
+        ws.column_dimensions[get_column_letter(ci)].width = 6
+
+    ws.freeze_panes = "C4"
+    ws.row_dimensions[2].height = 22
+    ws.row_dimensions[3].height = 18
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    frappe.local.response.filename = "Field_Overall_Dashboard.xlsx"
+    frappe.local.response.filecontent = output.read()
+    frappe.local.response.type = "binary"
+
+
+# ── School Teacher Dashboard Excel ────────────────────────────────────────────
+
+_STD_STAGES = [
+    {
+        "stage": "Candidate Applications",
+        "color": "FFF2CC",
+        "rows": [
+            {"label": "Total Received", "key": "total_received", "is_total": True},
+            {"label": "Shortlisted", "key": "cv_shortlist"},
+            {"label": "Regret", "key": "cv_regret"},
+            {"label": "Pending", "key": "cv_pending"},
+        ],
+    },
+    {
+        "stage": "Written Assessment",
+        "color": "BDD7EE",
+        "rows": [
+            {"label": "Select", "key": "written_select"},
+            {"label": "Regret", "key": "written_regret"},
+            {"label": "Scheduled", "key": "written_scheduled"},
+            {"label": "Absent", "key": "written_absent"},
+            {"label": "Pending", "key": "written_pending"},
+        ],
+    },
+    {
+        "stage": "Recruiter Round",
+        "color": "C6E0B4",
+        "rows": [
+            {"label": "Select", "key": "recruiter_select"},
+            {"label": "Regret", "key": "recruiter_regret"},
+            {"label": "Scheduled", "key": "recruiter_scheduled"},
+            {"label": "Pending", "key": "recruiter_pending"},
+        ],
+    },
+    {
+        "stage": "Functional Round",
+        "color": "D9E8FB",
+        "rows": [
+            {"label": "Select", "key": "functional_select"},
+            {"label": "Regret", "key": "functional_regret"},
+            {"label": "Scheduled", "key": "functional_scheduled"},
+            {"label": "Pending", "key": "functional_pending"},
+        ],
+    },
+    {
+        "stage": "Final Round",
+        "color": "FCE4D6",
+        "rows": [
+            {"label": "Select", "key": "final_select"},
+            {"label": "Regret", "key": "final_regret"},
+            {"label": "Scheduled", "key": "final_scheduled"},
+            {"label": "Pending", "key": "final_pending"},
+        ],
+    },
+    {
+        "stage": "Offer",
+        "color": "F4B942",
+        "rows": [
+            {"label": "Offer Made", "key": "offer_made"},
+            {"label": "Offer Accepted", "key": "offer_accepted"},
+            {"label": "Offer Declined", "key": "offer_declined"},
+            {"label": "Offer Revoked", "key": "offer_revoked"},
+            {"label": "Joined", "key": "joined"},
+        ],
+    },
+]
+
+_STD_STATUS_TO_KEY = {
+    "New Applicant": "cv_pending",
+    "CV Shortlist": "cv_shortlist",
+    "CV Reject": "cv_regret",
+    "Test Process": "written_select",
+    "Test Select": "written_select",
+    "Test Reject": "written_regret",
+    "Test Scheduled": "written_scheduled",
+    "Test Absent": "written_absent",
+    "Recruiter Round": "recruiter_select",
+    "Recruiter Reject": "recruiter_regret",
+    "Recruiter Scheduled": "recruiter_scheduled",
+    "Round One": "functional_select",
+    "Round 1 Reject": "functional_regret",
+    "Round One Scheduled": "functional_scheduled",
+    "Round Two": "final_select",
+    "Round 2 Reject": "final_regret",
+    "Round Two Scheduled": "final_scheduled",
+    "Round Three": "final_select",
+    "Round 3 Reject": "final_regret",
+    "Document Collection": "offer_made",
+    "Offer": "offer_made",
+    "Offer Accepted": "offer_accepted",
+    "Joined": "joined",
+    "Offer Declined": "offer_declined",
+    "Offer Revoked": "offer_revoked",
+    "Applied": "cv_pending",
+    "Shortlisted": "cv_shortlist",
+    "Rejected": "cv_regret",
+    "Interview Scheduled": "functional_scheduled",
+    "Selected": "joined",
+    "On Hold": "cv_pending",
+}
+
+_STD_ALL_KEYS = [
+    "total_received", "cv_shortlist", "cv_regret", "cv_pending",
+    "written_select", "written_regret", "written_scheduled", "written_absent", "written_pending",
+    "recruiter_select", "recruiter_regret", "recruiter_scheduled", "recruiter_pending",
+    "functional_select", "functional_regret", "functional_scheduled", "functional_pending",
+    "final_select", "final_regret", "final_scheduled", "final_pending",
+    "offer_made", "offer_accepted", "offer_declined", "offer_revoked", "joined",
+]
+
+_STD_DEFAULT_SUBJECTS = [
+    "Early Childhood Education",
+    "Primary All subjects",
+    "Primary EVS",
+    "Primary English",
+    "Primary Hindi",
+    "Primary Kannada",
+    "Primary Mathematics",
+    "Upper Primary English",
+    "Upper Primary Sanskrit",
+    "Upper Primary Bengali",
+    "Upper Primary Science",
+    "Upper Primary Social Science",
+    "Upper Primary Maths",
+    "Upper Primary Hindi",
+    "Upper Primary Kannada",
+    "Secondary Geography",
+    "Secondary English",
+    "Secondary Hindi",
+]
+
+
+@frappe.whitelist(allow_guest=False)
+def download_school_teacher_excel(from_date=None, to_date=None):
+    from openpyxl import Workbook
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    conditions = ["`role` LIKE %s"]
+    params = ["%School Teacher%"]
+    if from_date:
+        conditions.append("`creation` >= %s")
+        params.append(from_date + " 00:00:00")
+    if to_date:
+        conditions.append("`creation` <= %s")
+        params.append(to_date + " 23:59:59")
+
+    where_clause = " AND ".join(conditions)
+    table = "tabField Registration Form1"
+    try:
+        rows = frappe.db.sql(
+            "SELECT `written_subject`, `application_status` FROM `{0}` WHERE {1}".format(table, where_clause),
+            params, as_dict=True,
+        )
+    except Exception:
+        table = "tabField Registration Form"
+        rows = frappe.db.sql(
+            "SELECT `written_subject`, `application_status` FROM `{0}` WHERE {1}".format(table, where_clause),
+            params, as_dict=True,
+        )
+
+    # Collect unique subjects
+    subj_seen = set()
+    subjects = list(_STD_DEFAULT_SUBJECTS)
+    for r in rows:
+        s = (r.get("written_subject") or "").strip()
+        if s and s not in subj_seen:
+            subj_seen.add(s)
+            if s not in subjects:
+                subjects.append(s)
+
+    # Aggregate
+    data = {"Total": {k: 0 for k in _STD_ALL_KEYS}}
+    for s in subjects:
+        data[s] = {k: 0 for k in _STD_ALL_KEYS}
+
+    for r in rows:
+        status = (r.get("application_status") or "").strip()
+        subj = (r.get("written_subject") or "").strip()
+        key = _STD_STATUS_TO_KEY.get(status)
+        if not key:
+            continue
+        data["Total"]["total_received"] += 1
+        data["Total"][key] += 1
+        if subj and subj in data:
+            data[subj]["total_received"] += 1
+            data[subj][key] += 1
+
+    # Build workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "School Teacher Dashboard"
+
+    thin = Side(style="thin", color="AAAAAA")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    def _cell(r, c, val, bg="FFFFFF", fg="000000", bold=False, wrap=False, align="center"):
+        cell = ws.cell(row=r, column=c, value=val)
+        cell.fill = PatternFill("solid", fgColor=bg)
+        cell.font = Font(color=fg, bold=bold, size=10)
+        cell.alignment = Alignment(horizontal=align, vertical="center", wrap_text=wrap)
+        cell.border = border
+        return cell
+
+    all_cols = ["Total"] + subjects
+    n_cols = len(all_cols)
+    HDR_BG = "1F497D"
+
+    # Row 1: title header
+    _cell(1, 1, "Stage", bg=HDR_BG, fg="FFFFFF", bold=True)
+    _cell(1, 2, "Result", bg=HDR_BG, fg="FFFFFF", bold=True)
+    for ci, col_name in enumerate(all_cols):
+        _cell(1, 3 + ci, col_name, bg=HDR_BG, fg="FFFFFF", bold=True, wrap=True)
+
+    # Freeze
+    ws.freeze_panes = "C2"
+
+    # Column widths
+    ws.column_dimensions["A"].width = 20
+    ws.column_dimensions["B"].width = 26
+    for ci in range(n_cols):
+        ws.column_dimensions[get_column_letter(3 + ci)].width = 14
+
+    # Row 1 height
+    ws.row_dimensions[1].height = 36
+
+    # Data rows
+    row_cur = 2
+    for stage_cfg in _STD_STAGES:
+        stage_hex = stage_cfg["color"]
+        stage_rows = stage_cfg["rows"]
+        row_start = row_cur
+
+        for row_cfg in stage_rows:
+            key = row_cfg["key"]
+            is_total = row_cfg.get("is_total", False)
+            row_bg = "D9D9D9" if is_total else stage_hex
+
+            _cell(row_cur, 2, row_cfg["label"], bg=row_bg, bold=is_total, align="left", wrap=True)
+
+            for ci, col_name in enumerate(all_cols):
+                val = data[col_name].get(key, 0)
+                col_bg = "BBBBBB" if (is_total and ci == 0) else ("D9D9D9" if ci == 0 else row_bg)
+                _cell(row_cur, 3 + ci, val if val else "", bg=col_bg, bold=(ci == 0))
+
+            row_cur += 1
+
+        # Stage label with merge
+        ws.merge_cells(start_row=row_start, start_column=1,
+                       end_row=row_cur - 1, end_column=1)
+        _cell(row_start, 1, stage_cfg["stage"], bg=stage_hex, bold=True, wrap=True)
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    frappe.local.response.filename = "School_Teacher_Dashboard.xlsx"
+    frappe.local.response.filecontent = output.read()
+    frappe.local.response.type = "binary"
+

@@ -4,14 +4,14 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 	// ── Design tokens ─────────────────────────────────────────────────────────
 	const T1 = '#0f172a', T2 = '#64748b', T3 = '#94a3b8';
 	const BG = '#f0f4ff', BORD = '#e2e8f0';
-	const AC = '#6366f1', ACG = 'rgba(99,102,241,';
+	const AC = '#1F497D', ACG = 'rgba(31,73,125,';
 
 	// Per-unit color themes: Field=Indigo, Scholarship=Emerald, Philanthropy=Violet, Health=Rose
 	const THEMES = [
-		{ g1: '#ff416c', g2: '#ff4b2b', g3: '#ff8c42', rgb: '255,65,108', light: '#fff0f2', dark: '#e11d48' },
-		{ g1: '#7F00FF', g2: '#5a4fcf', g3: '#2ebf91', rgb: '127,0,255', light: '#f5f3ff', dark: '#6d28d9' },
-		{ g1: '#1565c0', g2: '#2193b0', g3: '#6dd5ed', rgb: '21,101,192', light: '#eff8ff', dark: '#0369a1' },
-		{ g1: '#f7971e', g2: '#f59e0b', g3: '#ffd200', rgb: '247,151,30', light: '#fffbeb', dark: '#b45309' },
+		{ g1: '#1F497D', g2: '#2c7db8', g3: '#4a9fd4', rgb: '31,73,125', light: '#EBF3FB', dark: '#1F497D' },
+		{ g1: '#2c7db8', g2: '#1F497D', g3: '#4a9fd4', rgb: '44,125,184', light: '#DDEBF7', dark: '#1a3d5c' },
+		{ g1: '#1F497D', g2: '#2c7db8', g3: '#4a9fd4', rgb: '31,73,125', light: '#EBF3FB', dark: '#1F497D' },
+		{ g1: '#2c7db8', g2: '#1F497D', g3: '#4a9fd4', rgb: '44,125,184', light: '#DDEBF7', dark: '#1a3d5c' },
 	];
 
 	// Status semantic type + colour map
@@ -24,11 +24,11 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 		return 'pipe';
 	}
 	const SC = {
-		offer: { bg: '#f0fdf4', txt: '#15803d', brd: '#bbf7d0', dot: '#22c55e' },
-		reject: { bg: '#fef2f2', txt: '#b91c1c', brd: '#fecaca', dot: '#ef4444' },
-		hold: { bg: '#fffbeb', txt: '#b45309', brd: '#fde68a', dot: '#f59e0b' },
-		doc: { bg: '#f0f9ff', txt: '#0369a1', brd: '#bae6fd', dot: '#38bdf8' },
-		pipe: { bg: '#faf5ff', txt: '#6d28d9', brd: '#ddd6fe', dot: '#8b5cf6' },
+		offer: { bg: '#DDEBF7', txt: '#1F497D', brd: '#BDD7EE', dot: '#1F497D' },
+		reject: { bg: '#DDEBF7', txt: '#1F497D', brd: '#BDD7EE', dot: '#1F497D' },
+		hold: { bg: '#DDEBF7', txt: '#1F497D', brd: '#BDD7EE', dot: '#1F497D' },
+		doc: { bg: '#DDEBF7', txt: '#1F497D', brd: '#BDD7EE', dot: '#1F497D' },
+		pipe: { bg: '#DDEBF7', txt: '#1F497D', brd: '#BDD7EE', dot: '#1F497D' },
 	};
 
 	// Animate a number counter
@@ -719,8 +719,8 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 				</div>
 				<div class="rd-hkpis">
 					<div class="rd-hkpi">
-						<div class="rd-hkpi-ico" style="background:#fce7f3">
-							<svg fill="none" stroke="#ec4899" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+						<div class="rd-hkpi-ico" style="background:#DDEBF7">
+							<svg fill="none" stroke="#1F497D" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
 						</div>
 						<div class="rd-hkpi-body">
 							<div class="rd-hkpi-v" id="gs-total">—</div>
@@ -728,8 +728,8 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 						</div>
 					</div>
 					<div class="rd-hkpi">
-						<div class="rd-hkpi-ico" style="background:#d1fae5">
-							<svg fill="none" stroke="#10b981" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+						<div class="rd-hkpi-ico" style="background:#DDEBF7">
+							<svg fill="none" stroke="#1F497D" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
 						</div>
 						<div class="rd-hkpi-body">
 							<div class="rd-hkpi-v" id="gs-offers">—</div>
@@ -737,8 +737,8 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 						</div>
 					</div>
 					<div class="rd-hkpi">
-						<div class="rd-hkpi-ico" style="background:#e0f2fe">
-							<svg fill="none" stroke="#0ea5e9" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>
+						<div class="rd-hkpi-ico" style="background:#DDEBF7">
+							<svg fill="none" stroke="#1F497D" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>
 						</div>
 						<div class="rd-hkpi-body">
 							<div class="rd-hkpi-v" id="gs-conv">—</div>
@@ -746,8 +746,8 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 						</div>
 					</div>
 					<div class="rd-hkpi">
-						<div class="rd-hkpi-ico" style="background:#ede9fe">
-							<svg fill="none" stroke="#8b5cf6" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+						<div class="rd-hkpi-ico" style="background:#DDEBF7">
+							<svg fill="none" stroke="#1F497D" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
 						</div>
 						<div class="rd-hkpi-body">
 							<div class="rd-hkpi-v">4</div>
@@ -876,33 +876,33 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 						</div>
 					</div>
 					<div class="rd-kpi">
-						<div class="rd-kpi-icon" style="background:linear-gradient(135deg,#16a34a,#4ade80)">
+						<div class="rd-kpi-icon" style="background:linear-gradient(135deg,#1F497D,#2c7db8)">
 							<svg fill="none" stroke="#fff" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
 						</div>
 						<div class="rd-kpi-body">
-							<div class="rd-kpi-v" id="kv-offered" style="color:#16a34a">0</div>
+							<div class="rd-kpi-v" id="kv-offered" style="color:#1F497D">0</div>
 							<div class="rd-kpi-k">Offered</div>
-							<div class="rd-kpi-tag" style="background:#f0fdf4;color:#15803d">${convRate} offer rate</div>
+							<div class="rd-kpi-tag" style="background:#DDEBF7;color:#1F497D">${convRate} offer rate</div>
 						</div>
 					</div>
 					<div class="rd-kpi">
-						<div class="rd-kpi-icon" style="background:linear-gradient(135deg,#dc2626,#f87171)">
+						<div class="rd-kpi-icon" style="background:linear-gradient(135deg,#1F497D,#2c7db8)">
 							<svg fill="none" stroke="#fff" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
 						</div>
 						<div class="rd-kpi-body">
-							<div class="rd-kpi-v" id="kv-rejected" style="color:#dc2626">0</div>
+							<div class="rd-kpi-v" id="kv-rejected" style="color:#1F497D">0</div>
 							<div class="rd-kpi-k">Rejected</div>
-							<div class="rd-kpi-tag" style="background:#fef2f2;color:#b91c1c">${rejRate} of total</div>
+							<div class="rd-kpi-tag" style="background:#DDEBF7;color:#1F497D">${rejRate} of total</div>
 						</div>
 					</div>
 					<div class="rd-kpi">
-						<div class="rd-kpi-icon" style="background:linear-gradient(135deg,#0891b2,#67e8f9)">
+						<div class="rd-kpi-icon" style="background:linear-gradient(135deg,#1F497D,#2c7db8)">
 							<svg fill="none" stroke="#fff" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>
 						</div>
 						<div class="rd-kpi-body">
-							<div class="rd-kpi-v" id="kv-pipeline" style="color:#0891b2">0</div>
+							<div class="rd-kpi-v" id="kv-pipeline" style="color:#1F497D">0</div>
 							<div class="rd-kpi-k">In Pipeline</div>
-							<div class="rd-kpi-tag" style="background:#f0f9ff;color:#0369a1">${pipeRate} active</div>
+							<div class="rd-kpi-tag" style="background:#DDEBF7;color:#1F497D">${pipeRate} active</div>
 						</div>
 					</div>
 				</div>
