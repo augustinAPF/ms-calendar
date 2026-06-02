@@ -1017,33 +1017,37 @@ def create_interview_event(
             # resume_upload is NOT auto-attached — resume comes from candidate_cv__resume on the form
             # application_forms is always attached for all rounds
             if is_calibration_arp:
-                # Attach every PDF field that is filled on the applicant's record.
-                # Empty fields are silently skipped by the loop below.
                 auto_attach_fields = [
                     "resume_upload",
                     "application_forms",
+                    "self_declaration",
                     "recruiter_round_feedback_form",
                     "round_one_feedback_from",
                     "round_two_feedback_form",
                     "round_tree_feedback_form",
                 ]
             elif is_recruiter_round:
-                auto_attach_fields = ["resume_upload", "application_forms"]
+                auto_attach_fields = [
+                    "resume_upload",
+                    "application_forms",
+                    "self_declaration",
+                ]
             elif is_round1:
                 if "education capacity round" in round_raw:
-                    # Education Capacity Round: resume + application + feedback form 1
                     auto_attach_fields = [
                         "resume_upload",
                         "recruiter_round_feedback_form",
                         "application_forms",
+                        "self_declaration",
                     ]
                 else:
-                    # Subject Round / Functional Round: resume + application + feedback form 1 + 2
+                    # Subject Round / Functional Round
                     auto_attach_fields = [
                         "resume_upload",
                         "recruiter_round_feedback_form",
                         "round_one_feedback_from",
                         "application_forms",
+                        "self_declaration",
                     ]
             elif is_round2:
                 auto_attach_fields = [
@@ -1051,6 +1055,7 @@ def create_interview_event(
                     "recruiter_round_feedback_form",
                     "round_one_feedback_from",
                     "application_forms",
+                    "self_declaration",
                 ]
             elif is_round3:
                 auto_attach_fields = [
@@ -1059,9 +1064,14 @@ def create_interview_event(
                     "round_one_feedback_from",
                     "round_two_feedback_form",
                     "application_forms",
+                    "self_declaration",
                 ]
             else:
-                auto_attach_fields = ["resume_upload", "application_forms"]
+                auto_attach_fields = [
+                    "resume_upload",
+                    "application_forms",
+                    "self_declaration",
+                ]
 
             # Track filenames already added (from manual attachments) to avoid duplicates
             _already_added = {fname.lower() for fname, _ in final_files}
