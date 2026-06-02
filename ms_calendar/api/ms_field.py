@@ -680,7 +680,7 @@ def create_interview_event(
                 f"?app_id={_fq(str(application_id or ''), safe='')}"
                 f"&applicant_name={_fq(str(Applicants_name or ''), safe='')}"
             )
-        elif _round_norm == "calibration process":
+        elif "calibration" in _round_norm:
             feedback_url = (
                 "https://careers.frappe.cloud/calibration-process/new"
                 f"?app_id={_fq(str(application_id or ''), safe='')}"
@@ -1030,11 +1030,21 @@ def create_interview_event(
             elif is_recruiter_round:
                 auto_attach_fields = ["resume_upload", "application_forms"]
             elif is_round1:
-                auto_attach_fields = [
-                    "resume_upload",
-                    "recruiter_round_feedback_form",
-                    "application_forms",
-                ]
+                if "education capacity round" in round_raw:
+                    # Education Capacity Round: resume + application + feedback form 1
+                    auto_attach_fields = [
+                        "resume_upload",
+                        "recruiter_round_feedback_form",
+                        "application_forms",
+                    ]
+                else:
+                    # Subject Round / Functional Round: resume + application + feedback form 1 + 2
+                    auto_attach_fields = [
+                        "resume_upload",
+                        "recruiter_round_feedback_form",
+                        "round_one_feedback_from",
+                        "application_forms",
+                    ]
             elif is_round2:
                 auto_attach_fields = [
                     "resume_upload",
@@ -1230,6 +1240,8 @@ comments/recommendations for the calibration process and final selection decisio
   </tr>
 </table>
 
+{feedback_html_block}
+
 <p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
 """
 
@@ -1242,6 +1254,7 @@ comments/recommendations for the calibration process and final selection decisio
             Applicants_name=Applicants_name,
             InterviewersName=InterviewersName,
             interview_date_str=interview_date_str,
+            feedback_html_block=feedback_html_block,
         )
     elif is_round1:
         calendar_subject = f"Interview Scheduled – {Applicants_name} | {round_label} for {Applicants_Role} {candidate_phone}"
@@ -1476,6 +1489,7 @@ comments/recommendations for the calibration process and final selection decisio
             Applicants_name=Applicants_name,
             InterviewersName=InterviewersName,
             interview_date_str=interview_date_str,
+            feedback_html_block=feedback_html_block,
         )
     elif is_round1:
         final_body = round1_interviewer_template.format(
