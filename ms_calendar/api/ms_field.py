@@ -938,11 +938,14 @@ def create_interview_event(
         dict.fromkeys([r.strip() for r in (room_emails or "").split(",") if r.strip()])
     )
 
+    _org_email_lower = Organizer_email.strip().lower()
     attendees = []
     for r in room_list:
         attendees.append({"emailAddress": {"address": r}, "type": "resource"})
     for i in interviewer_list:
-        attendees.append({"emailAddress": {"address": i}, "type": "required"})
+        # Graph API returns 400 / silently drops the send when organizer is added as attendee
+        if i.strip().lower() != _org_email_lower:
+            attendees.append({"emailAddress": {"address": i}, "type": "required"})
     # ----------------------------------------
     # ATTACHMENTS (PUBLIC + PRIVATE FIXED)
     # --------------------------------------
@@ -1570,7 +1573,7 @@ comments/recommendations for the calibration process and final selection decisio
     for _patch_attempt in range(3):
         try:
             patch_res = requests.patch(
-                event_fetch_url + "?sendUpdates=all",
+                event_fetch_url + "?sendUpdates=sendToAllAndSaveCopy",
                 headers=headers,
                 json={
                     "body": {"contentType": "HTML", "content": final_body},
@@ -1594,6 +1597,100 @@ comments/recommendations for the calibration process and final selection decisio
                 title="Attendees PATCH error",
                 message=f"{patch_err} — event {event_id} — response: {_patch_detail[:2000]}",
             )
+
+    # When interviewer email == organizer email, Graph never sends a calendar invite
+    # to the organizer. Use the Graph MIME endpoint to deliver a proper
+    # text/calendar METHOD:REQUEST message — Outlook renders Accept/Decline buttons.
+    _self_interviewers = [i for i in interviewer_list if i.strip().lower() == _org_email_lower]
+    if _self_interviewers:
+        import email.mime.multipart as _mime_mp
+        import email.mime.text as _mime_txt
+
+        _safe_subj  = calendar_subject.replace('\n', ' ').replace('\r', ' ')
+        _ics_uid    = f"{event_id}@azimpremjifoundation.org"
+        _start_ics  = start_datetime.replace('-', '').replace(':', '').split('.')[0]
+        _end_ics    = end_datetime.replace('-', '').replace(':', '').split('.')[0]
+        _ics = (
+            "BEGIN:VCALENDAR\r\n"
+            "VERSION:2.0\r\n"
+            "PRODID:-//AzimPremji Foundation//Interview Scheduler//EN\r\n"
+            "METHOD:REQUEST\r\n"
+            "BEGIN:VEVENT\r\n"
+            f"UID:{_ics_uid}\r\n"
+            f"DTSTART;TZID=Asia/Kolkata:{_start_ics}\r\n"
+            f"DTEND;TZID=Asia/Kolkata:{_end_ics}\r\n"
+            f"SUMMARY:{_safe_subj}\r\n"
+            f"ORGANIZER:mailto:{Organizer_email}\r\n"
+            f"ATTENDEE;CN={InterviewersName};RSVP=TRUE;"
+            f"PARTSTAT=NEEDS-ACTION;ROLE=REQ-PARTICIPANT:"
+            f"mailto:{Organizer_email}\r\n"
+            "STATUS:CONFIRMED\r\n"
+            "SEQUENCE:0\r\n"
+            "END:VEVENT\r\n"
+            "END:VCALENDAR\r\n"
+        )
+
+        # Build MIME message: HTML body + calendar part
+        # Graph MIME endpoint (Content-Type: text/plain, body = base64 MIME)
+        # delivers a proper meeting request with Accept/Decline in Outlook.
+        _mime_msg = _mime_mp.MIMEMultipart('mixed')
+        _mime_msg['MIME-Version'] = '1.0'
+        _mime_msg['From']    = Organizer_email
+        _mime_msg['To']      = Organizer_email
+        _mime_msg['Subject'] = _safe_subj
+        _mime_msg.attach(_mime_txt.MIMEText(final_body, 'html', 'utf-8'))
+        _cal_part = _mime_txt.MIMEText(_ics, 'calendar', 'utf-8')
+        _cal_part.replace_header('Content-Type', 'text/calendar; method=REQUEST; charset=utf-8')
+        _mime_msg.attach(_cal_part)
+
+        _mime_b64      = base64.b64encode(_mime_msg.as_bytes()).decode('ascii')
+        _mime_send_url = f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/sendMail"
+        _mime_headers  = {
+            "Authorization": headers["Authorization"],
+            "Content-Type": "text/plain",
+        }
+
+        _self_graph_sent = False
+        try:
+            _r = requests.post(_mime_send_url, headers=_mime_headers, data=_mime_b64, timeout=30)
+            _r.raise_for_status()
+            _self_graph_sent = True
+        except Exception as _se:
+            try:
+                frappe.log_error(title="Organizer MIME calendar invite error", message=str(_se)[:1000])
+            except Exception:
+                pass
+
+        if not _self_graph_sent:
+            # Fallback: plain JSON sendMail
+            try:
+                requests.post(
+                    _mime_send_url,
+                    headers=headers,
+                    json={
+                        "message": {
+                            "subject": calendar_subject,
+                            "body": {"contentType": "HTML", "content": final_body},
+                            "toRecipients": [{"emailAddress": {"address": Organizer_email}}],
+                        },
+                        "saveToSentItems": True,
+                    },
+                    timeout=30,
+                ).raise_for_status()
+                _self_graph_sent = True
+            except Exception:
+                pass
+
+        if not _self_graph_sent:
+            try:
+                frappe.sendmail(
+                    recipients=[Organizer_email],
+                    subject=calendar_subject,
+                    message=final_body,
+                    delayed=False,
+                )
+            except Exception:
+                pass
 
     # If PATCH failed after all retries, fall back to a plain email to each interviewer
     # so they at least receive the interview details and feedback form link.
@@ -1740,80 +1837,62 @@ comments/recommendations for the calibration process and final selection decisio
             send_mail_url = (
                 f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/sendMail"
             )
+            _cand_cc = (
+                []
+                if interviewee_email.strip().lower() == Organizer_email.strip().lower()
+                else [{"emailAddress": {"address": Organizer_email}}]
+            )
             mail_payload = {
                 "message": {
                     "subject": candidate_email_subject,
                     "body": {"contentType": "HTML", "content": candidate_email_body},
                     "toRecipients": [{"emailAddress": {"address": interviewee_email}}],
-                    "ccRecipients": [{"emailAddress": {"address": Organizer_email}}],
+                    "ccRecipients": _cand_cc,
                 },
                 "saveToSentItems": True,
             }
+            # Attempt 1: Graph API JSON sendMail (sends FROM Organizer_email)
             graph_sent = False
-            for attempt in range(2):
+            try:
+                send_res = requests.post(
+                    send_mail_url, headers=headers, json=mail_payload, timeout=30
+                )
+                send_res.raise_for_status()
+                graph_sent = True
+            except Exception as mail_err:
                 try:
-                    send_res = requests.post(
-                        send_mail_url, headers=headers, json=mail_payload, timeout=30
+                    frappe.log_error(
+                        title="Candidate Email Graph Error (attempt 1)",
+                        message=(send_res.text if hasattr(send_res, "text") else str(mail_err))[:2000],
                     )
-                    send_res.raise_for_status()
-                    graph_sent = True
-                    break
-                except Exception as mail_err:
-                    if attempt == 0:
-                        # Refresh token and retry once
-                        try:
-                            retry_token = (
-                                requests.post(
-                                    f"https://login.microsoftonline.com/{creds.tenant_id.strip()}/oauth2/v2.0/token",
-                                    data={
-                                        "grant_type": "client_credentials",
-                                        "client_id": creds.client_id.strip(),
-                                        "client_secret": creds.get_password(
-                                            "client_secret"
-                                        ),
-                                        "scope": "https://graph.microsoft.com/.default",
-                                    },
-                                )
-                                .json()
-                                .get("access_token", "")
-                            )
-                            if retry_token:
-                                headers["Authorization"] = f"Bearer {retry_token}"
-                        except Exception:
-                            pass
-                    else:
-                        try:
-                            resp_body = (
-                                send_res.text
-                                if hasattr(send_res, "text")
-                                else str(mail_err)
-                            )
-                        except Exception:
-                            resp_body = str(mail_err)
-                        try:
-                            frappe.log_error(
-                                title="Candidate Email Graph Error",
-                                message=str(resp_body)[:2000],
-                            )
-                        except Exception:
-                            pass
+                except Exception:
+                    pass
 
-            # Fallback: frappe.sendmail if Graph API failed
+            # Attempt 2: Graph MIME endpoint — same FROM address, different encoding
             if not graph_sent:
                 try:
-                    frappe.sendmail(
-                        recipients=[interviewee_email],
-                        cc=[Organizer_email],
-                        sender=Organizer_email,
-                        subject=candidate_email_subject,
-                        message=candidate_email_body,
-                        delayed=False,
+                    import email.mime.multipart as _cmmp
+                    import email.mime.text as _cmtxt
+                    _cmsg = _cmmp.MIMEMultipart('mixed')
+                    _cmsg['MIME-Version'] = '1.0'
+                    _cmsg['From']    = Organizer_email
+                    _cmsg['To']      = interviewee_email
+                    _cmsg['Subject'] = candidate_email_subject
+                    _cmsg.attach(_cmtxt.MIMEText(candidate_email_body, 'html', 'utf-8'))
+                    _cmime_b64 = base64.b64encode(_cmsg.as_bytes()).decode('ascii')
+                    _cmime_res = requests.post(
+                        send_mail_url,
+                        headers={"Authorization": headers["Authorization"], "Content-Type": "text/plain"},
+                        data=_cmime_b64,
+                        timeout=30,
                     )
-                except Exception as fallback_err:
+                    _cmime_res.raise_for_status()
+                    graph_sent = True
+                except Exception as _ce2:
                     try:
                         frappe.log_error(
-                            title="Candidate Email Fallback Error",
-                            message=str(fallback_err)[:2000],
+                            title="Candidate Email Graph Error (attempt 2 MIME)",
+                            message=str(_ce2)[:2000],
                         )
                     except Exception:
                         pass

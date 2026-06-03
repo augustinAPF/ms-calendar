@@ -169,11 +169,81 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		if (key === 'offers') { showOffers(); return; }
 	}
 
+	// ── Shared: show records dialog with CSV export + Frappe links ────────
+	function showRecordsDialog(title, records, headers, rowFn) {
+		function csvDownload() {
+			var lines = [headers.join(',')];
+			records.forEach(function(r) {
+				lines.push(rowFn(r).map(function(v) {
+					return '"' + (v || '').toString().replace(/"/g,'""') + '"';
+				}).join(','));
+			});
+			var blob = new Blob([lines.join('\n')], {type:'text/csv'});
+			var url = URL.createObjectURL(blob);
+			var a = document.createElement('a'); a.href=url;
+			a.download = title.replace(/[^a-z0-9]/gi,'_').slice(0,40) + '.csv';
+			document.body.appendChild(a); a.click();
+			document.body.removeChild(a); URL.revokeObjectURL(url);
+		}
+
+		var rows = records.map(function(r) {
+			var vals = rowFn(r);
+			var link = frappe.utils.get_url_to_form
+				? frappe.utils.get_url_to_form('Field Registration Form', r.name)
+				: '/app/field-registration-form/' + encodeURIComponent(r.name);
+			var cells = vals.map(function(v, i) {
+				if (i === 0) {
+					return '<td style="padding:4px 8px;white-space:nowrap;">'
+						+ '<a href="' + link + '" target="_blank" '
+						+ 'style="color:#1F497D;font-weight:600;">' + (v||'') + '</a>'
+						+ '</td>';
+				}
+				return '<td style="padding:4px 8px;">' + (v||'') + '</td>';
+			}).join('');
+			return '<tr>' + cells + '</tr>';
+		}).join('');
+
+		var thCells = headers.map(function(h) {
+			return '<th style="padding:6px 8px;white-space:nowrap;">' + h + '</th>';
+		}).join('');
+
+		var tbl = '<table id="rec-dlg-tbl" style="width:100%;border-collapse:collapse;font-size:12px;">'
+			+ '<thead><tr style="background:#1F497D;color:#fff;">' + thCells + '</tr></thead>'
+			+ '<tbody>' + rows + '</tbody></table>';
+
+		var html = '<div style="margin-bottom:8px;display:flex;gap:8px;align-items:center;">'
+			+ '<button id="rec-csv-btn" style="padding:5px 14px;background:#166534;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;">⬇ Download CSV</button>'
+			+ '<button id="rec-print-btn" style="padding:5px 14px;background:#1e40af;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;">🖨 Print / PDF</button>'
+			+ '<span style="font-size:11px;color:#6b7280;">Click ID to open in Frappe</span>'
+			+ '</div>'
+			+ '<div style="overflow:auto;max-height:420px;">' + tbl + '</div>';
+
+		var d = frappe.msgprint({ title: title + ' (' + records.length + ')', wide: true, message: html });
+
+		// Bind buttons after dialog renders
+		setTimeout(function() {
+			$('#rec-csv-btn').off('click').on('click', csvDownload);
+			$('#rec-print-btn').off('click').on('click', function() {
+				var w = window.open('', '_blank');
+				w.document.write('<html><head><title>' + title + '</title>'
+					+ '<style>table{border-collapse:collapse;font-size:12px;width:100%}'
+					+ 'th,td{border:1px solid #ccc;padding:4px 8px;text-align:left}'
+					+ 'th{background:#1F497D;color:#fff}</style></head><body>'
+					+ '<h3>' + title + '</h3>' + document.getElementById('rec-dlg-tbl').outerHTML
+					+ '</body></html>');
+				w.document.close(); w.focus(); w.print();
+			});
+		}, 100);
+
+		return d;
+	}
+
 	// ── APPLICATIONS RECEIVED ─────────────────────────────────────────────
 	var _arData = {};       // aggregated data
 	var _arStates = [];     // discovered states
 	var _arUsedMonths = []; // all months that have data
 	var _arSelected = {};   // selected months {label: true/false}
+	var _arAllRecs = [];    // raw records for click-through
 
 	var FIN_MONTHS = ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
 	var STATE_COLORS = ['#DDEBF7', '#E2EFDA', '#FFF2CC', '#FCE4D6', '#D9E1F2', '#EAF4E2', '#FDE9D9', '#EBE9F3'];
@@ -196,6 +266,8 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				<input type="date" class="rpt-toolbar-date" id="ar-from" />
 				<span class="rpt-toolbar-label">To:</span>
 				<input type="date" class="rpt-toolbar-date" id="ar-to" />
+				<select class="rpt-toolbar-date" id="ar-state" style="min-width:120px;"><option value="">All States</option></select>
+				<select class="rpt-toolbar-date" id="ar-district" style="min-width:120px;"><option value="">All Districts</option></select>
 				<div class="ar-month-picker" id="ar-month-picker" style="display:none;">
 					<button class="ar-month-btn" id="ar-month-btn">
 						Months: All <span style="font-size:10px;">▼</span>
@@ -232,6 +304,9 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			showHub();
 		});
 		$('#ar-refresh').on('click', fetchArData);
+		$('#ar-state,#ar-district').on('change', function () {
+			applyArStateFilter();
+		});
 
 		// Month picker toggle
 		$(document).on('click.arDrop', function (e) {
@@ -257,6 +332,19 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		fetchArData();
 	}
 
+	function applyArStateFilter() {
+		var stF = $('#ar-state').val() || '';
+		var diF = $('#ar-district').val() || '';
+		var filtered = _arAllRecs.filter(function (r) {
+			if (stF && getState(r) !== stF) return false;
+			if (diF && (r.native_district || '').trim() !== diF) return false;
+			return true;
+		});
+		aggregateArData(filtered);
+		buildArMonthFilter();
+		renderArBody();
+	}
+
 	function fetchArData() {
 		$('#ar-tbl-wrap').html('<div class="rpt-loading">Loading…</div>');
 		var from = $('#ar-from').val() || '';
@@ -271,15 +359,32 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			args: {
 				doctype: 'Field Registration Form',
 				filters: filters,
-				fields: ['name', 'role', 'location', 'worklocation', 'native_state',
-					'application_status', 'creation'],
+				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
+					'location', 'worklocation', 'native_state', 'native_district', 'opportunity',
+					'email_address', 'phone_number', 'alternate_no', 'gender', 'dob', 'age',
+					'highest_education', 'teaching_degrees', 'teaching_year', 'teachingexp_month',
+					'health_expyear', 'health_expmonth', 'languages_known', 'written_subject',
+					'test_location', 'apf_associated', 'former_employee',
+					'reasons_for_shortlist', 'reasons_for_reject', 'hold_reason', 'blocklist_reason',
+					'creation'],
 				limit_page_length: 10000,
 				order_by: 'creation asc'
 			},
 			callback: function (r) {
-				var recs = (r && r.message) ? r.message : [];
-				$('#ar-info').text('Records: ' + recs.length + ' | Date: ' + frappe.datetime.now_date());
-				aggregateArData(recs);
+				_arAllRecs = (r && r.message) ? r.message : [];
+				$('#ar-info').text('Records: ' + _arAllRecs.length + ' | Date: ' + frappe.datetime.now_date());
+				// Populate state/district dropdowns
+				var stSet = {}, diSet = {};
+				_arAllRecs.forEach(function (rec) {
+					var st = getState(rec);
+					if (st) stSet[st] = true;
+					if (rec.native_district) diSet[rec.native_district.trim()] = true;
+				});
+				var $st = $('#ar-state').empty().append('<option value="">All States</option>');
+				Object.keys(stSet).sort().forEach(function (v) { $st.append('<option value="' + v + '">' + v + '</option>'); });
+				var $di = $('#ar-district').empty().append('<option value="">All Districts</option>');
+				Object.keys(diSet).sort().forEach(function (v) { $di.append('<option value="' + v + '">' + v + '</option>'); });
+				aggregateArData(_arAllRecs);
 				buildArMonthFilter();
 				renderArBody();
 			},
@@ -423,17 +528,87 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				tbody += '<td class="col-status" style="background:' + rd.bg + ';' + (rd.bold ? 'font-weight:700;' : '') + '">' + rd.label + '</td>';
 				_arStates.forEach(function (s) {
 					var bucket = (_arData[ml] && _arData[ml][s]) ? _arData[ml][s] : { RP: mkRow(), ST: mkRow() };
-					tbody += '<td class="col-num" style="background:' + rd.bg + ';">' + (bucket.RP[rd.key] || '') + '</td>';
-					tbody += '<td class="col-num" style="background:' + rd.bg + ';">' + (bucket.ST[rd.key] || '') + '</td>';
+					var rpV = bucket.RP[rd.key] || '';
+					var stV = bucket.ST[rd.key] || '';
+					tbody += '<td class="col-num ar-cell" style="background:' + rd.bg + ';cursor:pointer;" '
+						+ 'data-month="' + ml + '" data-state="' + s + '" data-col="RP" data-rowkey="' + rd.key + '">'
+						+ rpV + '</td>';
+					tbody += '<td class="col-num ar-cell" style="background:' + rd.bg + ';cursor:pointer;" '
+						+ 'data-month="' + ml + '" data-state="' + s + '" data-col="ST" data-rowkey="' + rd.key + '">'
+						+ stV + '</td>';
 				});
 				var tot = (_arData[ml] && _arData[ml]['__total']) ? _arData[ml]['__total'] : { RP: mkRow(), ST: mkRow() };
-				tbody += '<td class="col-num col-total-rp">' + (tot.RP[rd.key] || '') + '</td>';
-				tbody += '<td class="col-num col-total-st">' + (tot.ST[rd.key] || '') + '</td>';
+				tbody += '<td class="col-num col-total-rp ar-cell" style="cursor:pointer;" '
+					+ 'data-month="' + ml + '" data-state="" data-col="RP" data-rowkey="' + rd.key + '">'
+					+ (tot.RP[rd.key] || '') + '</td>';
+				tbody += '<td class="col-num col-total-st ar-cell" style="cursor:pointer;" '
+					+ 'data-month="' + ml + '" data-state="" data-col="ST" data-rowkey="' + rd.key + '">'
+					+ (tot.ST[rd.key] || '') + '</td>';
 				tbody += '</tr>';
 			});
 		});
 		tbody += '</tbody>';
-		$('#ar-tbl-wrap').html('<table class="rpt-tbl">' + thead + tbody + '</table>');
+		var $tbl = $('<table class="rpt-tbl">' + thead + tbody + '</table>');
+		$('#ar-tbl-wrap').html($tbl);
+
+		// Click handler: filter raw records and show dialog
+		$('#ar-tbl-wrap').off('click.arCell').on('click.arCell', '.ar-cell', function () {
+			var ml     = $(this).data('month');
+			var state  = $(this).data('state');
+			var col    = $(this).data('col');
+			var rowkey = $(this).data('rowkey');
+			if (!ml) return;
+
+			var STATUS_KEYS = {
+				cv_shortlist: ['CV Shortlist', 'Shortlisted'],
+				cv_regret:    ['CV Reject', 'Rejected'],
+				cv_pending:   ['New Applicant', 'Applied', 'On Hold'],
+			};
+
+			var matched = _arAllRecs.filter(function (r) {
+				// month
+				var d = new Date(r.creation); var mi = d.getMonth(); var yr = d.getFullYear();
+				var mn = FIN_MONTHS[mi >= 3 ? mi - 3 : mi + 9];
+				var yr2 = mi >= 3 ? yr : yr + 1;
+				if ((mn + '/' + String(yr2).slice(2)) !== ml) return false;
+				// state (empty = total, no filter)
+				if (state && getState(r) !== state) return false;
+				// col (RP / ST)
+				if (getCol(r.role) !== col) return false;
+				// row key
+				if (rowkey !== 'app_received') {
+					var allowed = STATUS_KEYS[rowkey] || [];
+					if (!allowed.includes((r.application_status || '').trim())) return false;
+				}
+				return true;
+			});
+
+			if (!matched.length) { frappe.msgprint('No records found.'); return; }
+
+			var title = (state || 'Total') + ' | ' + col + ' | ' + ml
+				+ ' | ' + (rowkey === 'app_received' ? 'All Applications' : rowkey.replace('_', ' '))
+				+ ' (' + matched.length + ')';
+
+			showRecordsDialog(title, matched,
+				['ID','Full Name','Status','Role','Department',
+				 'Work State','Work Location','Native State','Native District','Source',
+				 'Email','Phone','Alt Phone','Gender','DOB','Age',
+				 'Education','Teaching Degree','Teaching Exp(Yr)','Teaching Exp(Mo)',
+				 'Health Exp(Yr)','Health Exp(Mo)','Languages','Written Subject',
+				 'Test Location','APF Associated','Former Employee',
+				 'Shortlist Reason','Reject Reason','Hold Reason','Blocklist Reason','Date'],
+				function(r) {
+					return [r.name, r.full_name_aadhaar, r.application_status, r.role, r.department,
+						r.location, r.worklocation, r.native_state, r.native_district, r.opportunity,
+						r.email_address, r.phone_number, r.alternate_no, r.gender, r.dob, r.age,
+						r.highest_education, r.teaching_degrees, r.teaching_year, r.teachingexp_month,
+						r.health_expyear, r.health_expmonth, r.languages_known, r.written_subject,
+						r.test_location, r.apf_associated, r.former_employee,
+						r.reasons_for_shortlist, r.reasons_for_reject, r.hold_reason, r.blocklist_reason,
+						r.creation ? r.creation.split(' ')[0] : ''];
+				});
+
+		});
 	}
 
 	// ── SOURCE REPORT ─────────────────────────────────────────────────────
@@ -456,6 +631,8 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		return 'Resource Person';
 	}
 
+	var _srcAllRecs = [];
+
 	function showSource() {
 		$('#rpt-main').html(`
 			<div class="rpt-view-toolbar">
@@ -465,6 +642,8 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				<input type="date" class="rpt-toolbar-date" id="src-from" />
 				<span class="rpt-toolbar-label">To:</span>
 				<input type="date" class="rpt-toolbar-date" id="src-to" />
+				<select class="rpt-toolbar-date" id="src-state" style="min-width:120px;"><option value="">All States</option></select>
+				<select class="rpt-toolbar-date" id="src-district" style="min-width:120px;"><option value="">All Districts</option></select>
 				<button class="rpt-btn-refresh" id="src-refresh">&#x21bb; Refresh</button>
 				<span class="rpt-info" id="src-info"></span>
 			</div>
@@ -480,6 +659,9 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		})();
 		$('#rpt-back').on('click', showHub);
 		$('#src-refresh').on('click', fetchSrcData);
+		$('#src-state,#src-district').on('change', function () {
+			renderSourceTable(_srcAllRecs);
+		});
 		fetchSrcData();
 	}
 
@@ -496,14 +678,26 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			args: {
 				doctype: 'Field Registration Form',
 				filters: filters,
-				fields: ['name', 'role', 'department', 'opportunity', 'creation'],
+				fields: ['name', 'role', 'department', 'opportunity',
+					'location', 'worklocation', 'native_state', 'native_district', 'creation'],
 				limit_page_length: 10000,
 				order_by: 'creation asc'
 			},
 			callback: function (r) {
-				var recs = (r && r.message) ? r.message : [];
-				$('#src-info').text('Records: ' + recs.length + ' | Date: ' + frappe.datetime.now_date());
-				renderSourceTable(recs);
+				_srcAllRecs = (r && r.message) ? r.message : [];
+				$('#src-info').text('Records: ' + _srcAllRecs.length + ' | Date: ' + frappe.datetime.now_date());
+				// Populate state/district dropdowns
+				var stSet = {}, diSet = {};
+				_srcAllRecs.forEach(function (rec) {
+					var st = (rec.location || rec.worklocation || rec.native_state || '').trim();
+					if (st) stSet[st] = true;
+					if (rec.native_district) diSet[rec.native_district.trim()] = true;
+				});
+				var $st = $('#src-state').empty().append('<option value="">All States</option>');
+				Object.keys(stSet).sort().forEach(function (v) { $st.append('<option value="' + v + '">' + v + '</option>'); });
+				var $di = $('#src-district').empty().append('<option value="">All Districts</option>');
+				Object.keys(diSet).sort().forEach(function (v) { $di.append('<option value="' + v + '">' + v + '</option>'); });
+				renderSourceTable(_srcAllRecs);
 			},
 			error: function () {
 				$('#src-tbl-wrap').html('<div class="rpt-loading">Failed to load. Please refresh.</div>');
@@ -512,6 +706,17 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 	}
 
 	function renderSourceTable(records) {
+		var selState = $('#src-state').val() || '';
+		var selDist  = $('#src-district').val() || '';
+		if (selState || selDist) {
+			records = records.filter(function (r) {
+				var st = (r.location || r.worklocation || r.native_state || '').trim();
+				if (selState && st !== selState) return false;
+				if (selDist && (r.native_district || '').trim() !== selDist) return false;
+				return true;
+			});
+		}
+
 		var srcData = {};
 		var groupTotals = { 'Health': 0, 'Livelihoods': 0, 'Resource Person': 0, 'School Teacher': 0, 'Total': 0 };
 		var otherData = { 'Health': 0, 'Livelihoods': 0, 'Resource Person': 0, 'School Teacher': 0, 'Total': 0 };

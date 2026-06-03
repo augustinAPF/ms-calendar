@@ -73,7 +73,6 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 		},
 	];
 
-	// actual application_status values → stage row key
 	const STATUS_TO_KEY = {
 		'New Applicant': 'cv_pending',
 		'CV Shortlist': 'cv_shortlist',
@@ -107,7 +106,6 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 	const DATA_COLS = ['RP', 'ST', 'HL', 'LH'];
 	const SUB_COLS = ['RP', 'ST', 'HL', 'LH', 'Total'];
 
-	// department = Health → HL | Livelihood → LH | else use role
 	function getCol(rec) {
 		const dept = (rec.department || '').toLowerCase().trim();
 		if (dept === 'health') return 'HL';
@@ -115,37 +113,64 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 		const role = rec.role || '';
 		if (role === 'School Teacher') return 'ST';
 		if (['Resource Person', 'District Resource Person',
-			'Cluster Resource Person', 'Associate Resource Person'].includes(role)) return 'RP';
+			'Cluster Resource Person'].includes(role)) return 'RP';
 		return null;
 	}
 
-	let _states = [], _data = {}, _statusSummary = {};
+	function getRecState(r) {
+		return (r.location || r.worklocation || r.native_state || '').trim();
+	}
+
+	let _allRecs = [], _states = [], _data = {};
+
+	const ALL_HEADERS = [
+		'ID','Full Name','Status','Role','Department',
+		'Work State','Work Location','Native State','Native District','Source',
+		'Email','Phone','Alt Phone','Gender','DOB','Age',
+		'Education','Teaching Degree','Teaching Exp (Yr)','Teaching Exp (Mo)',
+		'Health Exp (Yr)','Health Exp (Mo)','Languages','Written Subject',
+		'Test Location','APF Associated','Former Employee',
+		'Shortlist Reason','Reject Reason','Hold Reason','Blocklist Reason','Date'
+	];
+
+	function fullRow(r) {
+		return [
+			r.name, r.full_name_aadhaar, r.application_status, r.role, r.department,
+			r.location, r.worklocation, r.native_state, r.native_district, r.opportunity,
+			r.email_address, r.phone_number, r.alternate_no, r.gender, r.dob, r.age,
+			r.highest_education, r.teaching_degrees, r.teaching_year, r.teachingexp_month,
+			r.health_expyear, r.health_expmonth, r.languages_known, r.written_subject,
+			r.test_location, r.apf_associated, r.former_employee,
+			r.reasons_for_shortlist, r.reasons_for_reject, r.hold_reason, r.blocklist_reason,
+			r.creation ? r.creation.split(' ')[0] : ''
+		];
+	}
 
 	// ── Styles ────────────────────────────────────────────────────────────
 	$(wrapper).find('.page-content').append(`
 	<style>
-		.fod-bar{display:flex;align-items:center;gap:10px;padding:10px 20px 8px;background:#fff;border-bottom:1px solid #e5e7eb;flex-wrap:wrap}
+		.fod-bar{display:flex;align-items:center;gap:8px;padding:10px 20px 8px;background:#fff;border-bottom:1px solid #e5e7eb;flex-wrap:wrap}
 		.fod-bar label{font-size:12px;font-weight:600;color:#374151}
-		.fod-bar input[type=date]{padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px;color:#111}
+		.fod-bar input[type=date],.fod-bar select{padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px;color:#111;background:#fff;min-width:120px}
 		.fod-dt{font-size:12px;color:#9ca3af;margin-left:auto}
 		.fod-btn{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border-radius:6px;font-weight:600;font-size:12px;border:none;cursor:pointer;transition:background .15s}
 		.btn-green{background:#166534;color:#fff}.btn-green:hover{background:#14532d}
 		.btn-blue{background:#1e40af;color:#fff}.btn-blue:hover{background:#1d3a8a}
 		.btn-grey{background:#f3f4f6;color:#374151;border:1px solid #d1d5db}.btn-grey:hover{background:#e5e7eb}
-		.fod-wrap{overflow:auto;padding:0 20px 10px;max-height:calc(100vh - 200px)}
+		.fod-wrap{overflow:auto;padding:0 20px 10px;max-height:calc(100vh - 160px)}
 		.fod-load{padding:60px;text-align:center;color:#9ca3af;font-size:14px}
 		.fod-tbl{border-collapse:collapse;font-size:11px;white-space:nowrap}
 		.fod-tbl th,.fod-tbl td{border:1px solid #bbb;padding:3px 7px;text-align:center;vertical-align:middle}
 		.fod-tbl .c-stage{min-width:110px;font-weight:700;white-space:normal;position:sticky;left:0;z-index:12}
 		.fod-tbl .c-status{min-width:250px;text-align:left;white-space:normal;position:sticky;left:111px;z-index:12}
-		.fod-tbl .c-num{min-width:36px;font-variant-numeric:tabular-nums}
+		.fod-tbl .c-num{min-width:36px;font-variant-numeric:tabular-nums;cursor:pointer}
+		.fod-tbl .c-num:hover{filter:brightness(0.88)}
 		.fod-tbl .c-tot{font-weight:700;background:#BDD7EE!important;color:#1F497D!important}
 		.fod-tbl .r-total .c-stage,.fod-tbl .r-total .c-status{background:#BDD7EE!important;font-weight:700;color:#1F497D!important}
 		.fod-tbl .r-total .c-num{background:#BDD7EE!important;font-weight:700;color:#1F497D!important}
 		.fod-tbl .r-total .c-tot{background:#9ab8d4!important;color:#1F497D!important}
 		.fod-tbl thead th{position:sticky;top:0;z-index:20;font-weight:700}
 		.fod-tbl thead tr:nth-child(2) th{top:32px;z-index:19}
-		/* Status summary */
 		.ss-wrap{padding:18px 20px 28px}
 		.ss-title{font-size:13px;font-weight:700;color:#1e3a5f;margin-bottom:10px;padding-bottom:5px;border-bottom:2px solid #1e3a5f}
 		.ss-grid{display:flex;flex-wrap:wrap;gap:8px}
@@ -155,6 +180,9 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 	<div class="fod-bar">
 		<label>From:</label><input type="date" id="f-from"/>
 		<label>To:</label><input type="date" id="f-to"/>
+		<select id="f-state"><option value="">All States</option></select>
+		<select id="f-district"><option value="">All Districts</option></select>
+		<select id="f-source"><option value="">All Sources</option></select>
 		<button class="fod-btn btn-blue" id="f-apply">Apply</button>
 		<button class="fod-btn btn-grey"  id="f-clear">Clear</button>
 		<button class="fod-btn btn-grey"  id="f-rf">&#x21bb; Refresh</button>
@@ -172,7 +200,15 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 	$(wrapper).find('#f-rf').on('click', loadData);
 	$(wrapper).find('#f-clear').on('click', function () {
 		$(wrapper).find('#f-from,#f-to').val('');
+		$(wrapper).find('#f-state,#f-district,#f-source').val('');
 		loadData();
+	});
+	$(wrapper).find('#f-state,#f-district,#f-source').on('change', function () {
+		var filtered = getFilteredRecs();
+		var res = aggregate(filtered);
+		_states = res.states; _data = res.data;
+		renderTable();
+		renderSummary(filtered);
 	});
 	$(wrapper).find('#f-xl').on('click', function () {
 		const from = $(wrapper).find('#f-from').val();
@@ -185,7 +221,6 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 		window.location.href = url;
 	});
 
-	// ── Filters ───────────────────────────────────────────────────────────
 	function buildFilters() {
 		const f = [['docstatus', '!=', '2']];
 		const from = $(wrapper).find('#f-from').val();
@@ -193,6 +228,18 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 		if (from) f.push(['creation', '>=', from + ' 00:00:00']);
 		if (to) f.push(['creation', '<=', to + ' 23:59:59']);
 		return f;
+	}
+
+	function getFilteredRecs() {
+		var selState = $(wrapper).find('#f-state').val();
+		var selDist  = $(wrapper).find('#f-district').val();
+		var selSrc   = $(wrapper).find('#f-source').val();
+		return _allRecs.filter(function (r) {
+			if (selState && getRecState(r) !== selState) return false;
+			if (selDist && (r.native_district || '').trim() !== selDist) return false;
+			if (selSrc && (r.opportunity || '').trim() !== selSrc) return false;
+			return true;
+		});
 	}
 
 	// ── Load ──────────────────────────────────────────────────────────────
@@ -204,16 +251,39 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 			method: 'frappe.client.get_list',
 			args: {
 				doctype: 'Field Registration Form',
-				fields: ['name', 'role', 'department', 'location', 'worklocation', 'native_state', 'application_status', 'creation'],
+				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
+					'location', 'worklocation', 'native_state', 'native_district', 'opportunity',
+					'email_address', 'phone_number', 'alternate_no', 'gender', 'dob', 'age',
+					'highest_education', 'teaching_degrees', 'teaching_year', 'teachingexp_month',
+					'health_expyear', 'health_expmonth', 'languages_known', 'written_subject',
+					'test_location', 'apf_associated', 'former_employee',
+					'reasons_for_shortlist', 'reasons_for_reject', 'hold_reason', 'blocklist_reason',
+					'creation'],
 				filters: buildFilters(),
 				limit_page_length: 0,
 				order_by: 'creation asc'
 			},
 			callback: function (r) {
-				const res = aggregate(r.message || []);
-				_states = res.states; _data = res.data; _statusSummary = res.statusSummary;
+				_allRecs = r.message || [];
+				// Populate dropdowns
+				var stSet = {}, diSet = {}, srcSet = {};
+				_allRecs.forEach(function (rec) {
+					var st = getRecState(rec);
+					if (st) stSet[st] = true;
+					if (rec.native_district) diSet[rec.native_district.trim()] = true;
+					if (rec.opportunity) srcSet[rec.opportunity.trim()] = true;
+				});
+				var $st = $(wrapper).find('#f-state').empty().append('<option value="">All States</option>');
+				Object.keys(stSet).sort().forEach(function (v) { $st.append('<option value="' + v + '">' + v + '</option>'); });
+				var $di = $(wrapper).find('#f-district').empty().append('<option value="">All Districts</option>');
+				Object.keys(diSet).sort().forEach(function (v) { $di.append('<option value="' + v + '">' + v + '</option>'); });
+				var $so = $(wrapper).find('#f-source').empty().append('<option value="">All Sources</option>');
+				Object.keys(srcSet).sort().forEach(function (v) { $so.append('<option value="' + v + '">' + v + '</option>'); });
+
+				var res = aggregate(_allRecs);
+				_states = res.states; _data = res.data;
 				renderTable();
-				renderSummary();
+				renderSummary(_allRecs);
 			},
 			error: function () {
 				$(wrapper).find('#f-wrap').html('<div class="fod-load">Failed to load. Please refresh.</div>');
@@ -234,9 +304,7 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 		}
 
 		records.forEach(function (r) {
-			const state = (r.location && r.location.trim()) ||
-				(r.worklocation && r.worklocation.trim()) ||
-				(r.native_state && r.native_state.trim()) || 'Unknown';
+			const state = getRecState(r) || 'Unknown';
 			const col = getCol(r);
 			if (!col) return;
 			stSet.add(state);
@@ -258,13 +326,10 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 	function cnt(s, c, k) { return ((_data[s] || {})[c] || {})[k] || 0; }
 	function stTot(s, k) { return DATA_COLS.reduce(function (a, c) { return a + cnt(s, c, k); }, 0); }
 
-	// ── Render table ──────────────────────────────────────────────────────
+	// ── Render count table with clickable cells ───────────────────────────
 	function renderTable() {
 		const groups = _states.concat(['Grand Total']);
-		const HDR = '#1F497D';
-		const COL_A = '#DDEBF7';
-		const COL_B = '#BDD7EE';
-		const GRAND = '#1F497D';
+		const HDR = '#1F497D', COL_A = '#DDEBF7', COL_B = '#BDD7EE', GRAND = '#1F497D';
 
 		let h = '<table class="fod-tbl"><thead><tr>';
 		h += `<th class="c-stage" rowspan="2" style="background:${HDR};color:#fff;top:0;z-index:25">Stages</th>`;
@@ -304,11 +369,12 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 
 					DATA_COLS.forEach(function (col) {
 						const v = cnt(g, col, row.key);
-						h += `<td class="c-num" style="background:${nbg};color:${nfg}">${v || ''}</td>`;
+						const attr = 'data-state="' + g + '" data-col="' + col + '" data-rowkey="' + row.key + '"';
+						h += `<td class="c-num fod-cell" ${attr} style="background:${nbg};color:${nfg}">${v || ''}</td>`;
 					});
 					const t = stTot(g, row.key);
 					const tbg = isG ? '#1F497D' : '#BDD7EE';
-					h += `<td class="c-num c-tot" style="background:${tbg};color:${isG ? '#fff' : '#000'}">${t || ''}</td>`;
+					h += `<td class="c-num c-tot fod-cell" data-state="${g}" data-col="Total" data-rowkey="${row.key}" style="background:${tbg};color:${isG ? '#fff' : '#000'}">${t || ''}</td>`;
 				});
 				h += '</tr>';
 			});
@@ -316,20 +382,120 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 
 		h += '</tbody></table>';
 		$(wrapper).find('#f-wrap').html(h);
+
+		// Click handler on number cells
+		$(wrapper).find('#f-wrap').off('click.fodCell').on('click.fodCell', '.fod-cell', function () {
+			var state  = $(this).data('state');
+			var col    = $(this).data('col');
+			var rowkey = $(this).data('rowkey');
+			if (!$(this).text().trim()) return;
+
+			var base = getFilteredRecs();
+			var april1 = new Date(new Date().getFullYear(), 3, 1);
+
+			var matched = base.filter(function (r) {
+				// state filter
+				if (state !== 'Grand Total') {
+					if (getRecState(r) !== state) return false;
+				}
+				// col filter
+				if (col !== 'Total') {
+					if (getCol(r) !== col) return false;
+				}
+				// rowkey filter
+				if (rowkey === 'total') return true;
+				if (rowkey === 'carried_forward') return new Date(r.creation) < april1;
+				if (rowkey === 'received_this_year') return new Date(r.creation) >= april1;
+				return STATUS_TO_KEY[r.application_status] === rowkey;
+			});
+
+			if (!matched.length) { frappe.msgprint('No records found.'); return; }
+
+			var title = (state === 'Grand Total' ? 'All States' : state)
+				+ ' | ' + col + ' | ' + rowkey.replace(/_/g, ' ');
+
+			showRecordsDialog(title, matched, ALL_HEADERS, fullRow);
+		});
 	}
 
-	// ── Application Status cards ──────────────────────────────────────────
-	function renderSummary() {
-		const entries = Object.entries(_statusSummary).sort(function (a, b) { return b[1] - a[1]; });
+	// ── Application Status summary cards ──────────────────────────────────
+	function renderSummary(recs) {
+		var summ = {};
+		(recs || _allRecs).forEach(function (r) {
+			var k = r.application_status || 'Unknown';
+			summ[k] = (summ[k] || 0) + 1;
+		});
+		const entries = Object.entries(summ).sort(function (a, b) { return b[1] - a[1]; });
 		if (!entries.length) return;
 		const palette = ['#1F497D', '#2c7db8'];
 		let html = '';
 		entries.forEach(function (e, i) {
-			const color = palette[i % palette.length];
-			html += `<div class="ss-card"><div class="n" style="color:${color}">${e[1]}</div><div class="l">${e[0]}</div></div>`;
+			html += `<div class="ss-card"><div class="n" style="color:${palette[i%palette.length]}">${e[1]}</div><div class="l">${e[0]}</div></div>`;
 		});
 		$(wrapper).find('#ss-grid').html(html);
 		$(wrapper).find('#ss-wrap').show();
+	}
+
+	// ── Records dialog: CSV + Print/PDF + open in Frappe ─────────────────
+	function showRecordsDialog(title, records, headers, rowFn) {
+		function csvDownload() {
+			var lines = [headers.join(',')];
+			records.forEach(function (r) {
+				lines.push(rowFn(r).map(function (v) {
+					return '"' + (v || '').toString().replace(/"/g, '""') + '"';
+				}).join(','));
+			});
+			var blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+			var url = URL.createObjectURL(blob);
+			var a = document.createElement('a'); a.href = url;
+			a.download = title.replace(/[^a-z0-9]/gi, '_').slice(0, 40) + '.csv';
+			document.body.appendChild(a); a.click();
+			document.body.removeChild(a); URL.revokeObjectURL(url);
+		}
+
+		var thCells = headers.map(function (h) {
+			return '<th style="padding:6px 8px;white-space:nowrap;">' + h + '</th>';
+		}).join('');
+
+		var rows = records.map(function (r) {
+			var vals = rowFn(r);
+			var formUrl = frappe.utils.get_url_to_form
+				? frappe.utils.get_url_to_form('Field Registration Form', r.name)
+				: '/app/field-registration-form/' + encodeURIComponent(r.name);
+			return '<tr>' + vals.map(function (v, i) {
+				return i === 0
+					? '<td style="padding:4px 8px;white-space:nowrap;"><a href="' + formUrl + '" target="_blank" style="color:#1F497D;font-weight:600;">' + (v || '') + '</a></td>'
+					: '<td style="padding:4px 8px;">' + (v || '') + '</td>';
+			}).join('') + '</tr>';
+		}).join('');
+
+		var html = '<div style="margin-bottom:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
+			+ '<button id="rec-csv-btn" style="padding:5px 14px;background:#166534;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;">⬇ Download CSV/Excel</button>'
+			+ '<button id="rec-print-btn" style="padding:5px 14px;background:#1e40af;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;">🖨 Print / PDF</button>'
+			+ '<span style="font-size:11px;color:#6b7280;">Click the ID to open record in Frappe</span>'
+			+ '</div>'
+			+ '<div style="overflow:auto;max-height:420px;">'
+			+ '<table id="rec-dlg-tbl" style="width:100%;border-collapse:collapse;font-size:12px;">'
+			+ '<thead><tr style="background:#1F497D;color:#fff;">' + thCells + '</tr></thead>'
+			+ '<tbody>' + rows + '</tbody></table></div>';
+
+		frappe.msgprint({ title: title + ' (' + records.length + ')', wide: true, message: html });
+
+		setTimeout(function () {
+			$('#rec-csv-btn').off('click').on('click', csvDownload);
+			$('#rec-print-btn').off('click').on('click', function () {
+				var tbl = document.getElementById('rec-dlg-tbl');
+				var w = window.open('', '_blank');
+				w.document.open();
+				w.document.write('<html><head><title>' + title + '</title>'
+					+ '<style>body{font-family:sans-serif}table{border-collapse:collapse;font-size:12px;width:100%}'
+					+ 'th,td{border:1px solid #ccc;padding:4px 8px;text-align:left}'
+					+ 'th{background:#1F497D;color:#fff}a{color:#1F497D}</style></head><body>'
+					+ '<h3>' + title + ' (' + records.length + ')</h3>'
+					+ (tbl ? tbl.outerHTML : '') + '</body></html>');
+				w.document.close(); w.focus(); w.print();
+			});
+		}, 100);
 	}
 
 	loadData();

@@ -257,6 +257,8 @@ frappe.pages['school-teacher-dashb'].on_page_load = function (wrapper) {
 			<input type="date" id="st-from" />
 			<label>To:</label>
 			<input type="date" id="st-to" />
+			<select id="st-state" style="padding:4px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:12px;min-width:120px;"><option value="">All States</option></select>
+			<select id="st-district" style="padding:4px 8px;border:1px solid #d1d5db;border-radius:4px;font-size:12px;min-width:120px;"><option value="">All Districts</option></select>
 			<button class="std-btn-refresh" id="st-refresh">&#x21bb; Refresh</button>
 			<button class="std-btn-download" id="st-download">
 				<svg width="15" height="15" viewBox="0 0 20 20" fill="currentColor">
@@ -292,9 +294,27 @@ frappe.pages['school-teacher-dashb'].on_page_load = function (wrapper) {
 	$(wrapper).find('#st-refresh').on('click', function () {
 		loadDashboard();
 	});
+	$(wrapper).find('#st-state,#st-district').on('change', function () {
+		applyStFilters();
+	});
 
 	// ── Load data ─────────────────────────────────────────────────────────
 	var _lastRecords = [];
+	var _stAllRecs = [];
+
+	function applyStFilters() {
+		var stF = $('#st-state').val() || '';
+		var diF = $('#st-district').val() || '';
+		var filtered = _stAllRecs.filter(function (r) {
+			var st = (r.location || r.worklocation || r.native_state || '').trim();
+			if (stF && st !== stF) return false;
+			if (diF && (r.native_district || '').trim() !== diF) return false;
+			return true;
+		});
+		_lastRecords = filtered;
+		renderTable(filtered);
+		$('#st-date').text('Report Date: ' + frappe.datetime.now_date() + ' | Records: ' + filtered.length);
+	}
 
 	function loadDashboard() {
 		$('#st-table-wrap').html('<div class="std-loading">Loading…</div>');
@@ -310,17 +330,34 @@ frappe.pages['school-teacher-dashb'].on_page_load = function (wrapper) {
 			args: {
 				doctype: 'Field Registration Form',
 				filters: filters,
-				fields: ['name', 'role', 'written_subject', 'application_status', 'creation',
-					'full_name_aadhaar', 'email_address', 'phone_number'],
+				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
+					'location', 'worklocation', 'native_state', 'native_district', 'opportunity',
+					'email_address', 'phone_number', 'alternate_no', 'gender', 'dob', 'age',
+					'highest_education', 'teaching_degrees', 'teaching_year', 'teachingexp_month',
+					'languages_known', 'written_subject', 'test_location', 'apf_associated',
+					'former_employee', 'reasons_for_shortlist', 'reasons_for_reject',
+					'hold_reason', 'blocklist_reason', 'creation'],
 				limit_page_length: 10000,
 				order_by: 'creation asc'
 			},
 			callback: function (r) {
 				if (r && r.message) {
-					_lastRecords = r.message;
-					renderTable(r.message);
+					_stAllRecs = r.message;
+					// Populate state/district dropdowns
+					var stSet = {}, diSet = {};
+					_stAllRecs.forEach(function (rec) {
+						var st = (rec.location || rec.worklocation || rec.native_state || '').trim();
+						if (st) stSet[st] = true;
+						if (rec.native_district) diSet[rec.native_district.trim()] = true;
+					});
+					var $st = $('#st-state').empty().append('<option value="">All States</option>');
+					Object.keys(stSet).sort().forEach(function (v) { $st.append('<option value="' + v + '">' + v + '</option>'); });
+					var $di = $('#st-district').empty().append('<option value="">All Districts</option>');
+					Object.keys(diSet).sort().forEach(function (v) { $di.append('<option value="' + v + '">' + v + '</option>'); });
+					_lastRecords = _stAllRecs;
+					renderTable(_stAllRecs);
 					$('#st-date').text('Report Date: ' + frappe.datetime.now_date()
-						+ ' | Records: ' + r.message.length);
+						+ ' | Records: ' + _stAllRecs.length);
 				} else {
 					$('#st-table-wrap').html('<div class="std-loading">No data found.</div>');
 				}
@@ -472,31 +509,81 @@ frappe.pages['school-teacher-dashb'].on_page_load = function (wrapper) {
 				return;
 			}
 
-			var rows = matched.map(function (r) {
-				return '<tr>'
-					+ '<td style="padding:4px 8px;">' + (r.name || '') + '</td>'
-					+ '<td style="padding:4px 8px;">' + (r.full_name_aadhaar || '') + '</td>'
-					+ '<td style="padding:4px 8px;">' + (r.written_subject || '—') + '</td>'
-					+ '<td style="padding:4px 8px;">' + (r.application_status || '') + '</td>'
-					+ '<td style="padding:4px 8px;">' + (r.phone_number || '') + '</td>'
-					+ '</tr>';
-			}).join('');
-
-			var title = label + (subj ? ' — ' + subj : ' — All Subjects') + ' (' + matched.length + ' records)';
-			var html = '<div style="overflow:auto;max-height:400px;">'
-				+ '<table style="width:100%;border-collapse:collapse;font-size:12px;">'
-				+ '<thead><tr style="background:#1F497D;color:#fff;">'
-				+ '<th style="padding:6px 8px;">ID</th>'
-				+ '<th style="padding:6px 8px;">Name</th>'
-				+ '<th style="padding:6px 8px;">Subject</th>'
-				+ '<th style="padding:6px 8px;">Status</th>'
-				+ '<th style="padding:6px 8px;">Phone</th>'
-				+ '</tr></thead>'
-				+ '<tbody>' + rows + '</tbody>'
-				+ '</table></div>';
-
-			frappe.msgprint({ title: title, message: html, wide: true });
+			var dlgTitle = label + (subj ? ' — ' + subj : ' — All Subjects');
+			showRecordsDialog(dlgTitle, matched,
+				['ID','Full Name','Status','Role','Department',
+				 'Work State','Work Location','Native State','Native District','Source',
+				 'Email','Phone','Alt Phone','Gender','DOB','Age',
+				 'Education','Teaching Degree','Teaching Exp(Yr)','Teaching Exp(Mo)',
+				 'Languages','Written Subject','Test Location','APF Associated','Former Employee',
+				 'Shortlist Reason','Reject Reason','Hold Reason','Blocklist Reason','Date'],
+				function(r) {
+					return [r.name, r.full_name_aadhaar, r.application_status, r.role, r.department,
+						r.location, r.worklocation, r.native_state, r.native_district, r.opportunity,
+						r.email_address, r.phone_number, r.alternate_no, r.gender, r.dob, r.age,
+						r.highest_education, r.teaching_degrees, r.teaching_year, r.teachingexp_month,
+						r.languages_known, r.written_subject, r.test_location, r.apf_associated,
+						r.former_employee, r.reasons_for_shortlist, r.reasons_for_reject,
+						r.hold_reason, r.blocklist_reason,
+						r.creation ? r.creation.split(' ')[0] : ''];
+				});
 		});
+	}
+
+	// ── Records dialog: CSV export + Print/PDF + Frappe links ────────────
+	function showRecordsDialog(title, records, headers, rowFn) {
+		function csvDownload() {
+			var lines = [headers.join(',')];
+			records.forEach(function(r) {
+				lines.push(rowFn(r).map(function(v) {
+					return '"' + (v||'').toString().replace(/"/g,'""') + '"';
+				}).join(','));
+			});
+			var blob = new Blob([lines.join('\n')], {type:'text/csv'});
+			var url = URL.createObjectURL(blob);
+			var a = document.createElement('a'); a.href=url;
+			a.download = title.replace(/[^a-z0-9]/gi,'_').slice(0,40) + '.csv';
+			document.body.appendChild(a); a.click();
+			document.body.removeChild(a); URL.revokeObjectURL(url);
+		}
+
+		var thCells = headers.map(function(h) {
+			return '<th style="padding:6px 8px;white-space:nowrap;">' + h + '</th>';
+		}).join('');
+
+		var rows = records.map(function(r) {
+			var vals = rowFn(r);
+			var link = frappe.utils.get_url_to_form
+				? frappe.utils.get_url_to_form('Field Registration Form', r.name)
+				: '/app/field-registration-form/' + encodeURIComponent(r.name);
+			return '<tr>' + vals.map(function(v, i) {
+				return i === 0
+					? '<td style="padding:4px 8px;white-space:nowrap;"><a href="' + link + '" target="_blank" style="color:#1F497D;font-weight:600;">' + (v||'') + '</a></td>'
+					: '<td style="padding:4px 8px;">' + (v||'') + '</td>';
+			}).join('') + '</tr>';
+		}).join('');
+
+		var html = '<div style="margin-bottom:8px;display:flex;gap:8px;align-items:center;">'
+			+ '<button id="rec-csv-btn" style="padding:5px 14px;background:#166534;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;">⬇ Download CSV</button>'
+			+ '<button id="rec-print-btn" style="padding:5px 14px;background:#1e40af;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;">🖨 Print / PDF</button>'
+			+ '<span style="font-size:11px;color:#6b7280;">Click ID to open in Frappe</span></div>'
+			+ '<div style="overflow:auto;max-height:420px;"><table id="rec-dlg-tbl" style="width:100%;border-collapse:collapse;font-size:12px;">'
+			+ '<thead><tr style="background:#1F497D;color:#fff;">' + thCells + '</tr></thead>'
+			+ '<tbody>' + rows + '</tbody></table></div>';
+
+		frappe.msgprint({ title: title + ' (' + records.length + ')', wide: true, message: html });
+		setTimeout(function() {
+			$('#rec-csv-btn').off('click').on('click', csvDownload);
+			$('#rec-print-btn').off('click').on('click', function() {
+				var w = window.open('', '_blank');
+				var tbl = document.getElementById('rec-dlg-tbl');
+				w.document.open();
+				w.document.write('<html><head><title>' + title + '</title>'
+					+ '<style>table{border-collapse:collapse;font-size:12px;width:100%}th,td{border:1px solid #ccc;padding:4px 8px;text-align:left}th{background:#1F497D;color:#fff}</style></head><body>'
+					+ '<h3>' + title + '</h3>' + (tbl ? tbl.outerHTML : '') + '</body></html>');
+				w.document.close(); w.focus(); w.print();
+			});
+		}, 100);
 	}
 
 	// ── Initial load ──────────────────────────────────────────────────────
