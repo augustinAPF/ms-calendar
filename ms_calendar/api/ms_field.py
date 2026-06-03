@@ -1853,22 +1853,24 @@ comments/recommendations for the calibration process and final selection decisio
             }
             # Attempt 1: Graph API JSON sendMail (sends FROM Organizer_email)
             graph_sent = False
+            _c1_err = ""
             try:
-                send_res = requests.post(
+                _c1_res = requests.post(
                     send_mail_url, headers=headers, json=mail_payload, timeout=30
                 )
-                send_res.raise_for_status()
+                _c1_err = _c1_res.text
+                _c1_res.raise_for_status()
                 graph_sent = True
-            except Exception as mail_err:
+            except Exception as _c1_exc:
                 try:
                     frappe.log_error(
                         title="Candidate Email Graph Error (attempt 1)",
-                        message=(send_res.text if hasattr(send_res, "text") else str(mail_err))[:2000],
+                        message=(_c1_err or str(_c1_exc))[:2000],
                     )
                 except Exception:
                     pass
 
-            # Attempt 2: Graph MIME endpoint — same FROM address, different encoding
+            # Attempt 2: Graph MIME endpoint (raw MIME string, no base64)
             if not graph_sent:
                 try:
                     import email.mime.multipart as _cmmp
@@ -1879,20 +1881,37 @@ comments/recommendations for the calibration process and final selection decisio
                     _cmsg['To']      = interviewee_email
                     _cmsg['Subject'] = candidate_email_subject
                     _cmsg.attach(_cmtxt.MIMEText(candidate_email_body, 'html', 'utf-8'))
-                    _cmime_b64 = base64.b64encode(_cmsg.as_bytes()).decode('ascii')
-                    _cmime_res = requests.post(
+                    _c2_res = requests.post(
                         send_mail_url,
                         headers={"Authorization": headers["Authorization"], "Content-Type": "text/plain"},
-                        data=_cmime_b64,
+                        data=_cmsg.as_string().encode('utf-8'),
                         timeout=30,
                     )
-                    _cmime_res.raise_for_status()
+                    _c2_res.raise_for_status()
                     graph_sent = True
-                except Exception as _ce2:
+                except Exception as _c2_exc:
                     try:
                         frappe.log_error(
                             title="Candidate Email Graph Error (attempt 2 MIME)",
-                            message=str(_ce2)[:2000],
+                            message=str(_c2_exc)[:2000],
+                        )
+                    except Exception:
+                        pass
+
+            # Fallback: frappe.sendmail (last resort — email arrives but from Frappe server)
+            if not graph_sent:
+                try:
+                    frappe.sendmail(
+                        recipients=[interviewee_email],
+                        subject=candidate_email_subject,
+                        message=candidate_email_body,
+                        delayed=False,
+                    )
+                except Exception as _cfall:
+                    try:
+                        frappe.log_error(
+                            title="Candidate Email Fallback Error",
+                            message=str(_cfall)[:2000],
                         )
                     except Exception:
                         pass
