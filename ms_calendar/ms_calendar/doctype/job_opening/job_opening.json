@@ -1,308 +1,309 @@
 {
-    "actions": [],
-    "allow_guest_to_view": 1,
-    "allow_import": 1,
-    "autoname": "APF-OPNf-.YYYY.-.####",
-    "creation": "2026-05-12 11:13:39.610185",
-    "default_view": "List",
-    "description": "Description of a Job Opening",
-    "doctype": "DocType",
-    "document_type": "Document",
-    "engine": "InnoDB",
-    "field_order": [
-        "job_details_section",
-        "job_title",
-        "status",
-        "column_break_5",
-        "posted_on",
-        "closes_on",
-        "section_break_nngy",
-        "unit",
-        "department",
-        "designation",
-        "theme",
-        "geo",
-        "column_break_dxpv",
-        "location",
-        "experience",
-        "employment_type",
-        "references_section",
-        "staffing_plan",
-        "planned_vacancies",
-        "job_requisition",
-        "vacancies",
-        "section_break_6",
-        "publish",
-        "route",
-        "publish_applications_received",
-        "column_break_12",
-        "job_application_route",
-        "section_break_14",
-        "description",
-        "section_break_16",
-        "currency",
-        "lower_range",
-        "upper_range",
-        "column_break_20",
-        "salary_per",
-        "publish_salary_range"
-    ],
-    "fields": [
-        {
-            "fieldname": "job_details_section",
-            "fieldtype": "Section Break"
-        },
-        {
-            "fieldname": "job_title",
-            "fieldtype": "Data",
-            "in_list_view": 1,
-            "label": "Job Title",
-            "reqd": 1
-        },
-        {
-            "fieldname": "column_break_5",
-            "fieldtype": "Column Break"
-        },
-        {
-            "fieldname": "status",
-            "fieldtype": "Select",
-            "in_list_view": 1,
-            "in_standard_filter": 1,
-            "label": "Status",
-            "options": "Open\nClosed"
-        },
-        {
-            "default": "Now",
-            "fieldname": "posted_on",
-            "fieldtype": "Datetime",
-            "label": "Posted On"
-        },
-        {
-            "depends_on": "eval:doc.status == 'Open'",
-            "description": "If set, the job opening will be closed automatically after this date",
-            "fieldname": "closes_on",
-            "fieldtype": "Date",
-            "label": "Closes On"
-        },
-        {
-            "fieldname": "section_break_nngy",
-            "fieldtype": "Section Break",
-            "label": "Company Details"
-        },
-        {
-            "fieldname": "unit",
-            "fieldtype": "Link",
-            "label": "Unit",
-            "options": "Recruitment Units"
-        },
-        {
-            "fieldname": "department",
-            "fieldtype": "Link",
-            "label": "Sub Unit",
-            "options": "Recruitment Department"
-        },
-        {
-            "fieldname": "designation",
-            "fieldtype": "Link",
-            "label": "Designation",
-            "options": "Recruitment Designation"
-        },
-        {
-            "fieldname": "theme",
-            "fieldtype": "Link",
-            "label": "Theme",
-            "options": "Theme Master"
-        },
-        {
-            "fieldname": "geo",
-            "fieldtype": "Link",
-            "label": "Geo",
-            "options": "Geo Master"
-        },
-        {
-            "fieldname": "column_break_dxpv",
-            "fieldtype": "Column Break"
-        },
-        {
-            "fieldname": "location",
-            "fieldtype": "Link",
-            "label": "Location",
-            "options": "Recruitment Location"
-        },
-        {
-            "fieldname": "experience",
-            "fieldtype": "Data",
-            "label": "Experience",
-            "options": "Experience Years"
-        },
-        {
-            "fieldname": "employment_type",
-            "fieldtype": "Select",
-            "label": "Employment Type",
-            "options": "\nFull-time\nPart-time\nContract"
-        },
-        {
-            "collapsible": 1,
-            "fieldname": "references_section",
-            "fieldtype": "Section Break",
-            "label": "References"
-        },
-        {
-            "fieldname": "staffing_plan",
-            "fieldtype": "Data",
-            "label": "Staffing Plan",
-            "read_only": 1
-        },
-        {
-            "depends_on": "staffing_plan",
-            "fieldname": "planned_vacancies",
-            "fieldtype": "Int",
-            "label": "Planned number of Positions",
-            "read_only": 1
-        },
-        {
-            "fieldname": "job_requisition",
-            "fieldtype": "Data",
-            "label": "Job Requisition",
-            "read_only": 1
-        },
-        {
-            "depends_on": "job_requisition",
-            "fetch_from": "job_requisition.no_of_positions",
-            "fieldname": "vacancies",
-            "fieldtype": "Int",
-            "label": "Vacancies",
-            "read_only": 1
-        },
-        {
-            "fieldname": "section_break_6",
-            "fieldtype": "Section Break"
-        },
-        {
-            "default": "0",
-            "fieldname": "publish",
-            "fieldtype": "Check",
-            "label": "Publish on website"
-        },
-        {
-            "depends_on": "publish",
-            "fieldname": "route",
-            "fieldtype": "Data",
-            "label": "Route",
-            "unique": 1
-        },
-        {
-            "default": "1",
-            "depends_on": "publish",
-            "description": "If enabled, the total no. of applications received for this opening will be displayed on the website",
-            "fieldname": "publish_applications_received",
-            "fieldtype": "Check",
-            "label": "Publish Applications Received"
-        },
-        {
-            "fieldname": "column_break_12",
-            "fieldtype": "Column Break"
-        },
-        {
-            "depends_on": "publish",
-            "description": "Route to the custom Job Application Webform",
-            "fieldname": "job_application_route",
-            "fieldtype": "Data",
-            "label": "Job Application Route",
-            "length": 500
-        },
-        {
-            "fieldname": "section_break_14",
-            "fieldtype": "Section Break"
-        },
-        {
-            "description": "Job profile, qualifications required etc.",
-            "fieldname": "description",
-            "fieldtype": "Text Editor",
-            "in_list_view": 1,
-            "label": "Description"
-        },
-        {
-            "collapsible": 1,
-            "fieldname": "section_break_16",
-            "fieldtype": "Section Break"
-        },
-        {
-            "fieldname": "currency",
-            "fieldtype": "Data",
-            "label": "Currency"
-        },
-        {
-            "fieldname": "lower_range",
-            "fieldtype": "Currency",
-            "label": "Lower Range",
-            "options": "currency",
-            "precision": "0"
-        },
-        {
-            "fieldname": "upper_range",
-            "fieldtype": "Currency",
-            "label": "Upper Range",
-            "options": "currency",
-            "precision": "0"
-        },
-        {
-            "fieldname": "column_break_20",
-            "fieldtype": "Column Break"
-        },
-        {
-            "default": "Month",
-            "fieldname": "salary_per",
-            "fieldtype": "Select",
-            "label": "Salary Paid Per",
-            "options": "Month\nYear"
-        },
-        {
-            "default": "0",
-            "fieldname": "publish_salary_range",
-            "fieldtype": "Check",
-            "label": "Publish Salary Range"
-        }
-    ],
-    "has_web_view": 1,
-    "icon": "fa fa-bookmark",
-    "is_published_field": "publish",
-    "links": [],
-    "modified": "2026-05-19 15:15:33.404967",
-    "modified_by": "Administrator",
-    "module": "Ms Calendar",
-    "name": "Job Opening",
-    "naming_rule": "Expression",
-    "owner": "Administrator",
-    "permissions": [
-        {
-            "create": 1,
-            "delete": 1,
-            "email": 1,
-            "export": 1,
-            "print": 1,
-            "read": 1,
-            "report": 1,
-            "role": "System Manager",
-            "share": 1,
-            "write": 1
-        }
-    ],
-    "row_format": "Dynamic",
-    "sort_field": "creation",
-    "sort_order": "ASC",
-    "states": [
-        {
-            "color": "Green",
-            "title": "Open"
-        },
-        {
-            "color": "Gray",
-            "title": "Closed"
-        }
-    ],
-    "title_field": "job_title",
-    "track_changes": 1,
-    "track_seen": 1,
-    "track_views": 1
+ "actions": [],
+ "allow_guest_to_view": 1,
+ "allow_import": 1,
+ "autoname": "APF-OPNf-.YYYY.-.####",
+ "creation": "2026-05-12 11:13:39.610185",
+ "default_view": "List",
+ "description": "Description of a Job Opening",
+ "doctype": "DocType",
+ "document_type": "Document",
+ "engine": "InnoDB",
+ "field_order": [
+  "job_details_section",
+  "job_title",
+  "status",
+  "column_break_5",
+  "posted_on",
+  "closes_on",
+  "section_break_nngy",
+  "unit",
+  "department",
+  "designation",
+  "theme",
+  "geo",
+  "column_break_dxpv",
+  "location",
+  "experience",
+  "employment_type",
+  "references_section",
+  "staffing_plan",
+  "planned_vacancies",
+  "job_requisition",
+  "vacancies",
+  "section_break_6",
+  "publish",
+  "route",
+  "publish_applications_received",
+  "column_break_12",
+  "job_application_route",
+  "section_break_14",
+  "description",
+  "section_break_16",
+  "currency",
+  "lower_range",
+  "upper_range",
+  "column_break_20",
+  "salary_per",
+  "publish_salary_range"
+ ],
+ "fields": [
+  {
+   "fieldname": "job_details_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "job_title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Job Title",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_5",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Open\nClosed"
+  },
+  {
+   "default": "Now",
+   "fieldname": "posted_on",
+   "fieldtype": "Datetime",
+   "label": "Posted On"
+  },
+  {
+   "depends_on": "eval:doc.status == 'Open'",
+   "description": "If set, the job opening will be closed automatically after this date",
+   "fieldname": "closes_on",
+   "fieldtype": "Date",
+   "label": "Closes On"
+  },
+  {
+   "fieldname": "section_break_nngy",
+   "fieldtype": "Section Break",
+   "label": "Company Details"
+  },
+  {
+   "fieldname": "unit",
+   "fieldtype": "Link",
+   "label": "Unit",
+   "options": "Recruitment Units"
+  },
+  {
+   "fieldname": "department",
+   "fieldtype": "Link",
+   "label": "Sub Unit",
+   "options": "Recruitment Department"
+  },
+  {
+   "fieldname": "designation",
+   "fieldtype": "Link",
+   "label": "Designation",
+   "options": "Recruitment Designation"
+  },
+  {
+   "fieldname": "theme",
+   "fieldtype": "Link",
+   "label": "Theme",
+   "options": "Theme Master"
+  },
+  {
+   "fieldname": "geo",
+   "fieldtype": "Link",
+   "label": "Geo",
+   "options": "Geo Master"
+  },
+  {
+   "fieldname": "column_break_dxpv",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "location",
+   "fieldtype": "Link",
+   "label": "Location",
+   "options": "Recruitment Location"
+  },
+  {
+   "fieldname": "experience",
+   "fieldtype": "Data",
+   "label": "Experience",
+   "options": "Experience Years"
+  },
+  {
+   "fieldname": "employment_type",
+   "fieldtype": "Select",
+   "label": "Employment Type",
+   "options": "\nFull-time\nPart-time\nContract"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "references_section",
+   "fieldtype": "Section Break",
+   "hidden": 1,
+   "label": "References"
+  },
+  {
+   "fieldname": "staffing_plan",
+   "fieldtype": "Data",
+   "label": "Staffing Plan",
+   "read_only": 1
+  },
+  {
+   "depends_on": "staffing_plan",
+   "fieldname": "planned_vacancies",
+   "fieldtype": "Int",
+   "label": "Planned number of Positions",
+   "read_only": 1
+  },
+  {
+   "fieldname": "job_requisition",
+   "fieldtype": "Data",
+   "label": "Job Requisition",
+   "read_only": 1
+  },
+  {
+   "depends_on": "job_requisition",
+   "fetch_from": "job_requisition.no_of_positions",
+   "fieldname": "vacancies",
+   "fieldtype": "Int",
+   "label": "Vacancies",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_6",
+   "fieldtype": "Section Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "publish",
+   "fieldtype": "Check",
+   "label": "Publish on website"
+  },
+  {
+   "depends_on": "publish",
+   "fieldname": "route",
+   "fieldtype": "Data",
+   "label": "Route",
+   "unique": 1
+  },
+  {
+   "default": "1",
+   "depends_on": "publish",
+   "description": "If enabled, the total no. of applications received for this opening will be displayed on the website",
+   "fieldname": "publish_applications_received",
+   "fieldtype": "Check",
+   "label": "Publish Applications Received"
+  },
+  {
+   "fieldname": "column_break_12",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "publish",
+   "description": "Route to the custom Job Application Webform",
+   "fieldname": "job_application_route",
+   "fieldtype": "Data",
+   "label": "Job Application Route",
+   "length": 500
+  },
+  {
+   "fieldname": "section_break_14",
+   "fieldtype": "Section Break"
+  },
+  {
+   "description": "Job profile, qualifications required etc.",
+   "fieldname": "description",
+   "fieldtype": "Text Editor",
+   "in_list_view": 1,
+   "label": "Description"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_16",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Data",
+   "label": "Currency"
+  },
+  {
+   "fieldname": "lower_range",
+   "fieldtype": "Currency",
+   "label": "Lower Range",
+   "options": "currency",
+   "precision": "0"
+  },
+  {
+   "fieldname": "upper_range",
+   "fieldtype": "Currency",
+   "label": "Upper Range",
+   "options": "currency",
+   "precision": "0"
+  },
+  {
+   "fieldname": "column_break_20",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Month",
+   "fieldname": "salary_per",
+   "fieldtype": "Select",
+   "label": "Salary Paid Per",
+   "options": "Month\nYear"
+  },
+  {
+   "default": "0",
+   "fieldname": "publish_salary_range",
+   "fieldtype": "Check",
+   "label": "Publish Salary Range"
+  }
+ ],
+ "has_web_view": 1,
+ "icon": "fa fa-bookmark",
+ "is_published_field": "publish",
+ "links": [],
+ "modified": "2026-06-10 14:49:35.330111",
+ "modified_by": "Administrator",
+ "module": "Ms Calendar",
+ "name": "Job Opening",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "ASC",
+ "states": [
+  {
+   "color": "Green",
+   "title": "Open"
+  },
+  {
+   "color": "Gray",
+   "title": "Closed"
+  }
+ ],
+ "title_field": "job_title",
+ "track_changes": 1,
+ "track_seen": 1,
+ "track_views": 1
 }

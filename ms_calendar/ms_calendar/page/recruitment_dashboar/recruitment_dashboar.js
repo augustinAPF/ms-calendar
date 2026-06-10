@@ -24,7 +24,7 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 		return 'pipe';
 	}
 	const SC = {
-		offer: { bg: '#DDEBF7', txt: '#1F497D', brd: '#BDD7EE', dot: '#1F497D' },
+		offer: { bg: '#e7e7e7ff', txt: '#1F497D', brd: '#BDD7EE', dot: '#1F497D' },
 		reject: { bg: '#DDEBF7', txt: '#1F497D', brd: '#BDD7EE', dot: '#1F497D' },
 		hold: { bg: '#DDEBF7', txt: '#1F497D', brd: '#BDD7EE', dot: '#1F497D' },
 		doc: { bg: '#DDEBF7', txt: '#1F497D', brd: '#BDD7EE', dot: '#1F497D' },
@@ -54,6 +54,7 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 		{ label: 'Custom Range', key: 'custom' },
 	];
 	let activeFilter = 'all', customFrom = '', customTo = '';
+	let activeStatuses = [], activeUnits = [];
 
 	// ── Unit config ───────────────────────────────────────────────────────────
 	const UNITS = [
@@ -269,6 +270,57 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 	// ── CSS ───────────────────────────────────────────────────────────────────
 	const S = document.createElement('style');
 	S.textContent = `
+	/* ── Opening animations ── */
+	@keyframes rdFadeUp  { from{opacity:0;transform:translateY(22px)} to{opacity:1;transform:translateY(0)} }
+	@keyframes rdFadeIn  { from{opacity:0} to{opacity:1} }
+	@keyframes rdLoader  { 0%{transform:translateX(-100%)} 100%{transform:translateX(300%)} }
+	@keyframes rdProgress{ 0%{width:0%} 80%{width:85%} 100%{width:100%} }
+	@keyframes rdSlideIn { from{opacity:0;transform:translateY(32px) scale(.97)} to{opacity:1;transform:translateY(0) scale(1)} }
+	.rd-anim-hdr { animation:rdFadeUp .55s cubic-bezier(.25,.46,.45,.94) .1s both; }
+	.rd-anim-kpi { animation:rdFadeUp .5s cubic-bezier(.25,.46,.45,.94) .22s both; }
+	.rd-anim-filter { animation:rdFadeUp .5s .3s both; }
+	.rd-ucard { animation:rdSlideIn .5s cubic-bezier(.34,1.2,.64,1) both; }
+	.rd-ucard:nth-child(1) { animation-delay:.35s; }
+	.rd-ucard:nth-child(2) { animation-delay:.45s; }
+	.rd-ucard:nth-child(3) { animation-delay:.55s; }
+	.rd-ucard:nth-child(4) { animation-delay:.65s; }
+	.rd-hub-charts { animation:rdFadeUp .6s .75s both; }
+	/* ── Splash overlay ── */
+	#rd-splash {
+		position:fixed; inset:0; z-index:9999;
+		background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 50%,#0f172a 100%);
+		display:flex; flex-direction:column; align-items:center; justify-content:center;
+		transition:opacity .5s ease; pointer-events:none;
+	}
+	.rd-splash-badge {
+		font-size:11px; font-weight:700; letter-spacing:.18em; text-transform:uppercase;
+		color:rgba(255,255,255,.4); margin-bottom:12px;
+		animation:rdFadeIn .6s .2s both;
+	}
+	.rd-splash-welcome {
+		font-size:14px; font-weight:600; letter-spacing:.06em; text-transform:uppercase;
+		color:#2c7db8; margin-bottom:10px; animation:rdFadeUp .5s .25s both;
+	}
+	.rd-splash-title {
+		font-size:36px; font-weight:900; color:#fff; letter-spacing:-.025em; line-height:1.1;
+		text-align:center; animation:rdFadeUp .6s .35s both;
+	}
+	.rd-splash-quote {
+		font-size:13.5px; font-style:italic; color:rgba(255,255,255,.55);
+		margin-top:18px; max-width:380px; text-align:center; line-height:1.65;
+		animation:rdFadeIn .8s .65s both;
+	}
+	.rd-splash-quote::before { content:'"'; font-size:20px; color:#2c7db8; vertical-align:-.1em; margin-right:2px; }
+	.rd-splash-quote::after  { content:'"'; font-size:20px; color:#2c7db8; vertical-align:-.1em; margin-left:2px; }
+	.rd-splash-bar {
+		margin-top:32px; width:220px; height:3px;
+		background:rgba(255,255,255,.1); border-radius:3px; overflow:hidden;
+		animation:rdFadeIn .4s .6s both;
+	}
+	.rd-splash-fill {
+		height:100%; width:0%; background:linear-gradient(90deg,#1F497D,#2c7db8,#4a9fd4); border-radius:3px;
+		animation:rdProgress 9.5s .4s cubic-bezier(.4,0,.2,1) forwards;
+	}
 	.rd-wrap {
 		background:${BG}; min-height:calc(100vh - 60px);
 		margin:-15px -15px 0; padding:0 0 80px;
@@ -373,6 +425,17 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 		background:${AC}; color:#fff; border:none; cursor:pointer; transition:opacity .15s;
 	}
 	.rd-apply:hover { opacity:.85; }
+	/* ── unit & status filters ── */
+	.rd-droprow {
+		display:flex; align-items:center; gap:10px; margin-top:10px; flex-wrap:wrap;
+	}
+	.rd-drop {
+		padding:6px 12px; border-radius:8px; font-size:12px; font-weight:600;
+		border:1px solid ${BORD}; background:#fff; color:${T1};
+		cursor:pointer; min-width:140px; outline:none; transition:border-color .15s;
+	}
+	.rd-drop:focus { border-color:${AC}; box-shadow:0 0 0 3px ${ACG}.08); }
+	.rd-drop-lbl { font-size:11px; font-weight:700; color:${T2}; text-transform:uppercase; letter-spacing:.06em; }
 	/* ── wave decoration on unit cards ── */
 	.rd-ucard-wave {
 		position:absolute; bottom:0; left:0; right:0; width:100%;
@@ -470,6 +533,10 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 	.rd-chart-hdr { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:18px; }
 	.rd-chart-ttl { font-size:14px; font-weight:700; color:${T1}; }
 	.rd-chart-sub { font-size:12px; color:${T2}; }
+	/* ── hub analytics grid ── */
+	.rd-hub-charts { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:32px; }
+	.rd-hub-charts .rd-chart-card { margin-bottom:0; }
+	.rd-hub-charts .span2 { grid-column:span 2; }
 	/* ── status grid ── */
 	.rd-sgrid { display:grid; grid-template-columns:repeat(6,1fr); gap:12px; margin-bottom:24px; }
 	.rd-scard {
@@ -618,11 +685,143 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 	.rd-tname { font-weight:600; color:${AC}; }
 	.rd-spill { display:inline-block; padding:3px 10px; border-radius:20px; font-size:10.5px; font-weight:700; border:1px solid; white-space:nowrap; }
 	.rd-nodata { padding:60px; text-align:center; color:${T2}; font-size:14px; }
+	/* ── filter bar (one-line) ── */
+	.rd-filter-bar {
+		display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+		padding:12px 32px; border-top:1px solid ${BORD}; background:#fafbff;
+	}
+	.rd-fitem { display:flex; flex-direction:column; gap:3px; }
+	.rd-fitem-row { display:flex; align-items:center; gap:8px; }
+	.rd-filter-divider { width:1px; height:32px; background:${BORD}; flex-shrink:0; }
+	/* ── refined multi-select ── */
+	.rd-ms { position:relative; display:inline-block; }
+	.rd-ms-btn {
+		display:flex; align-items:center; gap:8px; height:38px;
+		padding:0 10px 0 14px; border-radius:10px;
+		border:1.5px solid ${BORD}; background:#fff;
+		cursor:pointer; min-width:164px; max-width:260px;
+		transition:border-color .18s, box-shadow .18s, background .15s;
+		user-select:none; box-shadow:0 1px 3px rgba(0,0,0,.05);
+	}
+	.rd-ms-btn:hover { border-color:${ACG}.5); background:#fafcff; }
+	.rd-ms-btn.open {
+		border-color:${AC}; background:#fff;
+		box-shadow:0 0 0 3px ${ACG}.1), 0 1px 4px rgba(0,0,0,.04);
+	}
+	.rd-ms-lbl { flex:1; font-size:13px; font-weight:600; color:${T1}; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+	.rd-ms-badge {
+		display:none; min-width:20px; height:20px; padding:0 6px;
+		border-radius:10px; background:${AC}; color:#fff;
+		font-size:10px; font-weight:800; align-items:center; justify-content:center; flex-shrink:0;
+	}
+	.rd-ms-badge.show { display:inline-flex; }
+	.rd-ms-chev {
+		width:15px; height:15px; flex-shrink:0; color:${T3};
+		transition:transform .22s cubic-bezier(.4,0,.2,1), color .15s;
+	}
+	.rd-ms-btn.open .rd-ms-chev { transform:rotate(180deg); color:${AC}; }
+	/* dropdown panel */
+	.rd-ms-panel {
+		position:absolute; top:calc(100% + 6px); left:0;
+		min-width:270px; width:max-content; max-width:360px;
+		display:flex; flex-direction:column; overflow:hidden;
+		background:#fff; border:1px solid ${BORD}; border-radius:14px;
+		box-shadow:0 20px 48px rgba(0,0,0,.13), 0 4px 12px rgba(0,0,0,.06);
+		z-index:600;
+		opacity:0; transform:translateY(-8px) scale(.98);
+		pointer-events:none;
+		transition:opacity .18s ease, transform .2s cubic-bezier(.34,1.2,.64,1);
+	}
+	.rd-ms-panel.open { opacity:1; transform:translateY(0) scale(1); pointer-events:all; }
+	/* search */
+	.rd-ms-srchwrap { padding:10px 10px 8px; border-bottom:1px solid ${BORD}; flex-shrink:0; background:#fafbff; }
+	.rd-ms-srch {
+		width:100%; padding:8px 12px 8px 36px; border-radius:8px; font-size:13px;
+		border:1.5px solid ${BORD}; outline:none; color:${T1}; background:#fff;
+		transition:border-color .15s; box-sizing:border-box;
+		background-image:url("data:image/svg+xml,%3Csvg width='15' height='15' fill='none' stroke='%2394a3b8' stroke-width='2' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E");
+		background-repeat:no-repeat; background-position:11px center;
+	}
+	.rd-ms-srch:focus { border-color:${AC}; box-shadow:0 0 0 3px ${ACG}.08); }
+	/* options list */
+	.rd-ms-opts { overflow-y:auto; max-height:240px; padding:6px; }
+	.rd-ms-opts::-webkit-scrollbar { width:4px; }
+	.rd-ms-opts::-webkit-scrollbar-thumb { background:#dde3ef; border-radius:4px; }
+	/* each option — no checkbox boxes, just left-border + checkmark */
+	.rd-ms-opt {
+		display:flex; align-items:center; justify-content:space-between; gap:10px;
+		padding:9px 12px 9px 14px; border-radius:9px; cursor:pointer;
+		border-left:3px solid transparent;
+		transition:background .12s, border-color .12s;
+		user-select:none;
+	}
+	.rd-ms-opt:hover { background:#f2f6ff; border-left-color:#bdd7ee; }
+	.rd-ms-opt.selected { background:#EBF3FB; border-left-color:${AC}; }
+	.rd-ms-optlbl { font-size:13px; font-weight:500; color:${T1}; flex:1; line-height:1.35; }
+	.rd-ms-opt.selected .rd-ms-optlbl { font-weight:700; color:${AC}; }
+	.rd-ms-optchk {
+		display:none; width:15px; height:15px; flex-shrink:0;
+		color:${AC}; stroke-width:2.5;
+	}
+	.rd-ms-opt.selected .rd-ms-optchk { display:block; }
+	.rd-ms-empty { padding:20px; text-align:center; color:${T3}; font-size:13px; }
+	/* footer */
+	.rd-ms-foot {
+		padding:8px 14px; border-top:1px solid ${BORD}; flex-shrink:0;
+		display:flex; align-items:center; justify-content:space-between;
+		background:#fafbff;
+	}
+	.rd-ms-selall {
+		font-size:12px; font-weight:600; color:${T2}; cursor:pointer;
+		padding:4px 10px; border-radius:6px; transition:all .12s;
+	}
+	.rd-ms-selall:hover { background:#eef2f7; color:${T1}; }
+	.rd-ms-clr {
+		font-size:12px; font-weight:700; color:${AC}; cursor:pointer;
+		padding:4px 10px; border-radius:6px; transition:all .12s;
+	}
+	.rd-ms-clr:hover { background:${ACG}.08); }
+	/* ── summary cards ── */
+	.rd-sum-cards { display:grid; grid-template-columns:repeat(5,1fr); gap:14px; margin-bottom:24px; }
+	.rd-sum-card {
+		background:#fff; border:1.5px solid ${BORD}; border-radius:16px;
+		padding:16px 18px; display:flex; align-items:center; gap:14px;
+		cursor:pointer; transition:all .22s; box-shadow:0 2px 8px rgba(0,0,0,.04);
+	}
+	.rd-sum-card:hover { border-color:${AC}; box-shadow:0 8px 24px ${ACG}.14); transform:translateY(-3px); }
+	.rd-sum-ico { width:46px; height:46px; border-radius:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+	.rd-sum-body { flex:1; min-width:0; }
+	.rd-sum-v { font-size:28px; font-weight:900; line-height:1; color:${T1}; }
+	.rd-sum-k { font-size:11.5px; font-weight:600; color:${T2}; margin-top:4px; }
+	.rd-sum-hint { font-size:10px; color:${T3}; margin-top:5px; }
 	`;
 	document.head.appendChild(S);
 
 	// ── DOM shell ─────────────────────────────────────────────────────────────
+	const SPLASH_QUOTES = [
+		'Every great hire starts with a great process.',
+		'Building tomorrow\'s team, one candidate at a time.',
+		'Finding the right people to make the difference.',
+		'Great teams don\'t happen by accident — they\'re built with purpose.',
+		'The right talent can transform an organisation.',
+		'People are our greatest asset.',
+		'Every interview is an opportunity to change someone\'s story.',
+		'Connecting talent with purpose.',
+		'Empowering communities through the right people.',
+		'Excellence in recruitment, excellence in impact.',
+		'One good hire can change everything.',
+		'Invest in people — they are the foundation of every mission.',
+	];
+	const _splashQuote = SPLASH_QUOTES[Math.floor(Math.random() * SPLASH_QUOTES.length)];
+
 	$(wrapper).find('.page-content').append(`
+		<div id="rd-splash">
+			<div class="rd-splash-badge">Azim Premji Foundation</div>
+			<div class="rd-splash-welcome">&#x1F44B; Welcome to</div>
+			<div class="rd-splash-title">Recruitment Dashboard</div>
+			<div class="rd-splash-quote">${_splashQuote}</div>
+			<div class="rd-splash-bar"><div class="rd-splash-fill"></div></div>
+		</div>
 		<div class="rd-wrap">
 			<div id="rd-front"></div>
 			<div id="rd-detail"  style="display:none"></div>
@@ -630,6 +829,12 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 			<div id="rd-profile" style="display:none"></div>
 		</div>
 	`);
+
+	// Dismiss splash after 10 seconds
+	setTimeout(function () {
+		var sp = document.getElementById('rd-splash');
+		if (sp) { sp.style.opacity = '0'; setTimeout(function () { if (sp.parentNode) sp.parentNode.removeChild(sp); }, 500); }
+	}, 10000);
 
 	const $front = $('#rd-front');
 	const $detail = $('#rd-detail');
@@ -672,7 +877,12 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 
 	function getFilteredData(ui) {
 		if (!store[ui]) return { rows: [], counts: {} };
-		const rows = filterByDate(store[ui].rows, activeFilter);
+		let rows = filterByDate(store[ui].rows, activeFilter);
+		if (activeStatuses.length) {
+			rows = rows.filter(function (r) {
+				return activeStatuses.indexOf(r[UNITS[ui].status_field] || 'New Applicant') !== -1;
+			});
+		}
 		const counts = {};
 		rows.forEach(function (r) {
 			const s = r[UNITS[ui].status_field] || 'New Applicant';
@@ -682,21 +892,162 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 	}
 
 	function updateFrontStats() {
-		let total = 0, offers = 0;
+		let total = 0, offers = 0, rejects = 0, newApps = 0, inTeam = 0;
+		const RW = ['reject', 'blocklist', 'regret'];
+		const JW = ['join', 'accept'];
+
+		// Collect all statuses for the multi-select menu
+		const allStatuses = {};
+		UNITS.forEach(function (unit, ui) {
+			if (!store[ui]) return;
+			filterByDate(store[ui].rows, activeFilter).forEach(function (r) {
+				const s = r[unit.status_field] || 'New Applicant';
+				allStatuses[s] = true;
+			});
+		});
+		const sopts = document.getElementById('rd-status-opts');
+		if (sopts) {
+			const sortedStatuses = Object.keys(allStatuses).sort();
+			sopts.innerHTML = sortedStatuses.length ? sortedStatuses.map(function (s) {
+				const sel = activeStatuses.indexOf(s) !== -1 ? ' selected' : '';
+				return '<div class="rd-ms-opt' + sel + '" data-val="' + s.replace(/"/g, '&quot;') + '">' +
+					'<span class="rd-ms-optlbl">' + s + '</span>' +
+					'<svg class="rd-ms-optchk" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>' +
+					'</div>';
+			}).join('') : '<div class="rd-ms-empty">No statuses yet — data is loading</div>';
+		}
+
 		UNITS.forEach(function (unit, ui) {
 			if (!store[ui]) return;
 			const { rows, counts } = getFilteredData(ui);
+			const card = document.querySelector('.rd-ucard[data-ui="' + ui + '"]');
+			const hidden = activeUnits.length > 0 && activeUnits.indexOf(ui) === -1;
+			if (card) card.style.display = hidden ? 'none' : '';
 			const el = document.getElementById('unum-' + ui);
-			if (el) countUp(el, rows.length);
-			total += rows.length;
-			offers += unit.offerStatuses.reduce(function (s, st) { return s + (counts[st] || 0); }, 0);
+			if (el) countUp(el, hidden ? 0 : rows.length);
+			if (!hidden) {
+				total += rows.length;
+				offers += unit.offerStatuses.reduce(function (s, st) { return s + (counts[st] || 0); }, 0);
+				Object.keys(counts).forEach(function (s) {
+					const sl = s.toLowerCase();
+					if (RW.some(function (w) { return sl.includes(w); })) rejects += counts[s];
+					if (JW.some(function (w) { return sl.includes(w); })) inTeam  += counts[s];
+					if (sl === 'new applicant') newApps += counts[s];
+				});
+			}
 		});
 		const totalEl = document.getElementById('gs-total');
 		const offerEl = document.getElementById('gs-offers');
-		const convEl = document.getElementById('gs-conv');
+		const convEl  = document.getElementById('gs-conv');
 		if (totalEl) countUp(totalEl, total);
 		if (offerEl) countUp(offerEl, offers);
 		if (convEl) convEl.textContent = total > 0 ? (offers / total * 100).toFixed(1) + '%' : '—';
+
+		const sumTotalEl  = document.getElementById('gs-total-all');
+		const sumOfferEl  = document.getElementById('gs-offers-all');
+		const sumRejectEl = document.getElementById('gs-rejects-all');
+		const sumNewEl    = document.getElementById('gs-new-all');
+		const sumTeamEl   = document.getElementById('gs-team-all');
+		if (sumTotalEl)  countUp(sumTotalEl, total);
+		if (sumOfferEl)  countUp(sumOfferEl, offers);
+		if (sumRejectEl) countUp(sumRejectEl, rejects);
+		if (sumNewEl)    countUp(sumNewEl, newApps);
+		if (sumTeamEl)   countUp(sumTeamEl, inTeam);
+
+		drawFrontCharts();
+	}
+
+	// ── Hub analytics charts (update with date filter) ────────────────────────
+	function drawFrontCharts() {
+		const FIN_M = ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'];
+
+		// Collect data across all units
+		const unitLabels = UNITS.map(function (u) { return u.short; });
+		const unitCounts = UNITS.map(function (_u, ui) {
+			return store[ui] ? getFilteredData(ui).rows.length : 0;
+		});
+
+		// Monthly trend (all units combined)
+		const monthMap = {};
+		UNITS.forEach(function (_u, ui) {
+			if (!store[ui]) return;
+			getFilteredData(ui).rows.forEach(function (r) {
+				if (!r.creation) return;
+				const d = new Date(r.creation);
+				const mi = d.getMonth(), yr = d.getFullYear();
+				const mn = FIN_M[mi >= 3 ? mi - 3 : mi + 9];
+				const yr2 = mi >= 3 ? yr : yr + 1;
+				const k = mn + "'" + String(yr2).slice(2);
+				monthMap[k] = (monthMap[k] || 0) + 1;
+			});
+		});
+		const monthLabels = Object.keys(monthMap).sort(function (a, b) {
+			function ord(lbl) {
+				const p = lbl.split("'");
+				const mi = FIN_M.indexOf(p[0]), yr2 = parseInt('20' + p[1]);
+				return yr2 * 12 + (mi >= 9 ? mi - 9 : mi + 3);
+			}
+			return ord(a) - ord(b);
+		});
+		const monthValues = monthLabels.map(function (k) { return monthMap[k]; });
+
+		// Status distribution (top 10 across all units)
+		const statusMap = {};
+		UNITS.forEach(function (_u, ui) {
+			if (!store[ui]) return;
+			const { counts } = getFilteredData(ui);
+			Object.keys(counts).forEach(function (s) {
+				statusMap[s] = (statusMap[s] || 0) + counts[s];
+			});
+		});
+		const topStatuses = Object.keys(statusMap)
+			.sort(function (a, b) { return statusMap[b] - statusMap[a]; })
+			.slice(0, 10);
+		const statusValues = topStatuses.map(function (s) { return statusMap[s]; });
+
+		// Draw / redraw charts
+		const unitEl = document.getElementById('hub-chart-unit');
+		const trendEl = document.getElementById('hub-chart-trend');
+		const statusEl = document.getElementById('hub-chart-status');
+
+		if (unitEl && unitCounts.some(function (v) { return v > 0; })) {
+			unitEl.innerHTML = '';
+			try {
+				new frappe.Chart(unitEl, {
+					type: 'bar', height: 200,
+					colors: [AC, '#2c7db8', '#4a9fd4', '#6bb5e0'],
+					data: { labels: unitLabels, datasets: [{ name: 'Applications', values: unitCounts }] },
+					barOptions: { spaceRatio: 0.4 },
+					tooltipOptions: { formatTooltipY: function (v) { return v + ' applicants'; } }
+				});
+			} catch (e) { }
+		}
+
+		if (trendEl && monthLabels.length) {
+			trendEl.innerHTML = '';
+			try {
+				new frappe.Chart(trendEl, {
+					type: 'line', height: 220,
+					colors: [AC],
+					data: { labels: monthLabels, datasets: [{ name: 'Applications', values: monthValues }] },
+					lineOptions: { regionFill: 1, hideDots: monthLabels.length > 24 ? 1 : 0 },
+					tooltipOptions: { formatTooltipY: function (v) { return v + ' applications'; } }
+				});
+			} catch (e) { }
+		}
+
+		if (statusEl && topStatuses.length) {
+			statusEl.innerHTML = '';
+			try {
+				new frappe.Chart(statusEl, {
+					type: 'bar', height: 200,
+					colors: ['#2c7db8'],
+					data: { labels: topStatuses, datasets: [{ name: 'Count', values: statusValues }] },
+					barOptions: { spaceRatio: 0.3 },
+					tooltipOptions: { formatTooltipY: function (v) { return v + ' applicants'; } }
+				});
+			} catch (e) { }
+		}
 	}
 
 	// ── Front page ────────────────────────────────────────────────────────────
@@ -708,7 +1059,7 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 	];
 
 	$front.html(`
-		<div class="rd-header">
+		<div class="rd-header rd-anim-hdr">
 			<div class="rd-header-top">
 				<div class="rd-header-left">
 					<div class="rd-header-badge">
@@ -717,7 +1068,7 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 					</div>
 					<div class="rd-header-title">Recruitment Dashboard</div>
 				</div>
-				<div class="rd-hkpis">
+				<div class="rd-hkpis rd-anim-kpi">
 					<div class="rd-hkpi">
 						<div class="rd-hkpi-ico" style="background:#DDEBF7">
 							<svg fill="none" stroke="#1F497D" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -756,20 +1107,122 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 					</div>
 				</div>
 			</div>
-			<div class="rd-filter-row">
-				${DATE_FILTERS.map(function (f) {
-		return '<button class="rd-fpill' + (f.key === 'all' ? ' active' : '') + '" data-key="' + f.key + '">' + f.label + '</button>';
-	}).join('')}
-			</div>
-			<div class="rd-cdate" id="rd-cdate">
-				<span class="rd-cdate-lbl">From</span>
-				<input type="date" class="rd-dinput" id="rd-from" />
-				<span class="rd-cdate-lbl">To</span>
-				<input type="date" class="rd-dinput" id="rd-to" />
-				<button class="rd-apply" id="rd-apply-custom">Apply</button>
+			<div class="rd-filter-bar rd-anim-filter">
+				<div class="rd-fitem">
+					<span class="rd-drop-lbl">Date</span>
+					<select class="rd-drop" id="rd-date-filter" style="min-width:130px">
+						${DATE_FILTERS.map(function (f) { return '<option value="' + f.key + '">' + f.label + '</option>'; }).join('')}
+					</select>
+				</div>
+				<div class="rd-fitem" id="rd-cdate" style="display:none">
+					<span class="rd-drop-lbl">Range</span>
+					<div class="rd-fitem-row">
+						<input type="date" class="rd-dinput" id="rd-from" />
+						<span class="rd-drop-lbl" style="margin:0">to</span>
+						<input type="date" class="rd-dinput" id="rd-to" />
+						<button class="rd-apply" id="rd-apply-custom">Apply</button>
+					</div>
+				</div>
+				<div class="rd-filter-divider"></div>
+				<div class="rd-fitem">
+					<span class="rd-drop-lbl">Unit</span>
+					<div class="rd-ms" id="rd-unit-ms">
+						<div class="rd-ms-btn" id="rd-unit-btn">
+							<span class="rd-ms-lbl">All Units</span>
+							<span class="rd-ms-badge" id="rd-unit-badge"></span>
+							<svg class="rd-ms-chev" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+						</div>
+						<div class="rd-ms-panel" id="rd-unit-panel">
+							<div class="rd-ms-srchwrap"><input class="rd-ms-srch" type="text" placeholder="Search units…" id="rd-unit-srch" autocomplete="off" /></div>
+							<div class="rd-ms-opts" id="rd-unit-opts">
+								${UNITS.map(function (u, i) {
+									return '<div class="rd-ms-opt" data-val="' + i + '">' +
+										'<span class="rd-ms-optlbl">' + u.label + '</span>' +
+										'<svg class="rd-ms-optchk" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>' +
+										'</div>';
+								}).join('')}
+							</div>
+							<div class="rd-ms-foot">
+								<span class="rd-ms-selall" id="rd-unit-selall">Select all</span>
+								<span class="rd-ms-clr" id="rd-unit-clr">Clear all</span>
+							</div>
+						</div>
+					</div>
+				</div>
+				<div class="rd-fitem">
+					<span class="rd-drop-lbl">Status</span>
+					<div class="rd-ms" id="rd-status-ms">
+						<div class="rd-ms-btn" id="rd-status-btn">
+							<span class="rd-ms-lbl">All Statuses</span>
+							<span class="rd-ms-badge" id="rd-status-badge"></span>
+							<svg class="rd-ms-chev" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+						</div>
+						<div class="rd-ms-panel" id="rd-status-panel">
+							<div class="rd-ms-srchwrap"><input class="rd-ms-srch" type="text" placeholder="Search statuses…" id="rd-status-srch" autocomplete="off" /></div>
+							<div class="rd-ms-opts" id="rd-status-opts"></div>
+							<div class="rd-ms-foot">
+								<span class="rd-ms-selall" id="rd-status-selall">Select all</span>
+								<span class="rd-ms-clr" id="rd-status-clr">Clear all</span>
+							</div>
+						</div>
+					</div>
+				</div>
 			</div>
 		</div>
 		<div class="rd-body">
+			<div class="rd-section-hdr">Overview</div>
+			<div class="rd-sum-cards">
+				<div class="rd-sum-card" id="sum-total">
+					<div class="rd-sum-ico" style="background:#DDEBF7">
+						<svg fill="none" stroke="#1F497D" stroke-width="2" viewBox="0 0 24 24" width="24" height="24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+					</div>
+					<div class="rd-sum-body">
+						<div class="rd-sum-v" id="gs-total-all">—</div>
+						<div class="rd-sum-k">Total Applicants</div>
+						<div class="rd-sum-hint">Click to view all &rarr;</div>
+					</div>
+				</div>
+				<div class="rd-sum-card" id="sum-offers">
+					<div class="rd-sum-ico" style="background:#dcfce7">
+						<svg fill="none" stroke="#15803d" stroke-width="2" viewBox="0 0 24 24" width="24" height="24"><polyline points="20 6 9 17 4 12"/></svg>
+					</div>
+					<div class="rd-sum-body">
+						<div class="rd-sum-v" id="gs-offers-all">—</div>
+						<div class="rd-sum-k">Total Offers</div>
+						<div class="rd-sum-hint">Click to view &rarr;</div>
+					</div>
+				</div>
+				<div class="rd-sum-card" id="sum-rejects">
+					<div class="rd-sum-ico" style="background:#fee2e2">
+						<svg fill="none" stroke="#dc2626" stroke-width="2" viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+					</div>
+					<div class="rd-sum-body">
+						<div class="rd-sum-v" id="gs-rejects-all">—</div>
+						<div class="rd-sum-k">Total Rejects</div>
+						<div class="rd-sum-hint">Click to view &rarr;</div>
+					</div>
+				</div>
+				<div class="rd-sum-card" id="sum-new">
+					<div class="rd-sum-ico" style="background:#fef9c3">
+						<svg fill="none" stroke="#ca8a04" stroke-width="2" viewBox="0 0 24 24" width="24" height="24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+					</div>
+					<div class="rd-sum-body">
+						<div class="rd-sum-v" id="gs-new-all">—</div>
+						<div class="rd-sum-k">New Applicants</div>
+						<div class="rd-sum-hint">Click to view &rarr;</div>
+					</div>
+				</div>
+				<div class="rd-sum-card" id="sum-inteam">
+					<div class="rd-sum-ico" style="background:#e0f2fe">
+						<svg fill="none" stroke="#0369a1" stroke-width="2" viewBox="0 0 24 24" width="24" height="24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><polyline points="16 11 18 13 22 9"/></svg>
+					</div>
+					<div class="rd-sum-body">
+						<div class="rd-sum-v" id="gs-team-all">—</div>
+						<div class="rd-sum-k">In Team</div>
+						<div class="rd-sum-hint">Joined &amp; accepted &rarr;</div>
+					</div>
+				</div>
+			</div>
 			<div class="rd-section-hdr">Recruitment Units</div>
 			<div class="rd-units">
 				${UNITS.map(function (u, i) {
@@ -793,20 +1246,41 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 			'</div>';
 	}).join('')}
 			</div>
+			<div class="rd-section-hdr" style="margin-top:8px">Analytics</div>
+			<div class="rd-hub-charts">
+				<div class="rd-chart-card span2">
+					<div class="rd-chart-hdr">
+						<div class="rd-chart-ttl">Applications Over Time</div>
+						<div class="rd-chart-sub">Monthly trend — all units</div>
+					</div>
+					<div id="hub-chart-trend" style="min-height:180px"></div>
+				</div>
+				<div class="rd-chart-card">
+					<div class="rd-chart-hdr">
+						<div class="rd-chart-ttl">Applications by Unit</div>
+					</div>
+					<div id="hub-chart-unit" style="min-height:160px"></div>
+				</div>
+				<div class="rd-chart-card">
+					<div class="rd-chart-hdr">
+						<div class="rd-chart-ttl">Top Status Distribution</div>
+					</div>
+					<div id="hub-chart-status" style="min-height:160px"></div>
+				</div>
+			</div>
 		</div>
 	`);
 
 	$front.on('click', '.rd-ucard', function () {
 		showDetail(parseInt($(this).data('ui')));
 	});
-	$front.on('click', '.rd-fpill', function () {
-		activeFilter = $(this).data('key');
-		$front.find('.rd-fpill').removeClass('active');
-		$(this).addClass('active');
+	// Date select filter
+	$front.on('change', '#rd-date-filter', function () {
+		activeFilter = $(this).val();
 		if (activeFilter === 'custom') {
-			$('#rd-cdate').addClass('show');
+			$('#rd-cdate').show();
 		} else {
-			$('#rd-cdate').removeClass('show');
+			$('#rd-cdate').hide();
 			customFrom = ''; customTo = '';
 			updateFrontStats();
 		}
@@ -816,6 +1290,131 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 		customTo = $('#rd-to').val();
 		updateFrontStats();
 	});
+
+	// ── Multi-select helpers ──────────────────────────────────────────────────
+	function syncUnitBtn() {
+		var lbl = activeUnits.length === 0 ? 'All Units'
+			: activeUnits.length === 1 ? UNITS[activeUnits[0]].label
+			: activeUnits.length + ' Units';
+		$('#rd-unit-btn .rd-ms-lbl').text(lbl);
+		var $badge = $('#rd-unit-badge');
+		activeUnits.length > 0 ? $badge.text(activeUnits.length).addClass('show') : $badge.removeClass('show');
+	}
+	function syncStatusBtn() {
+		var lbl = activeStatuses.length === 0 ? 'All Statuses'
+			: activeStatuses.length === 1 ? activeStatuses[0]
+			: activeStatuses.length + ' Statuses';
+		$('#rd-status-btn .rd-ms-lbl').text(lbl);
+		var $badge = $('#rd-status-badge');
+		activeStatuses.length > 0 ? $badge.text(activeStatuses.length).addClass('show') : $badge.removeClass('show');
+	}
+	function closeAllPanels() {
+		$('.rd-ms-panel').removeClass('open');
+		$('.rd-ms-btn').removeClass('open');
+	}
+
+	// Unit trigger toggle
+	$front.on('click', '#rd-unit-btn', function (e) {
+		e.stopPropagation();
+		var isOpen = $('#rd-unit-panel').hasClass('open');
+		closeAllPanels();
+		if (!isOpen) {
+			$('#rd-unit-panel').addClass('open');
+			$('#rd-unit-btn').addClass('open');
+			setTimeout(function () { $('#rd-unit-srch').focus(); }, 80);
+		}
+	});
+	// Unit option click
+	$front.on('click', '#rd-unit-opts .rd-ms-opt', function (e) {
+		e.stopPropagation();
+		$(this).toggleClass('selected');
+		var val = parseInt($(this).data('val'));
+		var idx = activeUnits.indexOf(val);
+		if (idx === -1) activeUnits.push(val); else activeUnits.splice(idx, 1);
+		syncUnitBtn();
+		updateFrontStats();
+	});
+	// Unit search filter
+	$front.on('input', '#rd-unit-srch', function () {
+		var q = $(this).val().toLowerCase();
+		$('#rd-unit-opts .rd-ms-opt').each(function () {
+			$(this).toggle(!q || $(this).find('.rd-ms-optlbl').text().toLowerCase().includes(q));
+		});
+	});
+	// Unit select all
+	$front.on('click', '#rd-unit-selall', function (e) {
+		e.stopPropagation();
+		activeUnits = UNITS.map(function (_u, i) { return i; });
+		$('#rd-unit-opts .rd-ms-opt').addClass('selected');
+		syncUnitBtn();
+		updateFrontStats();
+	});
+	// Unit clear
+	$front.on('click', '#rd-unit-clr', function (e) {
+		e.stopPropagation();
+		activeUnits = [];
+		$('#rd-unit-opts .rd-ms-opt').removeClass('selected');
+		syncUnitBtn();
+		updateFrontStats();
+	});
+
+	// Status trigger toggle
+	$front.on('click', '#rd-status-btn', function (e) {
+		e.stopPropagation();
+		var isOpen = $('#rd-status-panel').hasClass('open');
+		closeAllPanels();
+		if (!isOpen) {
+			$('#rd-status-panel').addClass('open');
+			$('#rd-status-btn').addClass('open');
+			setTimeout(function () { $('#rd-status-srch').focus(); }, 80);
+		}
+	});
+	// Status option click
+	$front.on('click', '#rd-status-opts .rd-ms-opt', function (e) {
+		e.stopPropagation();
+		$(this).toggleClass('selected');
+		var val = $(this).data('val');
+		var idx = activeStatuses.indexOf(val);
+		if (idx === -1) activeStatuses.push(val); else activeStatuses.splice(idx, 1);
+		syncStatusBtn();
+		updateFrontStats();
+	});
+	// Status search filter
+	$front.on('input', '#rd-status-srch', function () {
+		var q = $(this).val().toLowerCase();
+		$('#rd-status-opts .rd-ms-opt').each(function () {
+			$(this).toggle(!q || $(this).find('.rd-ms-optlbl').text().toLowerCase().includes(q));
+		});
+	});
+	// Status select all
+	$front.on('click', '#rd-status-selall', function (e) {
+		e.stopPropagation();
+		activeStatuses = [];
+		$('#rd-status-opts .rd-ms-opt').each(function () {
+			$(this).addClass('selected');
+			activeStatuses.push($(this).data('val'));
+		});
+		syncStatusBtn();
+		updateFrontStats();
+	});
+	// Status clear
+	$front.on('click', '#rd-status-clr', function (e) {
+		e.stopPropagation();
+		activeStatuses = [];
+		$('#rd-status-opts .rd-ms-opt').removeClass('selected');
+		syncStatusBtn();
+		updateFrontStats();
+	});
+
+	// Summary card clicks
+	$front.on('click', '#sum-total',   function () { showAllUnitRecords('all',    'All Applicants'); });
+	$front.on('click', '#sum-offers',  function () { showAllUnitRecords('offer',  'Total Offers'); });
+	$front.on('click', '#sum-rejects', function () { showAllUnitRecords('reject', 'Total Rejects'); });
+	$front.on('click', '#sum-new',     function () { showAllUnitRecords('new',    'New Applicants'); });
+	$front.on('click', '#sum-inteam',  function () { showAllUnitRecords('inteam', 'In Team'); });
+
+	// Close all panels on outside click
+	$(document).on('click.rdms', function () { closeAllPanels(); });
 
 	// ── Fetch all units ───────────────────────────────────────────────────────
 	UNITS.forEach(function (unit, ui) {
@@ -1225,6 +1824,137 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 			.replace(/[^a-zA-Z0-9._-]/g, '_');
 		a.href = url; a.download = fname; a.click();
 		URL.revokeObjectURL(url);
+	}
+
+	// ── All-units records view (summary card clicks) ──────────────────────────
+	function showAllUnitRecords(filterType, title) {
+		const RW = ['reject', 'blocklist', 'regret'];
+		const JW = ['join', 'accept'];
+		var allRows = [];
+		UNITS.forEach(function (unit, ui) {
+			if (!store[ui]) return;
+			var { rows } = getFilteredData(ui);
+			if (filterType === 'offer') {
+				rows = rows.filter(function (r) {
+					return unit.offerStatuses.indexOf(r[unit.status_field] || 'New Applicant') !== -1;
+				});
+			} else if (filterType === 'reject') {
+				rows = rows.filter(function (r) {
+					var s = (r[unit.status_field] || 'New Applicant').toLowerCase();
+					return RW.some(function (w) { return s.includes(w); });
+				});
+			} else if (filterType === 'new') {
+				rows = rows.filter(function (r) {
+					return (r[unit.status_field] || 'New Applicant').toLowerCase() === 'new applicant';
+				});
+			} else if (filterType === 'inteam') {
+				rows = rows.filter(function (r) {
+					var s = (r[unit.status_field] || '').toLowerCase();
+					return JW.some(function (w) { return s.includes(w); });
+				});
+			}
+			rows.forEach(function (r) {
+				allRows.push(Object.assign({}, r, { _unit: unit, _ui: ui }));
+			});
+		});
+
+		$front.hide();
+		$records.show().html(`
+			<div class="rd-nav">
+				<button class="rd-back" id="rp-back">
+					<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+					Dashboard
+				</button>
+				<span class="rd-crumb">Recruitment &rsaquo; <b>${title}</b></span>
+				<span class="rd-nav-sp"></span>
+				<span class="rd-nav-date">${fmtDate()}</span>
+			</div>
+			<div class="rd-body">
+				<div class="rd-rpg-hero" style="background:linear-gradient(140deg,#0f172a 0%,#1F497D 55%,#2c7db8 100%);box-shadow:0 12px 40px rgba(31,73,125,.38)">
+					<div class="rd-rpg-unit">All Recruitment Units</div>
+					<div class="rd-rpg-title">${title}</div>
+					<div class="rd-rpg-meta">${allRows.length.toLocaleString('en-IN')} total records across all units</div>
+					<div class="rd-rpg-big">${allRows.length}</div>
+				</div>
+				<div class="rd-tcard">
+					<div class="rd-toolbar">
+						<span class="rd-tlabel">${title}</span>
+						<span class="rd-tcnt" id="rp-cnt">${allRows.length} records</span>
+						<input class="rd-srch" type="text" placeholder="Search name…" id="rp-srch" />
+						<button class="rd-export-btn" id="rp-export">
+							<svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+							Export CSV
+						</button>
+					</div>
+					<div class="rd-tbody-wrap" id="rp-body">${buildAllTable(allRows)}</div>
+					<div class="rd-tfoot">
+						<span id="rp-foot">Showing ${allRows.length} records</span>
+						<span>Click any row to open applicant profile</span>
+					</div>
+				</div>
+			</div>
+		`);
+
+		$records.find('#rp-back').on('click', function () {
+			$records.hide(); $front.show();
+			window.scrollTo({ top: 0, behavior: 'smooth' });
+		});
+		$records.find('#rp-srch').on('input', function () {
+			var q = $(this).val().toLowerCase().trim();
+			var f = q ? allRows.filter(function (r) {
+				var unit = r._unit;
+				var nameVal = (r[unit.nameField] || r.name || '').toLowerCase();
+				return nameVal.includes(q) || unit.columns.some(function (c) { return (r[c.field] || '').toLowerCase().includes(q); });
+			}) : allRows;
+			$records.find('#rp-body').html(buildAllTable(f));
+			$records.find('#rp-cnt').text(f.length + ' records');
+			$records.find('#rp-foot').text('Showing ' + f.length + ' of ' + allRows.length + ' records');
+		});
+		$records.find('#rp-export').on('click', function () {
+			var headers = ['#', 'Name', 'Unit', 'Status'];
+			var lines = [headers.join(',')];
+			allRows.forEach(function (r, i) {
+				var unit = r._unit;
+				var name = r[unit.nameField] || r.name || '';
+				var status = r[unit.status_field] || 'New Applicant';
+				lines.push([i + 1, '"' + name.replace(/"/g, '""') + '"', '"' + unit.short + '"', '"' + status.replace(/"/g, '""') + '"'].join(','));
+			});
+			var blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+			var url = URL.createObjectURL(blob);
+			var a = document.createElement('a');
+			a.href = url; a.download = title.replace(/[^a-zA-Z0-9._-]/g, '_') + '.csv'; a.click();
+			URL.revokeObjectURL(url);
+		});
+		$records.off('click', '.rd-tbl tbody tr').on('click', '.rd-tbl tbody tr', function () {
+			var name = $(this).data('name');
+			var ui = parseInt($(this).data('ui'));
+			if (!name || isNaN(ui)) return;
+			var unit = UNITS[ui];
+			var th = THEMES[ui];
+			var row = store[ui] && store[ui].rows.find(function (r) { return r.name === name; });
+			var status = row ? (row[unit.status_field] || 'New Applicant') : title;
+			showProfile(unit, name, status, th);
+		});
+		window.scrollTo({ top: 0, behavior: 'smooth' });
+	}
+
+	function buildAllTable(rows) {
+		if (!rows.length) return '<div class="rd-nodata">No records found.</div>';
+		var trs = rows.map(function (r, i) {
+			var unit = r._unit, ui = r._ui;
+			var sv = r[unit.status_field] || 'New Applicant';
+			var col = SC[sType(sv)];
+			var pill = '<span class="rd-spill" style="background:' + col.bg + ';color:' + col.txt + ';border-color:' + col.brd + '">' + sv + '</span>';
+			var unitPill = '<span class="rd-spill" style="background:#DDEBF7;color:#1F497D;border-color:#BDD7EE">' + unit.short + '</span>';
+			var name = r[unit.nameField] || r.name || '—';
+			return '<tr data-name="' + (r.name || '') + '" data-ui="' + ui + '">' +
+				'<td class="rd-tsno">' + (i + 1) + '</td>' +
+				'<td class="rd-tname" title="' + name + '">' + name + '</td>' +
+				'<td>' + unitPill + '</td>' +
+				'<td>' + pill + '</td>' +
+				'</tr>';
+		}).join('');
+		return '<table class="rd-tbl"><thead><tr><th>#</th><th>Name</th><th>Unit</th><th>Status</th></tr></thead><tbody>' + trs + '</tbody></table>';
 	}
 
 	// ── Keyboard navigation (Esc = go back) ──────────────────────────────────

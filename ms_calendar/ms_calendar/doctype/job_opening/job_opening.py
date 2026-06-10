@@ -99,11 +99,11 @@ class JobOpening(WebsiteGenerator):
 
         if old_doc.status == "Open" and self.status == "Closed":
             self.closes_on = None
-            if not self.closed_on:
-                self.closed_on = getdate()
+            if not self.closes_on:
+                self.closes_on = getdate()
 
         elif old_doc.status == "Closed" and self.status == "Open":
-            self.closed_on = None
+            self.closes_on = None
 
     def validate_dates(self):
         if self.status == "Open":

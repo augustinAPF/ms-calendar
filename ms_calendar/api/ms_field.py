@@ -1643,7 +1643,6 @@ comments/recommendations for the calibration process and final selection decisio
         _cal_part.replace_header('Content-Type', 'text/calendar; method=REQUEST; charset=utf-8')
         _mime_msg.attach(_cal_part)
 
-        _mime_b64      = base64.b64encode(_mime_msg.as_bytes()).decode('ascii')
         _mime_send_url = f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/sendMail"
         _mime_headers  = {
             "Authorization": headers["Authorization"],
@@ -1652,12 +1651,21 @@ comments/recommendations for the calibration process and final selection decisio
 
         _self_graph_sent = False
         try:
-            _r = requests.post(_mime_send_url, headers=_mime_headers, data=_mime_b64, timeout=30)
+            # Graph MIME endpoint: send raw MIME string (NOT base64 encoded)
+            _r = requests.post(
+                _mime_send_url,
+                headers=_mime_headers,
+                data=_mime_msg.as_string().encode('utf-8'),
+                timeout=30,
+            )
             _r.raise_for_status()
             _self_graph_sent = True
         except Exception as _se:
             try:
-                frappe.log_error(title="Organizer MIME calendar invite error", message=str(_se)[:1000])
+                frappe.log_error(
+                    title="Organizer MIME calendar invite error",
+                    message=(_r.text if hasattr(_r, 'text') else str(_se))[:2000],
+                )
             except Exception:
                 pass
 
@@ -1681,16 +1689,8 @@ comments/recommendations for the calibration process and final selection decisio
             except Exception:
                 pass
 
-        if not _self_graph_sent:
-            try:
-                frappe.sendmail(
-                    recipients=[Organizer_email],
-                    subject=calendar_subject,
-                    message=final_body,
-                    delayed=False,
-                )
-            except Exception:
-                pass
+        # No frappe.sendmail fallback — the event is already in the organizer's
+        # calendar and sending via Frappe would use the wrong "From" address.
 
     # If PATCH failed after all retries, fall back to a plain email to each interviewer
     # so they at least receive the interview details and feedback form link.
@@ -1898,20 +1898,54 @@ comments/recommendations for the calibration process and final selection decisio
                     except Exception:
                         pass
 
-            # Fallback: frappe.sendmail (last resort — email arrives but from Frappe server)
+            # Attempt 3: calendar-event fallback — uses Calendars.ReadWrite (no Mail.Send needed).
+            # Creates a lightweight event with only the candidate as attendee so the invite
+            # arrives FROM the organiser address (same as the interviewer calendar invite).
             if not graph_sent:
                 try:
-                    frappe.sendmail(
-                        recipients=[interviewee_email],
-                        subject=candidate_email_subject,
-                        message=candidate_email_body,
-                        delayed=False,
+                    _c3_create_url = (
+                        f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/events"
+                        f"?sendUpdates=none"
                     )
-                except Exception as _cfall:
+                    _c3_create_res = requests.post(
+                        _c3_create_url,
+                        headers=headers,
+                        json={
+                            "subject": candidate_email_subject,
+                            "start": {"dateTime": start_datetime, "timeZone": "Asia/Kolkata"},
+                            "end": {"dateTime": end_datetime, "timeZone": "Asia/Kolkata"},
+                            "body": {"contentType": "HTML", "content": candidate_email_body},
+                            "attendees": [],
+                            "showAs": "free",
+                        },
+                        timeout=30,
+                    )
+                    _c3_create_res.raise_for_status()
+                    _c3_eid = _c3_create_res.json()["id"]
+                    requests.patch(
+                        f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/events/{_c3_eid}"
+                        f"?sendUpdates=sendToAllAndSaveCopy",
+                        headers=headers,
+                        json={
+                            "body": {"contentType": "HTML", "content": candidate_email_body},
+                            "attendees": [
+                                {
+                                    "emailAddress": {
+                                        "address": interviewee_email,
+                                        "name": Applicants_name,
+                                    },
+                                    "type": "required",
+                                }
+                            ],
+                        },
+                        timeout=30,
+                    ).raise_for_status()
+                    graph_sent = True
+                except Exception as _c3_exc:
                     try:
                         frappe.log_error(
-                            title="Candidate Email Fallback Error",
-                            message=str(_cfall)[:2000],
+                            title="Candidate Email Calendar Fallback Error",
+                            message=str(_c3_exc)[:2000],
                         )
                     except Exception:
                         pass
