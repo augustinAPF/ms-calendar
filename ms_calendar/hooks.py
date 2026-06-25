@@ -15,6 +15,9 @@ doc_events = {
         "after_insert": "ms_calendar.ms_calendar.sms_utils.send_registration_form_after_insert",
         "on_update": "ms_calendar.ms_calendar.sms_utils.send_registration_form_on_update",
     },
+    "BGV Document": {
+        "after_insert": "ms_calendar.ms_calendar.doctype.bgv_request.bgv_request.on_document_upload"
+    },
 }
 
 # required_apps = []
