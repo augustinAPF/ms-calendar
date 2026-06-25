@@ -10,15 +10,13 @@ app_license = "mit"
 
 
 doc_events = {
-    "Field Offline Result": {
-        "after_insert": "ms_calendar.events.after_insert"
-    },
+    "Field Offline Result": {"after_insert": "ms_calendar.events.after_insert"},
     "Field Registration Form": {
         "after_insert": "ms_calendar.ms_calendar.sms_utils.send_registration_form_after_insert",
         "on_update": "ms_calendar.ms_calendar.sms_utils.send_registration_form_on_update",
     },
 }
- 
+
 # required_apps = []
 
 # Each item in the list will be shown as an app in the apps page
@@ -156,23 +154,7 @@ before_migrate = ["ms_calendar.patches.fix_pkg_resources.execute"]
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"ms_calendar.tasks.all"
-# 	],
-# 	"daily": [
-# 		"ms_calendar.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"ms_calendar.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"ms_calendar.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"ms_calendar.tasks.monthly"
-# 	],
-# }
+scheduler_events = {"daily": ["ms_calendar.api.authbridge_v2.poll_pending_cases"]}
 
 # Testing
 # -------
@@ -257,4 +239,3 @@ before_migrate = ["ms_calendar.patches.fix_pkg_resources.execute"]
 # default_log_clearing_doctypes = {
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
-

@@ -1,6 +1,18 @@
-import frappe, requests, io, base64
+import frappe, requests, io, base64, time as _time
 from datetime import timedelta
 from frappe.utils import get_datetime
+
+_TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
+
+def _requests_with_retry(method, url, max_retries=3, backoff=2, **kwargs):
+    for attempt in range(max_retries):
+        resp = requests.request(method, url, **kwargs)
+        if resp.status_code not in _TRANSIENT_STATUS_CODES:
+            return resp
+        if attempt < max_retries - 1:
+            wait = backoff * (2 ** attempt)
+            _time.sleep(wait)
+    return resp
 
 # ── Feedback URL lookup by department ──────────────────────────────────
 # Education: keyed by (role_lower, round_lower)
@@ -947,6 +959,11 @@ def create_interview_event(
         # Graph API returns 400 / silently drops the send when organizer is added as attendee
         if i.strip().lower() != _org_email_lower:
             attendees.append({"emailAddress": {"address": i}, "type": "required"})
+    # Add candidate as required attendee so the calendar invite blocks their time
+    if interviewee_email and interviewee_email.strip().lower() != _org_email_lower:
+        _already = {a["emailAddress"]["address"].lower() for a in attendees}
+        if interviewee_email.strip().lower() not in _already:
+            attendees.append({"emailAddress": {"address": interviewee_email}, "type": "required"})
     # ----------------------------------------
     # ATTACHMENTS (PUBLIC + PRIVATE FIXED)
     # --------------------------------------
@@ -1332,8 +1349,8 @@ comments/recommendations for the calibration process and final selection decisio
     }
 
     # Create event without attendees so no premature invite is fired
-    res = requests.post(
-        create_url + "?sendUpdates=none", headers=headers, json=draft_payload
+    res = _requests_with_retry(
+        "POST", create_url + "?sendUpdates=none", headers=headers, json=draft_payload
     )
     res.raise_for_status()
     event_id = res.json()["id"]
@@ -1592,12 +1609,9 @@ comments/recommendations for the calibration process and final selection decisio
             message=f"{patch_err} — event {event_id} — response: {_patch_detail[:2000]}",
         )
 
-    # When interviewer email == organizer email, Graph never sends a calendar invite
-    # to the organizer. Use the Graph MIME endpoint to deliver a proper
-    # text/calendar METHOD:REQUEST message — Outlook renders Accept/Decline buttons.
-    # When the organizer is also the interviewer, Graph API will not send them a
-    # calendar invite (organizer is excluded from attendees to avoid a 400 error).
-    # So we send a plain email directly to the organizer with the full interview details.
+    # When organizer is also an interviewer, Graph excludes them from attendees so no
+    # calendar invite is auto-sent to them. Send a plain email with interview details
+    # + feedback form link. Falls back to frappe.sendmail if Graph API lacks Mail.Send permission.
     _self_interviewers = [i for i in interviewer_list if i.strip().lower() == _org_email_lower]
     if _self_interviewers:
         _self_sent = False
@@ -1627,22 +1641,27 @@ comments/recommendations for the calibration process and final selection decisio
                 pass
 
         if not _self_sent:
-            # Fallback: frappe.sendmail
-            try:
-                frappe.sendmail(
-                    recipients=[Organizer_email],
-                    subject=calendar_subject,
-                    message=final_body,
-                    delayed=False,
-                )
-            except Exception as _fe:
+            # Try with organizer as sender first; if that account's SMTP isn't
+            # configured in Frappe, retry without sender (uses default outgoing).
+            for _sender_arg in [{"sender": Organizer_email}, {}]:
                 try:
-                    frappe.log_error(
-                        title="Organizer Interview Email Fallback Error",
-                        message=str(_fe)[:2000],
+                    frappe.sendmail(
+                        recipients=[Organizer_email],
+                        subject=calendar_subject,
+                        message=final_body,
+                        delayed=False,
+                        **_sender_arg,
                     )
-                except Exception:
-                    pass
+                    _self_sent = True
+                    break
+                except Exception as _fe:
+                    try:
+                        frappe.log_error(
+                            title="Organizer Interview Email Fallback Error",
+                            message=str(_fe)[:2000],
+                        )
+                    except Exception:
+                        pass
 
     # If PATCH failed after all retries, fall back to a plain email to each interviewer
     # so they at least receive the interview details and feedback form link.
@@ -1666,16 +1685,19 @@ comments/recommendations for the calibration process and final selection decisio
             except Exception:
                 pass
             if not _iv_graph_sent:
-                try:
-                    frappe.sendmail(
-                        recipients=[_iv_email],
-                        cc=[Organizer_email],
-                        subject=calendar_subject,
-                        message=final_body,
-                        delayed=False,
-                    )
-                except Exception:
-                    pass
+                for _sender_arg in [{"sender": Organizer_email}, {}]:
+                    try:
+                        frappe.sendmail(
+                            recipients=[_iv_email],
+                            cc=[Organizer_email],
+                            subject=calendar_subject,
+                            message=final_body,
+                            delayed=False,
+                            **_sender_arg,
+                        )
+                        break
+                    except Exception:
+                        pass
 
     # ----------------------------------------
     # EMAIL TO DEMO FEEDBACK INTERVIEWER(S)
@@ -1782,57 +1804,120 @@ comments/recommendations for the calibration process and final selection decisio
         # Send candidate email — always FROM field.recruitment@azimpremjifoundation.org
         # Interviewer emails come from the organizer's own email;
         # candidate emails come from the fixed official recruitment mailbox.
+        # Skip if candidate is the same person as the organizer or any interviewer
+        # (they already received the interviewer email; sending a second one is confusing).
         _CANDIDATE_SENDER = "field.recruitment@azimpremjifoundation.org"
+        _all_interviewer_emails_lower = {e.strip().lower() for e in interviewer_list if e.strip()}
+        _all_interviewer_emails_lower.add(_org_email_lower)
+        _is_same_person = interviewee_email.strip().lower() in _all_interviewer_emails_lower
+
         if not interviewee_email:
             frappe.log_error(
                 f"Candidate email (attendees) is empty for doc {doc_name}. Skipping candidate email.",
                 "Candidate Email Skipped",
             )
+        elif _is_same_person:
+            pass  # candidate is the interviewer/organizer — they already got the interviewer email
         else:
-            # Try Graph API sendMail as field.recruitment@
             _graph_cand_sent = False
-            _gc_err = ""
+            _cand_msg = {
+                "subject": candidate_email_subject,
+                "body": {"contentType": "HTML", "content": candidate_email_body},
+                "toRecipients": [{"emailAddress": {"address": interviewee_email}}],
+                "from": {"emailAddress": {
+                    "address": _CANDIDATE_SENDER,
+                    "name": "Field Recruitment Azim Premji Foundation",
+                }},
+            }
+
+            # Attempt 1: send directly FROM field.recruitment@ mailbox via Graph.
+            # Needs: the app to have Mail.Send permission on that shared mailbox.
+            _gc1_err = ""
             try:
-                _gc_res = requests.post(
+                _gc1 = requests.post(
                     f"https://graph.microsoft.com/v1.0/users/{_CANDIDATE_SENDER}/sendMail",
                     headers=headers,
-                    json={
-                        "message": {
-                            "subject": candidate_email_subject,
-                            "body": {"contentType": "HTML", "content": candidate_email_body},
-                            "toRecipients": [{"emailAddress": {"address": interviewee_email}}],
-                        },
-                        "saveToSentItems": True,
-                    },
+                    json={"message": _cand_msg, "saveToSentItems": True},
                     timeout=30,
                 )
-                _gc_err = _gc_res.text
-                _gc_res.raise_for_status()
+                _gc1_err = _gc1.text
+                _gc1.raise_for_status()
                 _graph_cand_sent = True
-            except Exception as _gc_exc:
+            except Exception as _gc1_exc:
                 try:
                     frappe.log_error(
-                        title="Candidate Email Graph Error",
-                        message=(_gc_err or str(_gc_exc))[:2000],
+                        title="Candidate Email Graph Attempt 1",
+                        message=(_gc1_err or str(_gc1_exc))[:2000],
                     )
                 except Exception:
                     pass
 
-            # Fallback: frappe.sendmail — uses configured SMTP, no calendar block ever
+            # Attempt 2: send via Organizer mailbox with From = field.recruitment@.
+            # Needs: Organizer to have "Send As" rights on the shared mailbox in Exchange.
             if not _graph_cand_sent:
+                _gc2_err = ""
+                try:
+                    _gc2 = requests.post(
+                        f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/sendMail",
+                        headers=headers,
+                        json={"message": _cand_msg, "saveToSentItems": True},
+                        timeout=30,
+                    )
+                    _gc2_err = _gc2.text
+                    _gc2.raise_for_status()
+                    _graph_cand_sent = True
+                except Exception as _gc2_exc:
+                    try:
+                        frappe.log_error(
+                            title="Candidate Email Graph Attempt 2",
+                            message=(_gc2_err or str(_gc2_exc))[:2000],
+                        )
+                    except Exception:
+                        pass
+
+            # Attempt 3: send via Organizer mailbox without From override (always works).
+            # Sends from organizer's email — used only when field.recruitment@ is not accessible.
+            if not _graph_cand_sent:
+                _gc3_err = ""
+                _cand_msg_direct = {k: v for k, v in _cand_msg.items() if k != "from"}
+                try:
+                    _gc3 = requests.post(
+                        f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/sendMail",
+                        headers=headers,
+                        json={"message": _cand_msg_direct, "saveToSentItems": True},
+                        timeout=30,
+                    )
+                    _gc3_err = _gc3.text
+                    _gc3.raise_for_status()
+                    _graph_cand_sent = True
+                except Exception as _gc3_exc:
+                    try:
+                        frappe.log_error(
+                            title="Candidate Email Graph Attempt 3",
+                            message=(_gc3_err or str(_gc3_exc))[:2000],
+                        )
+                    except Exception:
+                        pass
+
+            if not _graph_cand_sent:
+                # Last resort: frappe.sendmail using the default outgoing account.
+                # Use field.recruitment@ as sender only if that Email Account exists in Frappe.
+                _cand_sender_arg = {}
+                if frappe.db.exists("Email Account", {"email_id": _CANDIDATE_SENDER, "enable_outgoing": 1}):
+                    _cand_sender_arg = {"sender": _CANDIDATE_SENDER}
                 try:
                     frappe.sendmail(
                         recipients=[interviewee_email],
                         subject=candidate_email_subject,
                         message=candidate_email_body,
-                        sender=_CANDIDATE_SENDER,
                         delayed=False,
+                        **_cand_sender_arg,
                     )
-                except Exception as _fs_exc:
+                except Exception as _cand_fb_err:
                     try:
                         frappe.log_error(
-                            title="Candidate Email Frappe Sendmail Error",
-                            message=str(_fs_exc)[:2000],
+                            title="Candidate Email Not Sent",
+                            message=f"All delivery attempts failed for {interviewee_email}: {_cand_fb_err}",
                         )
                     except Exception:
                         pass
@@ -2706,7 +2791,8 @@ _STD_DEFAULT_SUBJECTS = [
 
 
 @frappe.whitelist(allow_guest=False)
-def download_school_teacher_excel(from_date=None, to_date=None):
+def download_school_teacher_excel(from_date=None, to_date=None, schools=None):
+    import json as _json
     from openpyxl import Workbook
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
@@ -2719,6 +2805,18 @@ def download_school_teacher_excel(from_date=None, to_date=None):
     if to_date:
         conditions.append("`creation` <= %s")
         params.append(to_date + " 23:59:59")
+
+    # schools: comma-separated or JSON list of test_location values
+    _school_list = []
+    if schools:
+        try:
+            _school_list = _json.loads(schools) if schools.startswith('[') else [s.strip() for s in schools.split(',') if s.strip()]
+        except Exception:
+            _school_list = [s.strip() for s in schools.split(',') if s.strip()]
+    if _school_list:
+        placeholders = ','.join(['%s'] * len(_school_list))
+        conditions.append("`test_location` IN ({0})".format(placeholders))
+        params.extend(_school_list)
 
     where_clause = " AND ".join(conditions)
     table = "tabField Registration Form1"

@@ -55,9 +55,9 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 			'<div class="rd-tx-name">' + name + '</div>' +
 			(sub ? '<div class="rd-tx-sub">' + sub + '</div>' : '') +
 			'<div class="rd-tx-dots">' +
-				'<div class="rd-tx-dot"></div>' +
-				'<div class="rd-tx-dot"></div>' +
-				'<div class="rd-tx-dot"></div>' +
+			'<div class="rd-tx-dot"></div>' +
+			'<div class="rd-tx-dot"></div>' +
+			'<div class="rd-tx-dot"></div>' +
 			'</div>';
 		document.body.appendChild(tx);
 		setTimeout(function () {
@@ -949,19 +949,19 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 	(function () {
 		var sp = document.getElementById('rd-splash');
 		if (!sp) return;
-		var sizes  = [4, 6, 8, 10, 5, 7, 9, 6, 4, 8, 5, 7];
+		var sizes = [4, 6, 8, 10, 5, 7, 9, 6, 4, 8, 5, 7];
 		var delays = [0, 1.2, 0.5, 2.1, 3.0, 1.7, 0.3, 2.8, 1.5, 0.8, 3.5, 2.3];
-		var durs   = [8, 11, 9, 13, 10, 12, 8.5, 11.5, 9.5, 14, 10.5, 7.5];
+		var durs = [8, 11, 9, 13, 10, 12, 8.5, 11.5, 9.5, 14, 10.5, 7.5];
 		for (var i = 0; i < 12; i++) {
 			var p = document.createElement('div');
 			p.className = 'rd-particle';
 			p.style.cssText = [
-				'width:'  + sizes[i] + 'px',
+				'width:' + sizes[i] + 'px',
 				'height:' + sizes[i] + 'px',
-				'left:'   + (5 + i * 8) + '%',
+				'left:' + (5 + i * 8) + '%',
 				'bottom:' + (-sizes[i]) + 'px',
 				'animation-duration:' + durs[i] + 's',
-				'animation-delay:'    + delays[i] + 's',
+				'animation-delay:' + delays[i] + 's',
 			].join(';');
 			sp.appendChild(p);
 		}
@@ -1068,28 +1068,28 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 				Object.keys(counts).forEach(function (s) {
 					const sl = s.toLowerCase();
 					if (RW.some(function (w) { return sl.includes(w); })) rejects += counts[s];
-					if (JW.some(function (w) { return sl.includes(w); })) inTeam  += counts[s];
+					if (JW.some(function (w) { return sl.includes(w); })) inTeam += counts[s];
 					if (sl === 'new applicant') newApps += counts[s];
 				});
 			}
 		});
 		const totalEl = document.getElementById('gs-total');
 		const offerEl = document.getElementById('gs-offers');
-		const convEl  = document.getElementById('gs-conv');
+		const convEl = document.getElementById('gs-conv');
 		if (totalEl) countUp(totalEl, total);
 		if (offerEl) countUp(offerEl, offers);
 		if (convEl) convEl.textContent = total > 0 ? (offers / total * 100).toFixed(1) + '%' : '—';
 
-		const sumTotalEl  = document.getElementById('gs-total-all');
-		const sumOfferEl  = document.getElementById('gs-offers-all');
+		const sumTotalEl = document.getElementById('gs-total-all');
+		const sumOfferEl = document.getElementById('gs-offers-all');
 		const sumRejectEl = document.getElementById('gs-rejects-all');
-		const sumNewEl    = document.getElementById('gs-new-all');
-		const sumTeamEl   = document.getElementById('gs-team-all');
-		if (sumTotalEl)  countUp(sumTotalEl, total);
-		if (sumOfferEl)  countUp(sumOfferEl, offers);
+		const sumNewEl = document.getElementById('gs-new-all');
+		const sumTeamEl = document.getElementById('gs-team-all');
+		if (sumTotalEl) countUp(sumTotalEl, total);
+		if (sumOfferEl) countUp(sumOfferEl, offers);
 		if (sumRejectEl) countUp(sumRejectEl, rejects);
-		if (sumNewEl)    countUp(sumNewEl, newApps);
-		if (sumTeamEl)   countUp(sumTeamEl, inTeam);
+		if (sumNewEl) countUp(sumNewEl, newApps);
+		if (sumTeamEl) countUp(sumTeamEl, inTeam);
 
 		drawFrontCharts();
 	}
@@ -1235,11 +1235,11 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 							<div class="rd-ms-srchwrap"><input class="rd-ms-srch" type="text" placeholder="Search units…" id="rd-unit-srch" autocomplete="off" /></div>
 							<div class="rd-ms-opts" id="rd-unit-opts">
 								${UNITS.map(function (u, i) {
-									return '<div class="rd-ms-opt" data-val="' + i + '">' +
-										'<span class="rd-ms-optlbl">' + u.label + '</span>' +
-										'<svg class="rd-ms-optchk" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>' +
-										'</div>';
-								}).join('')}
+		return '<div class="rd-ms-opt" data-val="' + i + '">' +
+			'<span class="rd-ms-optlbl">' + u.label + '</span>' +
+			'<svg class="rd-ms-optchk" fill="none" stroke="currentColor" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>' +
+			'</div>';
+	}).join('')}
 							</div>
 							<div class="rd-ms-foot">
 								<span class="rd-ms-selall" id="rd-unit-selall">Select all</span>
@@ -1379,7 +1379,7 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 		var rip = document.createElement('div');
 		rip.className = 'rd-ripple';
 		rip.style.left = (e.clientX - rect.left) + 'px';
-		rip.style.top  = (e.clientY - rect.top)  + 'px';
+		rip.style.top = (e.clientY - rect.top) + 'px';
 		card.appendChild(rip);
 		setTimeout(function () { if (rip.parentNode) rip.parentNode.removeChild(rip); }, 700);
 		// Welcome transition overlay
@@ -1407,7 +1407,7 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 	function syncUnitBtn() {
 		var lbl = activeUnits.length === 0 ? 'All Units'
 			: activeUnits.length === 1 ? UNITS[activeUnits[0]].label
-			: activeUnits.length + ' Units';
+				: activeUnits.length + ' Units';
 		$('#rd-unit-btn .rd-ms-lbl').text(lbl);
 		var $badge = $('#rd-unit-badge');
 		activeUnits.length > 0 ? $badge.text(activeUnits.length).addClass('show') : $badge.removeClass('show');
@@ -1415,7 +1415,7 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 	function syncStatusBtn() {
 		var lbl = activeStatuses.length === 0 ? 'All Statuses'
 			: activeStatuses.length === 1 ? activeStatuses[0]
-			: activeStatuses.length + ' Statuses';
+				: activeStatuses.length + ' Statuses';
 		$('#rd-status-btn .rd-ms-lbl').text(lbl);
 		var $badge = $('#rd-status-badge');
 		activeStatuses.length > 0 ? $badge.text(activeStatuses.length).addClass('show') : $badge.removeClass('show');
@@ -1444,7 +1444,7 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 		var maxPanelH = 340;
 		if (top + maxPanelH > vh - 12) top = rect.top - maxPanelH - 6;
 		if (top < 8) top = 8;
-		panel.style.top  = top + 'px';
+		panel.style.top = top + 'px';
 		panel.style.left = left + 'px';
 	}
 
@@ -1544,11 +1544,11 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 	});
 
 	// Summary card clicks
-	$front.on('click', '#sum-total',   function () { showTransition('Opening', 'All Applicants',  'Across all recruitment units'); showAllUnitRecords('all',    'All Applicants'); });
-	$front.on('click', '#sum-offers',  function () { showTransition('Opening', 'Total Offers',    'Offer stage candidates');       showAllUnitRecords('offer',  'Total Offers'); });
-	$front.on('click', '#sum-rejects', function () { showTransition('Opening', 'Total Rejects',   'Rejected candidates');          showAllUnitRecords('reject', 'Total Rejects'); });
-	$front.on('click', '#sum-new',     function () { showTransition('Opening', 'New Applicants',  'Recently entered the pipeline'); showAllUnitRecords('new',    'New Applicants'); });
-	$front.on('click', '#sum-inteam',  function () { showTransition('Opening', 'In Team',         'Joined & accepted candidates'); showAllUnitRecords('inteam', 'In Team'); });
+	$front.on('click', '#sum-total', function () { showTransition('Opening', 'All Applicants', 'Across all recruitment units'); showAllUnitRecords('all', 'All Applicants'); });
+	$front.on('click', '#sum-offers', function () { showTransition('Opening', 'Total Offers', 'Offer stage candidates'); showAllUnitRecords('offer', 'Total Offers'); });
+	$front.on('click', '#sum-rejects', function () { showTransition('Opening', 'Total Rejects', 'Rejected candidates'); showAllUnitRecords('reject', 'Total Rejects'); });
+	$front.on('click', '#sum-new', function () { showTransition('Opening', 'New Applicants', 'Recently entered the pipeline'); showAllUnitRecords('new', 'New Applicants'); });
+	$front.on('click', '#sum-inteam', function () { showTransition('Opening', 'In Team', 'Joined & accepted candidates'); showAllUnitRecords('inteam', 'In Team'); });
 
 	// Close all panels on outside click
 	$(document).on('click.rdms', function () { closeAllPanels(); });
@@ -2104,3 +2104,6 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 		else if ($detail.is(':visible')) { $detail.find('.rd-back').first().trigger('click'); }
 	});
 };
+
+
+//testing
