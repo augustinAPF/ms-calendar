@@ -12,7 +12,11 @@ app_license = "mit"
 doc_events = {
     "Field Offline Result": {
         "after_insert": "ms_calendar.events.after_insert"
-    }
+    },
+    "Field Registration Form": {
+        "after_insert": "ms_calendar.ms_calendar.sms_utils.send_registration_form_after_insert",
+        "on_update": "ms_calendar.ms_calendar.sms_utils.send_registration_form_on_update",
+    },
 }
  
 # required_apps = []

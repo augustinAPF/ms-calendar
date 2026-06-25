@@ -1850,6 +1850,33 @@ comments/recommendations for the calibration process and final selection decisio
         except Exception:
             pass
 
+    # ── SMS + WhatsApp notification ───────────────────────────────────────────
+    try:
+        from ms_calendar.ms_calendar.sms_utils import send_sms, send_whatsapp
+        _notify_phone = (candidate_phone or "").strip()
+        if not _notify_phone and application_id:
+            _notify_phone = frappe.db.get_value(
+                "Field Registration Form", application_id, "phone_number"
+            ) or ""
+        _full_name = ""
+        if application_id:
+            _full_name = frappe.db.get_value(
+                "Field Registration Form", application_id, "full_name_aadhaar"
+            ) or ""
+        if _notify_phone and Interview_round:
+            _notify_kwargs = dict(
+                phone=_notify_phone,
+                status=Interview_round,
+                applicant_id=application_id or "",
+                applicant_name=Applicants_name or "",
+                full_name_aadhaar=_full_name,
+                triggered_from="Interview Schedule",
+            )
+            send_sms(**_notify_kwargs)
+            send_whatsapp(**_notify_kwargs)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "Interview Schedule SMS/WhatsApp Failed")
+
     frappe.msgprint("✅ Event created successfully. Outlook invite sent.")
 
     return {
