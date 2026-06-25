@@ -44,6 +44,28 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 		}, dur / frames);
 	}
 
+	// Welcome transition overlay shown on every navigation
+	function showTransition(welcomeText, name, sub) {
+		var old = document.getElementById('rd-tx');
+		if (old && old.parentNode) old.parentNode.removeChild(old);
+		var tx = document.createElement('div');
+		tx.id = 'rd-tx';
+		tx.innerHTML =
+			'<div class="rd-tx-welcome">' + (welcomeText || 'Welcome to') + '</div>' +
+			'<div class="rd-tx-name">' + name + '</div>' +
+			(sub ? '<div class="rd-tx-sub">' + sub + '</div>' : '') +
+			'<div class="rd-tx-dots">' +
+				'<div class="rd-tx-dot"></div>' +
+				'<div class="rd-tx-dot"></div>' +
+				'<div class="rd-tx-dot"></div>' +
+			'</div>';
+		document.body.appendChild(tx);
+		setTimeout(function () {
+			tx.classList.add('rd-tx-out');
+			setTimeout(function () { if (tx.parentNode) tx.parentNode.removeChild(tx); }, 340);
+		}, 950);
+	}
+
 	const DATE_FILTERS = [
 		{ label: 'All Time', key: 'all' },
 		{ label: 'Today', key: 'today' },
@@ -271,11 +293,11 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 	const S = document.createElement('style');
 	S.textContent = `
 	/* ── Opening animations ── */
-	@keyframes rdFadeUp  { from{opacity:0;transform:translateY(22px)} to{opacity:1;transform:translateY(0)} }
+	@keyframes rdFadeUp  { from{opacity:0;transform:translateY(22px)} to{opacity:1;transform:none} }
 	@keyframes rdFadeIn  { from{opacity:0} to{opacity:1} }
 	@keyframes rdLoader  { 0%{transform:translateX(-100%)} 100%{transform:translateX(300%)} }
 	@keyframes rdProgress{ 0%{width:0%} 80%{width:85%} 100%{width:100%} }
-	@keyframes rdSlideIn { from{opacity:0;transform:translateY(32px) scale(.97)} to{opacity:1;transform:translateY(0) scale(1)} }
+	@keyframes rdSlideIn { from{opacity:0;transform:translateY(32px) scale(.97)} to{opacity:1;transform:none} }
 	.rd-anim-hdr { animation:rdFadeUp .55s cubic-bezier(.25,.46,.45,.94) .1s both; }
 	.rd-anim-kpi { animation:rdFadeUp .5s cubic-bezier(.25,.46,.45,.94) .22s both; }
 	.rd-anim-filter { animation:rdFadeUp .5s .3s both; }
@@ -722,17 +744,17 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 	.rd-ms-btn.open .rd-ms-chev { transform:rotate(180deg); color:${AC}; }
 	/* dropdown panel */
 	.rd-ms-panel {
-		position:absolute; top:calc(100% + 6px); left:0;
-		min-width:270px; width:max-content; max-width:360px;
-		display:flex; flex-direction:column; overflow:hidden;
+		position:fixed;
+		width:300px;
+		display:flex; flex-direction:column;
 		background:#fff; border:1px solid ${BORD}; border-radius:14px;
 		box-shadow:0 20px 48px rgba(0,0,0,.13), 0 4px 12px rgba(0,0,0,.06);
-		z-index:600;
+		z-index:99999;
 		opacity:0; transform:translateY(-8px) scale(.98);
 		pointer-events:none;
 		transition:opacity .18s ease, transform .2s cubic-bezier(.34,1.2,.64,1);
 	}
-	.rd-ms-panel.open { opacity:1; transform:translateY(0) scale(1); pointer-events:all; }
+	.rd-ms-panel.open { opacity:1; transform:none; pointer-events:all; }
 	/* search */
 	.rd-ms-srchwrap { padding:10px 10px 8px; border-bottom:1px solid ${BORD}; flex-shrink:0; background:#fafbff; }
 	.rd-ms-srch {
@@ -744,7 +766,7 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 	}
 	.rd-ms-srch:focus { border-color:${AC}; box-shadow:0 0 0 3px ${ACG}.08); }
 	/* options list */
-	.rd-ms-opts { overflow-y:auto; max-height:240px; padding:6px; }
+	.rd-ms-opts { overflow-y:auto; overflow-x:hidden; max-height:240px; min-height:40px; padding:6px; flex-shrink:0; }
 	.rd-ms-opts::-webkit-scrollbar { width:4px; }
 	.rd-ms-opts::-webkit-scrollbar-thumb { background:#dde3ef; border-radius:4px; }
 	/* each option — no checkbox boxes, just left-border + checkmark */
@@ -757,7 +779,7 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 	}
 	.rd-ms-opt:hover { background:#f2f6ff; border-left-color:#bdd7ee; }
 	.rd-ms-opt.selected { background:#EBF3FB; border-left-color:${AC}; }
-	.rd-ms-optlbl { font-size:13px; font-weight:500; color:${T1}; flex:1; line-height:1.35; }
+	.rd-ms-optlbl { font-size:13px; font-weight:500; color:${T1}; flex:1; line-height:1.35; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 	.rd-ms-opt.selected .rd-ms-optlbl { font-weight:700; color:${AC}; }
 	.rd-ms-optchk {
 		display:none; width:15px; height:15px; flex-shrink:0;
@@ -794,6 +816,99 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 	.rd-sum-v { font-size:28px; font-weight:900; line-height:1; color:${T1}; }
 	.rd-sum-k { font-size:11.5px; font-weight:600; color:${T2}; margin-top:4px; }
 	.rd-sum-hint { font-size:10px; color:${T3}; margin-top:5px; }
+
+	/* ── Floating splash particles ── */
+	@keyframes rdParticle {
+		0%   { transform:translateY(0) scale(1);   opacity:0; }
+		10%  { opacity:.7; }
+		90%  { opacity:.4; }
+		100% { transform:translateY(-110vh) scale(.3); opacity:0; }
+	}
+	.rd-particle {
+		position:absolute; border-radius:50%; pointer-events:none;
+		background:rgba(44,125,184,.5);
+		animation:rdParticle linear infinite;
+	}
+
+	/* ── Summary card staggered entrance ── */
+	@keyframes rdSumIn { from{opacity:0;transform:translateY(24px) scale(.95)} to{opacity:1;transform:none} }
+	.rd-sum-card:nth-child(1) { animation:rdSumIn .5s cubic-bezier(.34,1.2,.64,1) .05s both; }
+	.rd-sum-card:nth-child(2) { animation:rdSumIn .5s cubic-bezier(.34,1.2,.64,1) .15s both; }
+	.rd-sum-card:nth-child(3) { animation:rdSumIn .5s cubic-bezier(.34,1.2,.64,1) .25s both; }
+	.rd-sum-card:nth-child(4) { animation:rdSumIn .5s cubic-bezier(.34,1.2,.64,1) .35s both; }
+	.rd-sum-card:nth-child(5) { animation:rdSumIn .5s cubic-bezier(.34,1.2,.64,1) .45s both; }
+
+	/* ── KPI card pop-in on detail page ── */
+	@keyframes rdKpiPop { 0%{opacity:0;transform:scale(.82)} 70%{transform:scale(1.06)} 100%{opacity:1;transform:none} }
+	.rd-kpi:nth-child(1) { animation:rdKpiPop .42s cubic-bezier(.34,1.3,.64,1) .05s both; }
+	.rd-kpi:nth-child(2) { animation:rdKpiPop .42s cubic-bezier(.34,1.3,.64,1) .14s both; }
+	.rd-kpi:nth-child(3) { animation:rdKpiPop .42s cubic-bezier(.34,1.3,.64,1) .23s both; }
+	.rd-kpi:nth-child(4) { animation:rdKpiPop .42s cubic-bezier(.34,1.3,.64,1) .32s both; }
+
+	/* ── Chart card slide-up ── */
+	@keyframes rdChartIn { from{opacity:0;transform:translateY(18px)} to{opacity:1;transform:none} }
+	.rd-chart-card { animation:rdChartIn .5s cubic-bezier(.25,.46,.45,.94) .1s both; }
+
+	/* ── Shimmer skeleton loader ── */
+	@keyframes rdShimmer { 0%{background-position:-600px 0} 100%{background-position:600px 0} }
+	.rd-skeleton {
+		display:inline-block; border-radius:8px; height:18px; width:80%;
+		background:linear-gradient(90deg,#e8edf6 25%,#d0d9ea 50%,#e8edf6 75%);
+		background-size:1200px 100%;
+		animation:rdShimmer 1.5s infinite linear;
+	}
+	.rd-ucard-num .rd-skeleton { height:36px; width:60px; border-radius:6px; }
+
+	/* ── Table row slide-in ── */
+	@keyframes rdRowIn { from{opacity:0;transform:translateX(-10px)} to{opacity:1;transform:translateX(0)} }
+	.rd-tbl tbody tr { animation:rdRowIn .22s ease both; }
+
+	/* ── Ripple on unit card click ── */
+	@keyframes rdRipple { from{transform:scale(0);opacity:.55} to{transform:scale(5);opacity:0} }
+	.rd-ripple {
+		position:absolute; border-radius:50%;
+		width:60px; height:60px; margin:-30px 0 0 -30px;
+		background:rgba(255,255,255,.35); pointer-events:none;
+		animation:rdRipple .65s ease-out forwards;
+	}
+
+	/* ── Status card entrance stagger ── */
+	@keyframes rdSCardIn { from{opacity:0;transform:scale(.9) translateY(12px)} to{opacity:1;transform:none} }
+	.rd-scard { animation:rdSCardIn .35s cubic-bezier(.34,1.2,.64,1) both; }
+
+	/* ── Page transition welcome overlay ── */
+	@keyframes rdTxIn  { from{transform:translateY(100%);opacity:0} to{transform:translateY(0);opacity:1} }
+	@keyframes rdTxOut { from{opacity:1;transform:scale(1)} to{opacity:0;transform:scale(1.05)} }
+	@keyframes rdDotPing { 0%,100%{transform:scale(1);opacity:.3} 50%{transform:scale(1.6);opacity:1} }
+	#rd-tx {
+		position:fixed; inset:0; z-index:9998; pointer-events:none;
+		background:linear-gradient(135deg,#0a1128 0%,#1e3a5f 52%,#0a1128 100%);
+		display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;
+		animation:rdTxIn .38s cubic-bezier(.34,1.1,.64,1) forwards;
+	}
+	#rd-tx.rd-tx-out { animation:rdTxOut .32s ease forwards; }
+	.rd-tx-welcome {
+		font-size:11px; font-weight:800; letter-spacing:.2em; text-transform:uppercase;
+		color:#2c7db8; animation:rdFadeUp .4s .12s both;
+	}
+	.rd-tx-name {
+		font-size:36px; font-weight:900; color:#fff; letter-spacing:-.025em;
+		text-align:center; max-width:80vw; line-height:1.15;
+		animation:rdFadeUp .45s .22s both;
+	}
+	.rd-tx-sub {
+		font-size:13px; color:rgba(255,255,255,.42); margin-top:3px; text-align:center;
+		animation:rdFadeIn .5s .35s both;
+	}
+	.rd-tx-dots {
+		display:flex; gap:9px; margin-top:22px; animation:rdFadeIn .4s .38s both;
+	}
+	.rd-tx-dot {
+		width:9px; height:9px; border-radius:50%; background:rgba(255,255,255,.18);
+	}
+	.rd-tx-dot:nth-child(1) { animation:rdDotPing 1s .0s infinite; background:#2c7db8; }
+	.rd-tx-dot:nth-child(2) { animation:rdDotPing 1s .18s infinite; background:#4a9fd4; }
+	.rd-tx-dot:nth-child(3) { animation:rdDotPing 1s .36s infinite; background:#6bb5e0; }
 	`;
 	document.head.appendChild(S);
 
@@ -829,6 +944,28 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 			<div id="rd-profile" style="display:none"></div>
 		</div>
 	`);
+
+	// Floating particles inside splash
+	(function () {
+		var sp = document.getElementById('rd-splash');
+		if (!sp) return;
+		var sizes  = [4, 6, 8, 10, 5, 7, 9, 6, 4, 8, 5, 7];
+		var delays = [0, 1.2, 0.5, 2.1, 3.0, 1.7, 0.3, 2.8, 1.5, 0.8, 3.5, 2.3];
+		var durs   = [8, 11, 9, 13, 10, 12, 8.5, 11.5, 9.5, 14, 10.5, 7.5];
+		for (var i = 0; i < 12; i++) {
+			var p = document.createElement('div');
+			p.className = 'rd-particle';
+			p.style.cssText = [
+				'width:'  + sizes[i] + 'px',
+				'height:' + sizes[i] + 'px',
+				'left:'   + (5 + i * 8) + '%',
+				'bottom:' + (-sizes[i]) + 'px',
+				'animation-duration:' + durs[i] + 's',
+				'animation-delay:'    + delays[i] + 's',
+			].join(';');
+			sp.appendChild(p);
+		}
+	}());
 
 	// Dismiss splash after 10 seconds
 	setTimeout(function () {
@@ -1068,44 +1205,6 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 					</div>
 					<div class="rd-header-title">Recruitment Dashboard</div>
 				</div>
-				<div class="rd-hkpis rd-anim-kpi">
-					<div class="rd-hkpi">
-						<div class="rd-hkpi-ico" style="background:#DDEBF7">
-							<svg fill="none" stroke="#1F497D" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-						</div>
-						<div class="rd-hkpi-body">
-							<div class="rd-hkpi-v" id="gs-total">—</div>
-							<div class="rd-hkpi-k">Total Applicants</div>
-						</div>
-					</div>
-					<div class="rd-hkpi">
-						<div class="rd-hkpi-ico" style="background:#DDEBF7">
-							<svg fill="none" stroke="#1F497D" stroke-width="2" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
-						</div>
-						<div class="rd-hkpi-body">
-							<div class="rd-hkpi-v" id="gs-offers">—</div>
-							<div class="rd-hkpi-k">Total Offers</div>
-						</div>
-					</div>
-					<div class="rd-hkpi">
-						<div class="rd-hkpi-ico" style="background:#DDEBF7">
-							<svg fill="none" stroke="#1F497D" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>
-						</div>
-						<div class="rd-hkpi-body">
-							<div class="rd-hkpi-v" id="gs-conv">—</div>
-							<div class="rd-hkpi-k">Offer Rate</div>
-						</div>
-					</div>
-					<div class="rd-hkpi">
-						<div class="rd-hkpi-ico" style="background:#DDEBF7">
-							<svg fill="none" stroke="#1F497D" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
-						</div>
-						<div class="rd-hkpi-body">
-							<div class="rd-hkpi-v">4</div>
-							<div class="rd-hkpi-k">Active Units</div>
-						</div>
-					</div>
-				</div>
 			</div>
 			<div class="rd-filter-bar rd-anim-filter">
 				<div class="rd-fitem">
@@ -1271,8 +1370,21 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 		</div>
 	`);
 
-	$front.on('click', '.rd-ucard', function () {
-		showDetail(parseInt($(this).data('ui')));
+	$front.on('click', '.rd-ucard', function (e) {
+		var card = this;
+		var ui = parseInt($(card).data('ui'));
+		var unit = UNITS[ui];
+		// Ripple effect
+		var rect = card.getBoundingClientRect();
+		var rip = document.createElement('div');
+		rip.className = 'rd-ripple';
+		rip.style.left = (e.clientX - rect.left) + 'px';
+		rip.style.top  = (e.clientY - rect.top)  + 'px';
+		card.appendChild(rip);
+		setTimeout(function () { if (rip.parentNode) rip.parentNode.removeChild(rip); }, 700);
+		// Welcome transition overlay
+		showTransition('Welcome to', unit.label, unit.desc);
+		showDetail(ui);
 	});
 	// Date select filter
 	$front.on('change', '#rd-date-filter', function () {
@@ -1313,19 +1425,43 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 		$('.rd-ms-btn').removeClass('open');
 	}
 
+	function positionPanel(btnId, panelId) {
+		var btn = document.getElementById(btnId);
+		var panel = document.getElementById(panelId);
+		if (!btn || !panel) return;
+		// Portal: move to body so no container stacking context can clip it
+		if (panel.parentNode !== document.body) {
+			document.body.appendChild(panel);
+		}
+		var rect = btn.getBoundingClientRect();
+		var panelW = 300;
+		var vw = window.innerWidth;
+		var vh = window.innerHeight;
+		var left = rect.left;
+		if (left + panelW > vw - 12) left = vw - panelW - 12;
+		if (left < 8) left = 8;
+		var top = rect.bottom + 6;
+		var maxPanelH = 340;
+		if (top + maxPanelH > vh - 12) top = rect.top - maxPanelH - 6;
+		if (top < 8) top = 8;
+		panel.style.top  = top + 'px';
+		panel.style.left = left + 'px';
+	}
+
 	// Unit trigger toggle
 	$front.on('click', '#rd-unit-btn', function (e) {
 		e.stopPropagation();
 		var isOpen = $('#rd-unit-panel').hasClass('open');
 		closeAllPanels();
 		if (!isOpen) {
+			positionPanel('rd-unit-btn', 'rd-unit-panel');
 			$('#rd-unit-panel').addClass('open');
 			$('#rd-unit-btn').addClass('open');
 			setTimeout(function () { $('#rd-unit-srch').focus(); }, 80);
 		}
 	});
 	// Unit option click
-	$front.on('click', '#rd-unit-opts .rd-ms-opt', function (e) {
+	$(document).on('click', '#rd-unit-opts .rd-ms-opt', function (e) {
 		e.stopPropagation();
 		$(this).toggleClass('selected');
 		var val = parseInt($(this).data('val'));
@@ -1335,14 +1471,14 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 		updateFrontStats();
 	});
 	// Unit search filter
-	$front.on('input', '#rd-unit-srch', function () {
+	$(document).on('input', '#rd-unit-srch', function () {
 		var q = $(this).val().toLowerCase();
 		$('#rd-unit-opts .rd-ms-opt').each(function () {
 			$(this).toggle(!q || $(this).find('.rd-ms-optlbl').text().toLowerCase().includes(q));
 		});
 	});
 	// Unit select all
-	$front.on('click', '#rd-unit-selall', function (e) {
+	$(document).on('click', '#rd-unit-selall', function (e) {
 		e.stopPropagation();
 		activeUnits = UNITS.map(function (_u, i) { return i; });
 		$('#rd-unit-opts .rd-ms-opt').addClass('selected');
@@ -1350,7 +1486,7 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 		updateFrontStats();
 	});
 	// Unit clear
-	$front.on('click', '#rd-unit-clr', function (e) {
+	$(document).on('click', '#rd-unit-clr', function (e) {
 		e.stopPropagation();
 		activeUnits = [];
 		$('#rd-unit-opts .rd-ms-opt').removeClass('selected');
@@ -1364,13 +1500,14 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 		var isOpen = $('#rd-status-panel').hasClass('open');
 		closeAllPanels();
 		if (!isOpen) {
+			positionPanel('rd-status-btn', 'rd-status-panel');
 			$('#rd-status-panel').addClass('open');
 			$('#rd-status-btn').addClass('open');
 			setTimeout(function () { $('#rd-status-srch').focus(); }, 80);
 		}
 	});
 	// Status option click
-	$front.on('click', '#rd-status-opts .rd-ms-opt', function (e) {
+	$(document).on('click', '#rd-status-opts .rd-ms-opt', function (e) {
 		e.stopPropagation();
 		$(this).toggleClass('selected');
 		var val = $(this).data('val');
@@ -1380,14 +1517,14 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 		updateFrontStats();
 	});
 	// Status search filter
-	$front.on('input', '#rd-status-srch', function () {
+	$(document).on('input', '#rd-status-srch', function () {
 		var q = $(this).val().toLowerCase();
 		$('#rd-status-opts .rd-ms-opt').each(function () {
 			$(this).toggle(!q || $(this).find('.rd-ms-optlbl').text().toLowerCase().includes(q));
 		});
 	});
 	// Status select all
-	$front.on('click', '#rd-status-selall', function (e) {
+	$(document).on('click', '#rd-status-selall', function (e) {
 		e.stopPropagation();
 		activeStatuses = [];
 		$('#rd-status-opts .rd-ms-opt').each(function () {
@@ -1398,7 +1535,7 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 		updateFrontStats();
 	});
 	// Status clear
-	$front.on('click', '#rd-status-clr', function (e) {
+	$(document).on('click', '#rd-status-clr', function (e) {
 		e.stopPropagation();
 		activeStatuses = [];
 		$('#rd-status-opts .rd-ms-opt').removeClass('selected');
@@ -1407,11 +1544,11 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 	});
 
 	// Summary card clicks
-	$front.on('click', '#sum-total',   function () { showAllUnitRecords('all',    'All Applicants'); });
-	$front.on('click', '#sum-offers',  function () { showAllUnitRecords('offer',  'Total Offers'); });
-	$front.on('click', '#sum-rejects', function () { showAllUnitRecords('reject', 'Total Rejects'); });
-	$front.on('click', '#sum-new',     function () { showAllUnitRecords('new',    'New Applicants'); });
-	$front.on('click', '#sum-inteam',  function () { showAllUnitRecords('inteam', 'In Team'); });
+	$front.on('click', '#sum-total',   function () { showTransition('Opening', 'All Applicants',  'Across all recruitment units'); showAllUnitRecords('all',    'All Applicants'); });
+	$front.on('click', '#sum-offers',  function () { showTransition('Opening', 'Total Offers',    'Offer stage candidates');       showAllUnitRecords('offer',  'Total Offers'); });
+	$front.on('click', '#sum-rejects', function () { showTransition('Opening', 'Total Rejects',   'Rejected candidates');          showAllUnitRecords('reject', 'Total Rejects'); });
+	$front.on('click', '#sum-new',     function () { showTransition('Opening', 'New Applicants',  'Recently entered the pipeline'); showAllUnitRecords('new',    'New Applicants'); });
+	$front.on('click', '#sum-inteam',  function () { showTransition('Opening', 'In Team',         'Joined & accepted candidates'); showAllUnitRecords('inteam', 'In Team'); });
 
 	// Close all panels on outside click
 	$(document).on('click.rdms', function () { closeAllPanels(); });
@@ -1514,11 +1651,11 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 				</div>
 				<div class="rd-section-hdr" style="margin-bottom:14px">Status Breakdown — click any card to open records</div>
 				<div class="rd-sgrid" id="rd-sgrid">
-					${unit.statuses.map(function (s) {
+					${unit.statuses.map(function (s, si) {
 			const cnt = counts[s] || 0;
 			const col = SC[sType(s)];
 			const pct = total > 0 ? Math.round(cnt / total * 100) : 0;
-			return '<div class="rd-scard' + (cnt === 0 ? ' zero' : '') + '" data-status="' + s + '" style="border-left-color:' + col.dot + '">' +
+			return '<div class="rd-scard' + (cnt === 0 ? ' zero' : '') + '" data-status="' + s + '" style="border-left-color:' + col.dot + ';animation-delay:' + Math.min(si * 0.04, 0.8) + 's">' +
 				'<div class="sc-lbl">' + s + '</div>' +
 				'<div class="sc-num" style="color:' + col.dot + '">' + cnt + '</div>' +
 				'<div class="sc-bar"><div class="sc-fill" style="background:' + col.dot + '" data-pct="' + pct + '"></div></div>' +
@@ -1542,7 +1679,9 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 
 		$detail.find('#rd-back').on('click', function () { $detail.hide(); $front.show(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
 		$detail.find('#rd-sgrid').on('click', '.rd-scard:not(.zero)', function () {
-			showRecords(unit, rows, $(this).data('status'), th);
+			var status = $(this).data('status');
+			showTransition('Viewing', status, unit.label);
+			showRecords(unit, rows, status, th);
 		});
 		$detail.find('#rd-kpi-total').on('click', function () {
 			showRecords(unit, rows, null, th);
@@ -1795,7 +1934,7 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 					? '<td class="rd-tname" title="' + v + '">' + v + '</td>'
 					: '<td title="' + v + '">' + v + '</td>';
 			}).join('');
-			return '<tr data-name="' + (r.name || '') + '">' +
+			return '<tr data-name="' + (r.name || '') + '" style="animation-delay:' + Math.min(i * 0.028, 0.6) + 's">' +
 				'<td class="rd-tsno">' + (i + 1) + '</td>' +
 				'<td class="rd-tid">' + (r.name || '') + '</td>' +
 				tds +
@@ -1947,7 +2086,7 @@ frappe.pages['recruitment-dashboar'].on_page_load = function (wrapper) {
 			var pill = '<span class="rd-spill" style="background:' + col.bg + ';color:' + col.txt + ';border-color:' + col.brd + '">' + sv + '</span>';
 			var unitPill = '<span class="rd-spill" style="background:#DDEBF7;color:#1F497D;border-color:#BDD7EE">' + unit.short + '</span>';
 			var name = r[unit.nameField] || r.name || '—';
-			return '<tr data-name="' + (r.name || '') + '" data-ui="' + ui + '">' +
+			return '<tr data-name="' + (r.name || '') + '" data-ui="' + ui + '" style="animation-delay:' + Math.min(i * 0.028, 0.6) + 's">' +
 				'<td class="rd-tsno">' + (i + 1) + '</td>' +
 				'<td class="rd-tname" title="' + name + '">' + name + '</td>' +
 				'<td>' + unitPill + '</td>' +
