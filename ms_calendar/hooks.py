@@ -18,6 +18,21 @@ doc_events = {
     "BGV Document": {
         "after_insert": "ms_calendar.ms_calendar.doctype.bgv_request.bgv_request.on_document_upload"
     },
+    "Phil Registration Form": {
+        "validate": "ms_calendar.api.resume_rename.on_phil_registration"
+    },
+    "Field Registration Form": {
+        "validate": "ms_calendar.api.resume_rename.on_field_registration"
+    },
+    "Field Registration Form1": {
+        "validate": "ms_calendar.api.resume_rename.on_field_registration"
+    },
+    "Health Registration Form": {
+        "validate": "ms_calendar.api.resume_rename.on_health_registration"
+    },
+    "Scholarship Recruitment Form": {
+        "validate": "ms_calendar.api.resume_rename.on_scholarship_registration"
+    },
 }
 
 # required_apps = []
@@ -56,7 +71,8 @@ doc_events = {
 
 # include js in doctype views
 doctype_js = {"Job Opening": "public/js/job_opening.js"}
-# doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
+doctype_list_js = {"Field Registration Form": "public/js/field_registration_form_list.js"}
+app_include_js = ["/assets/ms_calendar/js/field_registration_form_list.js"]
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
