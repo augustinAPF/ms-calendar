@@ -234,7 +234,7 @@ def test_result_api():
                         reference_name=candidate_id,
                     )
             except Exception as mail_exc:
-                frappe.log_error(f"Mail error: {mail_exc}", "MERIT_TRAC_MAIL_ERROR")
+                frappe.log_error(title="MERIT_TRAC_MAIL_ERROR", message=f"Mail error: {mail_exc}")
 
         frappe.db.commit()
 
@@ -247,7 +247,7 @@ def test_result_api():
         }
 
     except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "MERIT_TRAC_API_ERROR")
+        frappe.log_error(title="MERIT_TRAC_API_ERROR", message=frappe.get_traceback())
         frappe.local.response.http_status_code = 500
         return {"status": 500, "http_status": 500, "message": str(e)}
 
@@ -413,7 +413,7 @@ def field_assessment_result_api():
         }
 
     except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "FIELD_ASSESSMENT_RESULT_API_ERROR")
+        frappe.log_error(title="FIELD_ASSESSMENT_RESULT_API_ERROR", message=frappe.get_traceback())
         frappe.local.response.http_status_code = 500
         return {"status": 500, "http_status": 500, "message": str(e)}
 
@@ -474,8 +474,8 @@ def send_meritrac_scheduled_emails():
                 _send_email_for_type(email_type, rec)
             except Exception as e:
                 frappe.log_error(
-                    f"Email error ({email_type}) for {rec.get('name')}: {e}",
-                    "MERITRAC_SCHEDULED_EMAIL_ERROR",
+                    title="MERITRAC_SCHEDULED_EMAIL_ERROR",
+                    message=f"Email error ({email_type}) for {rec.get('name')}: {e}",
                 )
 
     frappe.db.commit()
@@ -551,7 +551,7 @@ def test_send_all_emails(record_name):
             _send_email_for_type(email_type, rec_dict, delayed=False)
             results.append(f"{email_type}: sent to {rec_dict['applicant_email']}")
         except Exception as e:
-            frappe.log_error(frappe.get_traceback(), f"TEST_EMAIL_{email_type.upper()}")
+            frappe.log_error(title=f"TEST_EMAIL_{email_type.upper()}", message=frappe.get_traceback())
             results.append(f"{email_type}: FAILED — {e}")
 
     frappe.db.commit()
@@ -805,7 +805,7 @@ def save_field_merittrac_tickets(
         log.insert(ignore_permissions=True)
     except Exception as e:
         frappe.log_error(
-            f"Creation log insert failed: {e}", "FIELD_MERITTRAC_LOG_ERROR"
+            title="FIELD_MERITTRAC_LOG_ERROR", message=f"Creation log insert failed: {e}"
         )
 
     # ── 2. Save ticket records + send admit card email immediately ───────
@@ -869,8 +869,8 @@ def save_field_merittrac_tickets(
                 _send_email_for_type("admit_card", rec_dict, delayed=False)
             except Exception as e:
                 frappe.log_error(
-                    f"Admit card email failed for {candidate_id}: {e}",
-                    "FIELD_MERITTRAC_ADMIT_CARD_ERROR",
+                    title="FIELD_MERITTRAC_ADMIT_CARD_ERROR",
+                    message=f"Admit card email failed for {candidate_id}: {e}",
                 )
 
     frappe.db.commit()
@@ -884,7 +884,9 @@ import frappe
 
 
 @frappe.whitelist()
-def initiate_merittrac_online_test(candidate_ids, assessment_number, start_utc, end_utc, enable_rp=0):
+def initiate_merittrac_online_test(
+    candidate_ids, assessment_number, start_utc, end_utc, enable_rp=0
+):
     """
     Proxy for MeritTrac API 1 — POST /hrms/get-landing-page-url.
     Runs server-side so credentials never leave the backend and CORS is not an issue.
@@ -920,8 +922,8 @@ def initiate_merittrac_online_test(candidate_ids, assessment_number, start_utc, 
     )
 
     frappe.log_error(
-        f"MeritTrac API-1 | status={resp.status_code} | body={resp.text[:800]}",
-        "MERITTRAC_API_1",
+        title="MERITTRAC_API_1",
+        message=f"MeritTrac API-1 | status={resp.status_code} | body={resp.text[:800]}",
     )
 
     if not resp.ok:
@@ -967,8 +969,8 @@ def get_merittrac_tickets(candidate_ids, start_utc, end_utc):
     )
 
     frappe.log_error(
-        f"MeritTrac API-2 | status={resp.status_code} | body={resp.text[:800]}",
-        "MERITTRAC_API_2",
+        title="MERITTRAC_API_2",
+        message=f"MeritTrac API-2 | status={resp.status_code} | body={resp.text[:800]}",
     )
 
     if not resp.ok:
