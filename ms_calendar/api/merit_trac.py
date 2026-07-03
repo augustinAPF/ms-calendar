@@ -667,16 +667,37 @@ def test_result_api():
             "doctype": result_doctype,
             "applicant_id": candidate_id,
             "score_percentile": percentage,
+            "overall_percentage_score": percentage,
             "attempt_id": item.get("attemptId"),
             "assessment_id": item.get("assessmentId"),
             "attempt_status": item.get("attempt_status"),
             "score_report": item.get("TnReport"),
+            "tn_report": item.get("TnReport"),
             "total_score": item.get("score"),
             "max_score": item.get("maxScore"),
             "total_questions": item.get("totalQuestion"),
             "total_attempted": item.get("totalAttempted"),
+            "user_img_key": item.get("userImgKey"),
+            "id_img_key": item.get("idImgKey"),
+            "credit_score": item.get("creditScore"),
+            "proctor_comment": item.get("proctorComment"),
             "updated_at": fix_datetime(item.get("updatedAt")),
-            "created_at": fix_datetime(item.get("createdAt"))
+            "created_at": fix_datetime(item.get("createdAt")),
+            "section_wise_score": [
+                {
+                    "section_name": section.get("name"),
+                    "score": section.get("score"),
+                    "max_score": section.get("maxScore"),
+                }
+                for section in (item.get("sectionWiseScore") or [])
+            ],
+            "descriptive_response": [
+                {
+                    "question_text": resp.get("questionText"),
+                    "candidate_response": resp.get("candidateResponse"),
+                }
+                for resp in (item.get("descriptiveResponse") or [])
+            ],
         })
 
         frappe.log_error(
