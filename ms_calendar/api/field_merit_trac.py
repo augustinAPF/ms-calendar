@@ -99,6 +99,12 @@ def test_result_api():
         max_score = item.get("maxScore")
         total_questions = item.get("totalQuestion")
         total_attempted = item.get("totalAttempted")
+        user_img_key = item.get("userImgKey")
+        id_img_key = item.get("idImgKey")
+        credit_score = item.get("creditScore")
+        proctor_comment = item.get("proctorComment")
+        section_wise_score = item.get("sectionWiseScore") or []
+        descriptive_response = item.get("descriptiveResponse") or []
         updated_at = fix_datetime(item.get("updatedAt"))
         created_at = fix_datetime(item.get("createdAt"))
 
@@ -129,20 +135,41 @@ def test_result_api():
         # ------------------------------------------------------------
         test_doc = frappe.get_doc(
             {
-                "doctype": "MeritTrac Test Result",
+                "doctype": "Field MeritTrac Test Result",
                 "applicant_id": candidate_id,
                 "applicant_name": _applicant_name,
                 "score_percentile": percentage,
+                "overall_percentage_score": percentage,
                 "attempt_id": attempt_id,
                 "assessment_id": assessment_id,
                 "attempt_status": attempt_status,
                 "score_report": report_url,
+                "tn_report": report_url,
                 "total_score": score,
                 "max_score": max_score,
                 "total_questions": total_questions,
                 "total_attempted": total_attempted,
+                "user_img_key": user_img_key,
+                "id_img_key": id_img_key,
+                "credit_score": credit_score,
+                "proctor_comment": proctor_comment,
                 "updated_at": updated_at,
                 "created_at": created_at,
+                "section_wise_score": [
+                    {
+                        "section_name": section.get("name"),
+                        "score": section.get("score"),
+                        "max_score": section.get("maxScore"),
+                    }
+                    for section in section_wise_score
+                ],
+                "descriptive_response": [
+                    {
+                        "question_text": resp.get("questionText"),
+                        "candidate_response": resp.get("candidateResponse"),
+                    }
+                    for resp in descriptive_response
+                ],
             }
         )
         test_doc.insert(ignore_permissions=True, ignore_links=True)
