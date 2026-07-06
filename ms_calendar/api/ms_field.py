@@ -4,50 +4,88 @@ from frappe.utils import get_datetime
 
 _TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
 
+
 def _requests_with_retry(method, url, max_retries=3, backoff=2, **kwargs):
     for attempt in range(max_retries):
         resp = requests.request(method, url, **kwargs)
         if resp.status_code not in _TRANSIENT_STATUS_CODES:
             return resp
         if attempt < max_retries - 1:
-            wait = backoff * (2 ** attempt)
+            wait = backoff * (2**attempt)
             _time.sleep(wait)
     return resp
+
 
 # ── Feedback URL lookup by department ──────────────────────────────────
 # Education: keyed by (role_lower, round_lower)
 _EDUCATION_FEEDBACK_URLS = {
     # ── School Teacher ──────────────────────────────────────────────────
-    ("school teacher", "recruiter round"): "https://careers.frappe.cloud/recruiter-assessment-form-feed-back-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    ("school teacher", "subject round"):   "https://careers.frappe.cloud/school-teacher-functional-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
-    ("school teacher", "demo round"):      "https://careers.frappe.cloud/demo-lesson-observation-feedback-form-feed-back-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    ("school teacher", "leader round-1"):  "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
-    ("school teacher", "leader round-2"):  "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
+    (
+        "school teacher",
+        "recruiter round",
+    ): "https://careers.frappe.cloud/recruiter-assessment-form-feed-back-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    (
+        "school teacher",
+        "subject round",
+    ): "https://careers.frappe.cloud/school-teacher-functional-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
+    (
+        "school teacher",
+        "demo round",
+    ): "https://careers.frappe.cloud/demo-lesson-observation-feedback-form-feed-back-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    (
+        "school teacher",
+        "leader round-1",
+    ): "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
+    (
+        "school teacher",
+        "leader round-2",
+    ): "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
     # ── Resource Person ─────────────────────────────────────────────────
-    ("resource person", "recruiter round"):            "https://careers.frappe.cloud/recruiter-assessment-form-feed-back-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    ("resource person", "education capacity round"):   "https://careers.frappe.cloud/educational-capacity-interview---feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    ("resource person", "leader round-1"):             "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
-    ("resource person", "leader round-2"):             "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
+    (
+        "resource person",
+        "recruiter round",
+    ): "https://careers.frappe.cloud/recruiter-assessment-form-feed-back-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    (
+        "resource person",
+        "education capacity round",
+    ): "https://careers.frappe.cloud/educational-capacity-interview---feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    (
+        "resource person",
+        "leader round-1",
+    ): "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
+    (
+        "resource person",
+        "leader round-2",
+    ): "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
     # ── Associate Resource Person ────────────────────────────────────────
-    ("associate resource person", "leader round-1"):   "https://careers.frappe.cloud/campus-associate-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    ("associate resource person", "leader round-2"):   "https://careers.frappe.cloud/campus-associate-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    ("associate resource person", "calibration process"): "https://careers.frappe.cloud/calibration-process/new?app_id={app_id}&applicant_name={applicant_name}",
+    (
+        "associate resource person",
+        "leader round-1",
+    ): "https://careers.frappe.cloud/campus-associate-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    (
+        "associate resource person",
+        "leader round-2",
+    ): "https://careers.frappe.cloud/campus-associate-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    (
+        "associate resource person",
+        "calibration process",
+    ): "https://careers.frappe.cloud/calibration-process/new?app_id={app_id}&applicant_name={applicant_name}",
 }
 
 # Livelihood: keyed by round_lower
 _LIVELIHOOD_FEEDBACK_URLS = {
-    "recruiter round":  "https://careers.frappe.cloud/livelihoods-recruiter-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "recruiter round": "https://careers.frappe.cloud/livelihoods-recruiter-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
     "functional round": "https://careers.frappe.cloud/livelihoods-functional-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    "leader round-1":   "https://careers.frappe.cloud/livelihoods-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    "leader round-2":   "https://careers.frappe.cloud/livelihoods-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "leader round-1": "https://careers.frappe.cloud/livelihoods-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "leader round-2": "https://careers.frappe.cloud/livelihoods-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
 }
 
 # Health: keyed by round_lower
 _HEALTH_FEEDBACK_URLS = {
-    "recruiter round":  "https://careers.frappe.cloud/health-recruitment-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "recruiter round": "https://careers.frappe.cloud/health-recruitment-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
     "functional round": "https://careers.frappe.cloud/health-functional-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    "leader round-1":   "https://careers.frappe.cloud/health-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    "leader round-2":   "https://careers.frappe.cloud/health-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "leader round-1": "https://careers.frappe.cloud/health-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "leader round-2": "https://careers.frappe.cloud/health-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
 }
 
 
@@ -526,7 +564,9 @@ def create_interview_event(
         is_online = 0
 
     Organizer_email = (Organizer_email or "").strip()
-    interviewee_email = (interviewee_email or "field.recruitment@azimpremjifoundation.org").strip()
+    interviewee_email = (
+        interviewee_email or "field.recruitment@azimpremjifoundation.org"
+    ).strip()
     Applicants_name = (Applicants_name or "").strip()
     Applicants_Role = (Applicants_Role or "").strip()
     InterviewersName = (InterviewersName or "").strip()
@@ -621,13 +661,8 @@ def create_interview_event(
         or "education capacity round" in round_raw
         or ("functional round" in round_raw and "leader" not in round_raw)
     )
-    is_round2 = (
-        "demo round" in round_raw
-        or "leader round-1" in round_raw
-    )
-    is_round3 = (
-        "leader round-2" in round_raw
-    )
+    is_round2 = "demo round" in round_raw or "leader round-1" in round_raw
+    is_round3 = "leader round-2" in round_raw
     # Calibration Process + Associate Resource Person → interviewer-only email
     is_calibration_arp = (
         "calibration" in round_raw and "associate resource person" in role_raw
@@ -685,9 +720,14 @@ def create_interview_event(
                 f"?app_id={_fq(str(application_id or ''), safe='')}"
                 f"&applicant_name={_fq(str(Applicants_name or ''), safe='')}"
             )
-        elif _round_norm in ("education capacity round", "subject round",
-                             "functional round", "demo round",
-                             "leader round-1", "leader round-2"):
+        elif _round_norm in (
+            "education capacity round",
+            "subject round",
+            "functional round",
+            "demo round",
+            "leader round-1",
+            "leader round-2",
+        ):
             feedback_url = (
                 "https://careers.frappe.cloud/campus-associate-feedback-form/new"
                 f"?app_id={_fq(str(application_id or ''), safe='')}"
@@ -793,7 +833,11 @@ def create_interview_event(
             pass
 
     # For Priority 1 & 2 URLs (manually filled), append params if not already present
-    if feedback_url and "app_id=" not in feedback_url:
+    if (
+        feedback_url
+        and "app_id=" not in feedback_url
+        and "applicant_id=" not in feedback_url
+    ):
         from urllib.parse import quote as _quote
 
         _sep = "&" if "?" in feedback_url else "?"
@@ -963,7 +1007,9 @@ def create_interview_event(
     if interviewee_email and interviewee_email.strip().lower() != _org_email_lower:
         _already = {a["emailAddress"]["address"].lower() for a in attendees}
         if interviewee_email.strip().lower() not in _already:
-            attendees.append({"emailAddress": {"address": interviewee_email}, "type": "required"})
+            attendees.append(
+                {"emailAddress": {"address": interviewee_email}, "type": "required"}
+            )
     # ----------------------------------------
     # ATTACHMENTS (PUBLIC + PRIVATE FIXED)
     # --------------------------------------
@@ -1046,12 +1092,14 @@ def create_interview_event(
                     "round_one_feedback_from",
                     "round_two_feedback_form",
                     "round_tree_feedback_form",
+                    "filed_merit_track_test",
                 ]
             elif is_recruiter_round:
                 auto_attach_fields = [
                     "resume_upload",
                     "application_forms",
                     "self_declaration",
+                    "filed_merit_track_test",
                 ]
             elif is_round1:
                 if "education capacity round" in round_raw:
@@ -1060,6 +1108,7 @@ def create_interview_event(
                         "recruiter_round_feedback_form",
                         "application_forms",
                         "self_declaration",
+                        "filed_merit_track_test",
                     ]
                 else:
                     # Subject Round / Functional Round
@@ -1069,6 +1118,7 @@ def create_interview_event(
                         "round_one_feedback_from",
                         "application_forms",
                         "self_declaration",
+                        "filed_merit_track_test",
                     ]
             elif is_round2:
                 auto_attach_fields = [
@@ -1077,6 +1127,7 @@ def create_interview_event(
                     "round_one_feedback_from",
                     "application_forms",
                     "self_declaration",
+                    "filed_merit_track_test",
                 ]
             elif is_round3:
                 auto_attach_fields = [
@@ -1086,6 +1137,7 @@ def create_interview_event(
                     "round_two_feedback_form",
                     "application_forms",
                     "self_declaration",
+                    "filed_merit_track_test",
                 ]
             else:
                 auto_attach_fields = [
@@ -1093,6 +1145,10 @@ def create_interview_event(
                     "application_forms",
                     "self_declaration",
                 ]
+
+            # MeritTrac test result PDF (manually uploaded) — always attach if present,
+            # regardless of round.
+            auto_attach_fields = auto_attach_fields + ["filed_merit_track_test"]
 
             # Track filenames already added (from manual attachments) to avoid duplicates
             _already_added = {fname.lower() for fname, _ in final_files}
@@ -1360,15 +1416,22 @@ comments/recommendations for the calibration process and final selection decisio
 
     attach_url = f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/events/{event_id}/attachments"
     for fname, fb64 in final_files:
-        requests.post(
-            attach_url,
-            headers=headers,
-            json={
-                "@odata.type": "#microsoft.graph.fileAttachment",
-                "name": fname,
-                "contentBytes": fb64,
-            },
-        ).raise_for_status()
+        try:
+            attach_res = requests.post(
+                attach_url,
+                headers=headers,
+                json={
+                    "@odata.type": "#microsoft.graph.fileAttachment",
+                    "name": fname,
+                    "contentBytes": fb64,
+                },
+            )
+            attach_res.raise_for_status()
+        except Exception as _atte:
+            frappe.log_error(
+                title="INTERVIEW_ATTACHMENT_UPLOAD_FAILED",
+                message=f"Failed to attach '{fname}' to event {event_id}: {_atte}",
+            )
 
     # ----------------------------------------
     # FETCH MEETING DETAILS
@@ -1601,7 +1664,9 @@ comments/recommendations for the calibration process and final selection decisio
         _patch_ok = True
     except Exception as patch_err:
         try:
-            _patch_detail = patch_res.text if hasattr(patch_res, "text") else str(patch_err)
+            _patch_detail = (
+                patch_res.text if hasattr(patch_res, "text") else str(patch_err)
+            )
         except Exception:
             _patch_detail = str(patch_err)
         frappe.log_error(
@@ -1612,7 +1677,9 @@ comments/recommendations for the calibration process and final selection decisio
     # When organizer is also an interviewer, Graph excludes them from attendees so no
     # calendar invite is auto-sent to them. Send a plain email with interview details
     # + feedback form link. Falls back to frappe.sendmail if Graph API lacks Mail.Send permission.
-    _self_interviewers = [i for i in interviewer_list if i.strip().lower() == _org_email_lower]
+    _self_interviewers = [
+        i for i in interviewer_list if i.strip().lower() == _org_email_lower
+    ]
     if _self_interviewers:
         _self_sent = False
         try:
@@ -1623,7 +1690,17 @@ comments/recommendations for the calibration process and final selection decisio
                     "message": {
                         "subject": calendar_subject,
                         "body": {"contentType": "HTML", "content": final_body},
-                        "toRecipients": [{"emailAddress": {"address": Organizer_email}}],
+                        "toRecipients": [
+                            {"emailAddress": {"address": Organizer_email}}
+                        ],
+                        "attachments": [
+                            {
+                                "@odata.type": "#microsoft.graph.fileAttachment",
+                                "name": fname,
+                                "contentBytes": fb64,
+                            }
+                            for fname, fb64 in final_files
+                        ],
                     },
                     "saveToSentItems": True,
                 },
@@ -1650,6 +1727,10 @@ comments/recommendations for the calibration process and final selection decisio
                         subject=calendar_subject,
                         message=final_body,
                         delayed=False,
+                        attachments=[
+                            {"fname": fname, "fcontent": base64.b64decode(fb64)}
+                            for fname, fb64 in final_files
+                        ],
                         **_sender_arg,
                     )
                     _self_sent = True
@@ -1666,7 +1747,9 @@ comments/recommendations for the calibration process and final selection decisio
     # If PATCH failed after all retries, fall back to a plain email to each interviewer
     # so they at least receive the interview details and feedback form link.
     if not _patch_ok and interviewer_list:
-        _iv_send_url = f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/sendMail"
+        _iv_send_url = (
+            f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/sendMail"
+        )
         for _iv_email in interviewer_list:
             _iv_payload = {
                 "message": {
@@ -1674,12 +1757,22 @@ comments/recommendations for the calibration process and final selection decisio
                     "body": {"contentType": "HTML", "content": final_body},
                     "toRecipients": [{"emailAddress": {"address": _iv_email}}],
                     "ccRecipients": [{"emailAddress": {"address": Organizer_email}}],
+                    "attachments": [
+                        {
+                            "@odata.type": "#microsoft.graph.fileAttachment",
+                            "name": fname,
+                            "contentBytes": fb64,
+                        }
+                        for fname, fb64 in final_files
+                    ],
                 },
                 "saveToSentItems": True,
             }
             _iv_graph_sent = False
             try:
-                _iv_res = requests.post(_iv_send_url, headers=headers, json=_iv_payload, timeout=30)
+                _iv_res = requests.post(
+                    _iv_send_url, headers=headers, json=_iv_payload, timeout=30
+                )
                 _iv_res.raise_for_status()
                 _iv_graph_sent = True
             except Exception:
@@ -1693,6 +1786,10 @@ comments/recommendations for the calibration process and final selection decisio
                             subject=calendar_subject,
                             message=final_body,
                             delayed=False,
+                            attachments=[
+                                {"fname": fname, "fcontent": base64.b64decode(fb64)}
+                                for fname, fb64 in final_files
+                            ],
                             **_sender_arg,
                         )
                         break
@@ -1807,9 +1904,13 @@ comments/recommendations for the calibration process and final selection decisio
         # Skip if candidate is the same person as the organizer or any interviewer
         # (they already received the interviewer email; sending a second one is confusing).
         _CANDIDATE_SENDER = "field.recruitment@azimpremjifoundation.org"
-        _all_interviewer_emails_lower = {e.strip().lower() for e in interviewer_list if e.strip()}
+        _all_interviewer_emails_lower = {
+            e.strip().lower() for e in interviewer_list if e.strip()
+        }
         _all_interviewer_emails_lower.add(_org_email_lower)
-        _is_same_person = interviewee_email.strip().lower() in _all_interviewer_emails_lower
+        _is_same_person = (
+            interviewee_email.strip().lower() in _all_interviewer_emails_lower
+        )
 
         if not interviewee_email:
             frappe.log_error(
@@ -1824,10 +1925,12 @@ comments/recommendations for the calibration process and final selection decisio
                 "subject": candidate_email_subject,
                 "body": {"contentType": "HTML", "content": candidate_email_body},
                 "toRecipients": [{"emailAddress": {"address": interviewee_email}}],
-                "from": {"emailAddress": {
-                    "address": _CANDIDATE_SENDER,
-                    "name": "Field Recruitment Azim Premji Foundation",
-                }},
+                "from": {
+                    "emailAddress": {
+                        "address": _CANDIDATE_SENDER,
+                        "name": "Field Recruitment Azim Premji Foundation",
+                    }
+                },
             }
 
             # Attempt 1: send directly FROM field.recruitment@ mailbox via Graph.
@@ -1903,7 +2006,10 @@ comments/recommendations for the calibration process and final selection decisio
                 # Last resort: frappe.sendmail using the default outgoing account.
                 # Use field.recruitment@ as sender only if that Email Account exists in Frappe.
                 _cand_sender_arg = {}
-                if frappe.db.exists("Email Account", {"email_id": _CANDIDATE_SENDER, "enable_outgoing": 1}):
+                if frappe.db.exists(
+                    "Email Account",
+                    {"email_id": _CANDIDATE_SENDER, "enable_outgoing": 1},
+                ):
                     _cand_sender_arg = {"sender": _CANDIDATE_SENDER}
                 try:
                     frappe.sendmail(
@@ -1938,16 +2044,23 @@ comments/recommendations for the calibration process and final selection decisio
     # ── SMS + WhatsApp notification ───────────────────────────────────────────
     try:
         from ms_calendar.ms_calendar.sms_utils import send_sms, send_whatsapp
+
         _notify_phone = (candidate_phone or "").strip()
         if not _notify_phone and application_id:
-            _notify_phone = frappe.db.get_value(
-                "Field Registration Form", application_id, "phone_number"
-            ) or ""
+            _notify_phone = (
+                frappe.db.get_value(
+                    "Field Registration Form", application_id, "phone_number"
+                )
+                or ""
+            )
         _full_name = ""
         if application_id:
-            _full_name = frappe.db.get_value(
-                "Field Registration Form", application_id, "full_name_aadhaar"
-            ) or ""
+            _full_name = (
+                frappe.db.get_value(
+                    "Field Registration Form", application_id, "full_name_aadhaar"
+                )
+                or ""
+            )
         if _notify_phone and Interview_round:
             _notify_kwargs = dict(
                 phone=_notify_phone,
@@ -1960,7 +2073,9 @@ comments/recommendations for the calibration process and final selection decisio
             send_sms(**_notify_kwargs)
             send_whatsapp(**_notify_kwargs)
     except Exception:
-        frappe.log_error(frappe.get_traceback(), "Interview Schedule SMS/WhatsApp Failed")
+        frappe.log_error(
+            frappe.get_traceback(), "Interview Schedule SMS/WhatsApp Failed"
+        )
 
     frappe.msgprint("✅ Event created successfully. Outlook invite sent.")
 
@@ -2057,7 +2172,10 @@ _FOD_STAGES = [
         "stage": "Applications",
         "color": "FFF2CC",
         "rows": [
-            {"label": "Carried forward Application from last year Before April", "key": "carried_forward"},
+            {
+                "label": "Carried forward Application from last year Before April",
+                "key": "carried_forward",
+            },
             {"label": "Received from April this Year", "key": "received_this_year"},
             {"label": "Total Applications", "key": "total", "is_total": True},
         ],
@@ -2120,8 +2238,14 @@ _FOD_STAGES = [
             {"label": "Joined", "key": "joined"},
             {"label": "Offer declined", "key": "offer_declined"},
             {"label": "Offer Revoked", "key": "offer_revoked"},
-            {"label": "Joined in 2025-26, Offered in 2025-26", "key": "joined_offered_current"},
-            {"label": "Joined in 2025-26, Offered in 2024-25", "key": "joined_offered_prev"},
+            {
+                "label": "Joined in 2025-26, Offered in 2025-26",
+                "key": "joined_offered_current",
+            },
+            {
+                "label": "Joined in 2025-26, Offered in 2024-25",
+                "key": "joined_offered_prev",
+            },
         ],
     },
 ]
@@ -2146,16 +2270,35 @@ _FOD_ROLE_TO_COL = {
 _FOD_COLS = ["RP", "ST", "HL", "LH"]
 
 _FOD_ALL_KEYS = [
-    "carried_forward", "received_this_year", "total",
-    "cv_shortlist", "cv_regret", "cv_pending",
-    "written_select", "written_regret",
-    "recruiter_select", "recruiter_regret", "recruiter_pending",
-    "functional_select", "functional_regret", "functional_scheduled",
-    "functional_feedback_pending", "functional_pending",
-    "final_select", "final_regret", "final_scheduled",
-    "final_feedback_pending", "final_pending",
-    "offer_in_process", "offer_made", "offer_accepted", "joined",
-    "offer_declined", "offer_revoked", "joined_offered_current", "joined_offered_prev",
+    "carried_forward",
+    "received_this_year",
+    "total",
+    "cv_shortlist",
+    "cv_regret",
+    "cv_pending",
+    "written_select",
+    "written_regret",
+    "recruiter_select",
+    "recruiter_regret",
+    "recruiter_pending",
+    "functional_select",
+    "functional_regret",
+    "functional_scheduled",
+    "functional_feedback_pending",
+    "functional_pending",
+    "final_select",
+    "final_regret",
+    "final_scheduled",
+    "final_feedback_pending",
+    "final_pending",
+    "offer_in_process",
+    "offer_made",
+    "offer_accepted",
+    "joined",
+    "offer_declined",
+    "offer_revoked",
+    "joined_offered_current",
+    "joined_offered_prev",
 ]
 
 
@@ -2189,7 +2332,9 @@ def get_field_overall_dashboard():
         if not col:
             continue
 
-        creation_date = record["creation"].date() if record["creation"] else date.today()
+        creation_date = (
+            record["creation"].date() if record["creation"] else date.today()
+        )
         status_key = _FOD_STATUS_TO_KEY.get(record["application_status"] or "")
 
         for entry in [state, "Grand Total"]:
@@ -2238,9 +2383,16 @@ def download_field_dashboard_excel():
     left = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
     STATE_FILLS = [
-        "DDEBF7", "E2EFDA", "FFF2CC", "FCE4D6",
-        "D9E1F2", "EAF4E2", "FDE9D9", "EBE9F3",
-        "D5E8D4", "FFF9C4",
+        "DDEBF7",
+        "E2EFDA",
+        "FFF2CC",
+        "FCE4D6",
+        "D9E1F2",
+        "EAF4E2",
+        "FDE9D9",
+        "EBE9F3",
+        "D5E8D4",
+        "FFF9C4",
     ]
 
     def cell_style(ws_cell, fill=None, font=None, align=None, brd=border):
@@ -2269,8 +2421,10 @@ def download_field_dashboard_excel():
         grp_fill = make_fill(fill_hex)
         # Merge state header across sub-columns
         ws.merge_cells(
-            start_row=2, start_column=col_cursor,
-            end_row=2, end_column=col_cursor + len(SUB_COLS) - 1
+            start_row=2,
+            start_column=col_cursor,
+            end_row=2,
+            end_column=col_cursor + len(SUB_COLS) - 1,
         )
         hc = ws.cell(2, col_cursor, grp)
         cell_style(hc, fill=grp_fill, font=Font(bold=True, size=9), align=center)
@@ -2321,16 +2475,19 @@ def download_field_dashboard_excel():
                     col_cursor += 1
                 # Total column for this group
                 tc = ws.cell(row_cursor, col_cursor, row_total if row_total else "")
-                cell_style(tc, fill=make_fill("D9D9D9") if is_total else row_fill,
-                           font=Font(bold=True, size=9) if is_total else row_font, align=center)
+                cell_style(
+                    tc,
+                    fill=make_fill("D9D9D9") if is_total else row_fill,
+                    font=Font(bold=True, size=9) if is_total else row_font,
+                    align=center,
+                )
                 col_cursor += 1
 
             row_cursor += 1
 
         # Stage label cell with rowspan (merge)
         ws.merge_cells(
-            start_row=row_start, start_column=1,
-            end_row=row_cursor - 1, end_column=1
+            start_row=row_start, start_column=1, end_row=row_cursor - 1, end_column=1
         )
         sc = ws.cell(row_start, 1, stage_cfg["stage"])
         cell_style(sc, fill=stage_fill, font=Font(bold=True, size=9), align=center)
@@ -2362,104 +2519,162 @@ def download_field_dashboard_excel():
 # ── Field Overall Dashboard Excel (Field Registration Form1) ──────────────────
 
 _FOV_STATUS_TO_KEY = {
-    "New Applicant":       "cv_pending",
-    "CV Shortlist":        "cv_shortlist",
-    "CV Reject":           "cv_regret",
-    "Test Process":        "written_select",
-    "Test Select":         "written_select",
-    "Test Reject":         "written_regret",
-    "Recruiter Round":     "recruiter_select",
-    "Recruiter Reject":    "recruiter_regret",
-    "Round One":           "functional_select",
-    "Round 1 Reject":      "functional_regret",
-    "Round Two":           "final_select",
-    "Round 2 Reject":      "final_regret",
-    "Round Three":         "final_select",
-    "Round 3 Reject":      "final_regret",
+    "New Applicant": "cv_pending",
+    "CV Shortlist": "cv_shortlist",
+    "CV Reject": "cv_regret",
+    "Test Process": "written_select",
+    "Test Select": "written_select",
+    "Test Reject": "written_regret",
+    "Recruiter Round": "recruiter_select",
+    "Recruiter Reject": "recruiter_regret",
+    "Round One": "functional_select",
+    "Round 1 Reject": "functional_regret",
+    "Round Two": "final_select",
+    "Round 2 Reject": "final_regret",
+    "Round Three": "final_select",
+    "Round 3 Reject": "final_regret",
     "Document Collection": "offer_in_process",
-    "Offer":               "offer_made",
-    "Offer Accepted":      "offer_accepted",
-    "Joined":              "joined",
-    "Offer Declined":      "offer_declined",
-    "Offer Revoked":       "offer_revoked",
-    "Applied":             "cv_pending",
-    "Shortlisted":         "cv_shortlist",
-    "Rejected":            "cv_regret",
+    "Offer": "offer_made",
+    "Offer Accepted": "offer_accepted",
+    "Joined": "joined",
+    "Offer Declined": "offer_declined",
+    "Offer Revoked": "offer_revoked",
+    "Applied": "cv_pending",
+    "Shortlisted": "cv_shortlist",
+    "Rejected": "cv_regret",
     "Interview Scheduled": "functional_scheduled",
-    "Selected":            "joined",
-    "On Hold":             "offer_in_process",
+    "Selected": "joined",
+    "On Hold": "offer_in_process",
 }
 
 _FOV_STAGES = [
-    ("Applications", "FFF9C4", [
-        ("Carried forward Application from last year Before April", "carried_forward", False),
-        ("Received from April this Year",                           "received_this_year", False),
-        ("Total Applications",                                      "total", True),
-    ]),
-    ("CV screening", "DCEDC8", [
-        ("Shortlist", "cv_shortlist", False),
-        ("Regret",    "cv_regret",    False),
-        ("Pending",   "cv_pending",   False),
-    ]),
-    ("Written test", "BBDEFB", [
-        ("Select", "written_select", False),
-        ("Regret", "written_regret", False),
-    ]),
-    ("Recruiter screening", "DCEDC8", [
-        ("Select",  "recruiter_select",  False),
-        ("Regret",  "recruiter_regret",  False),
-        ("Pending", "recruiter_pending", False),
-    ]),
-    ("Functional round", "BBDEFB", [
-        ("Select",           "functional_select",           False),
-        ("Regret",           "functional_regret",           False),
-        ("Scheduled",        "functional_scheduled",        False),
-        ("Feedback Pending", "functional_feedback_pending", False),
-        ("Pending",          "functional_pending",          False),
-    ]),
-    ("Final round", "FFCCBC", [
-        ("Select",           "final_select",           False),
-        ("Regret",           "final_regret",           False),
-        ("Scheduled",        "final_scheduled",        False),
-        ("Feedback Pending", "final_feedback_pending", False),
-        ("Pending",          "final_pending",          False),
-    ]),
-    ("Offers", "FFE0B2", [
-        ("Offer in process",                      "offer_in_process",       False),
-        ("Offer Made",                            "offer_made",             False),
-        ("Offer Accepted",                        "offer_accepted",         False),
-        ("Joined",                                "joined",                 False),
-        ("Offer declined",                        "offer_declined",         False),
-        ("Offer Revoked",                         "offer_revoked",          False),
-        ("Joined in 2025-26, Offered in 2025-26", "joined_offered_current", False),
-        ("Joined in 2025-26, Offered in 2024-25", "joined_offered_prev",    False),
-    ]),
+    (
+        "Applications",
+        "FFF9C4",
+        [
+            (
+                "Carried forward Application from last year Before April",
+                "carried_forward",
+                False,
+            ),
+            ("Received from April this Year", "received_this_year", False),
+            ("Total Applications", "total", True),
+        ],
+    ),
+    (
+        "CV screening",
+        "DCEDC8",
+        [
+            ("Shortlist", "cv_shortlist", False),
+            ("Regret", "cv_regret", False),
+            ("Pending", "cv_pending", False),
+        ],
+    ),
+    (
+        "Written test",
+        "BBDEFB",
+        [
+            ("Select", "written_select", False),
+            ("Regret", "written_regret", False),
+        ],
+    ),
+    (
+        "Recruiter screening",
+        "DCEDC8",
+        [
+            ("Select", "recruiter_select", False),
+            ("Regret", "recruiter_regret", False),
+            ("Pending", "recruiter_pending", False),
+        ],
+    ),
+    (
+        "Functional round",
+        "BBDEFB",
+        [
+            ("Select", "functional_select", False),
+            ("Regret", "functional_regret", False),
+            ("Scheduled", "functional_scheduled", False),
+            ("Feedback Pending", "functional_feedback_pending", False),
+            ("Pending", "functional_pending", False),
+        ],
+    ),
+    (
+        "Final round",
+        "FFCCBC",
+        [
+            ("Select", "final_select", False),
+            ("Regret", "final_regret", False),
+            ("Scheduled", "final_scheduled", False),
+            ("Feedback Pending", "final_feedback_pending", False),
+            ("Pending", "final_pending", False),
+        ],
+    ),
+    (
+        "Offers",
+        "FFE0B2",
+        [
+            ("Offer in process", "offer_in_process", False),
+            ("Offer Made", "offer_made", False),
+            ("Offer Accepted", "offer_accepted", False),
+            ("Joined", "joined", False),
+            ("Offer declined", "offer_declined", False),
+            ("Offer Revoked", "offer_revoked", False),
+            ("Joined in 2025-26, Offered in 2025-26", "joined_offered_current", False),
+            ("Joined in 2025-26, Offered in 2024-25", "joined_offered_prev", False),
+        ],
+    ),
 ]
 
 _FOV_ALL_KEYS = [
-    "carried_forward", "received_this_year", "total",
-    "cv_shortlist", "cv_regret", "cv_pending",
-    "written_select", "written_regret",
-    "recruiter_select", "recruiter_regret", "recruiter_pending",
-    "functional_select", "functional_regret", "functional_scheduled",
-    "functional_feedback_pending", "functional_pending",
-    "final_select", "final_regret", "final_scheduled",
-    "final_feedback_pending", "final_pending",
-    "offer_in_process", "offer_made", "offer_accepted", "joined",
-    "offer_declined", "offer_revoked", "joined_offered_current", "joined_offered_prev",
+    "carried_forward",
+    "received_this_year",
+    "total",
+    "cv_shortlist",
+    "cv_regret",
+    "cv_pending",
+    "written_select",
+    "written_regret",
+    "recruiter_select",
+    "recruiter_regret",
+    "recruiter_pending",
+    "functional_select",
+    "functional_regret",
+    "functional_scheduled",
+    "functional_feedback_pending",
+    "functional_pending",
+    "final_select",
+    "final_regret",
+    "final_scheduled",
+    "final_feedback_pending",
+    "final_pending",
+    "offer_in_process",
+    "offer_made",
+    "offer_accepted",
+    "joined",
+    "offer_declined",
+    "offer_revoked",
+    "joined_offered_current",
+    "joined_offered_prev",
 ]
 
 DATA_COLS = ["RP", "ST", "HL", "LH"]
-SUB_COLS  = ["RP", "ST", "HL", "LH", "Total"]
+SUB_COLS = ["RP", "ST", "HL", "LH", "Total"]
 
 
 def _fov_get_col(role, department):
     dept = (department or "").lower().strip()
-    if dept == "health":                          return "HL"
-    if dept in ("livelihood", "livelihoods"):     return "LH"
-    if role == "School Teacher":                  return "ST"
-    if role in ("Resource Person", "District Resource Person",
-                "Cluster Resource Person", "Associate Resource Person"):
+    if dept == "health":
+        return "HL"
+    if dept in ("livelihood", "livelihoods"):
+        return "LH"
+    if role == "School Teacher":
+        return "ST"
+    if role in (
+        "Resource Person",
+        "District Resource Person",
+        "Cluster Resource Person",
+        "Associate Resource Person",
+    ):
         return "RP"
     return None
 
@@ -2476,7 +2691,7 @@ def download_field_overall_excel(from_date=None, to_date=None):
     if from_date:
         filters.append(["creation", ">=", from_date + " 00:00:00"])
     if to_date:
-        filters.append(["creation", "<=", to_date   + " 23:59:59"])
+        filters.append(["creation", "<=", to_date + " 23:59:59"])
 
     try:
         records = frappe.db.sql(
@@ -2488,12 +2703,14 @@ def download_field_overall_excel(from_date=None, to_date=None):
             {date_filters}
             """.format(
                 date_filters=(
-                    ("AND creation >= %(fd)s" if from_date else "") +
-                    (" AND creation <= %(td)s" if to_date else "")
+                    ("AND creation >= %(fd)s" if from_date else "")
+                    + (" AND creation <= %(td)s" if to_date else "")
                 )
             ),
-            {"fd": from_date + " 00:00:00" if from_date else None,
-             "td": to_date   + " 23:59:59" if to_date   else None},
+            {
+                "fd": from_date + " 00:00:00" if from_date else None,
+                "td": to_date + " 23:59:59" if to_date else None,
+            },
             as_dict=True,
         )
     except Exception:
@@ -2507,23 +2724,30 @@ def download_field_overall_excel(from_date=None, to_date=None):
 
     april_1 = date_cls(date_cls.today().year, 4, 1)
 
-    states = sorted(set(
-        (r.get("location") or r.get("worklocation") or r.get("native_state") or "Unknown").strip()
-        for r in records
-        if (r.get("location") or r.get("worklocation") or r.get("native_state"))
-    ))
+    states = sorted(
+        set(
+            (
+                r.get("location")
+                or r.get("worklocation")
+                or r.get("native_state")
+                or "Unknown"
+            ).strip()
+            for r in records
+            if (r.get("location") or r.get("worklocation") or r.get("native_state"))
+        )
+    )
     all_entries = states + ["Grand Total"]
 
     data = {
-        e: {c: {k: 0 for k in _FOV_ALL_KEYS} for c in DATA_COLS}
-        for e in all_entries
+        e: {c: {k: 0 for k in _FOV_ALL_KEYS} for c in DATA_COLS} for e in all_entries
     }
 
     for rec in records:
         state = (
-            (rec.get("location")     or "").strip() or
-            (rec.get("worklocation") or "").strip() or
-            (rec.get("native_state") or "").strip() or ""
+            (rec.get("location") or "").strip()
+            or (rec.get("worklocation") or "").strip()
+            or (rec.get("native_state") or "").strip()
+            or ""
         )
         if not state:
             continue  # skip records with no state data
@@ -2536,7 +2760,9 @@ def download_field_overall_excel(from_date=None, to_date=None):
             if state not in all_entries:
                 all_entries.insert(-1, state)  # insert before Grand Total
 
-        creation_date = rec["creation"].date() if rec.get("creation") else date_cls.today()
+        creation_date = (
+            rec["creation"].date() if rec.get("creation") else date_cls.today()
+        )
         sk = _FOV_STATUS_TO_KEY.get(rec.get("application_status") or "")
 
         for entry in [state, "Grand Total"]:
@@ -2554,40 +2780,59 @@ def download_field_overall_excel(from_date=None, to_date=None):
     ws.title = "Field Dashboard"
 
     thin = Side(style="thin", color="AAAAAA")
-    bdr  = Border(left=thin, right=thin, top=thin, bottom=thin)
-    ctr  = Alignment(horizontal="center",  vertical="center", wrap_text=True)
-    lft  = Alignment(horizontal="left",    vertical="center", wrap_text=True)
+    bdr = Border(left=thin, right=thin, top=thin, bottom=thin)
+    ctr = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    lft = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
-    def fill(hex_):  return PatternFill("solid", fgColor=hex_)
+    def fill(hex_):
+        return PatternFill("solid", fgColor=hex_)
+
     def font(bold=False, color="000000", size=9):
         return Font(bold=bold, color=color, size=size)
+
     def cell(ws_, r, c, val="", bg=None, fg="000000", bold=False, align=None):
         cl = ws_.cell(r, c, val)
-        if bg:    cl.fill   = fill(bg)
-        cl.font   = font(bold=bold, color=fg, size=9)
+        if bg:
+            cl.fill = fill(bg)
+        cl.font = font(bold=bold, color=fg, size=9)
         cl.border = bdr
         cl.alignment = align or ctr
         return cl
 
     HDR_BG, HDR_FG = "2C5F8A", "FFFFFF"
-    TOT_BG         = "E0E0E0"
-    RTOT_BG        = "BDBDBD"
-    GRAND_BG       = "1e3a5f"
+    TOT_BG = "E0E0E0"
+    RTOT_BG = "BDBDBD"
+    GRAND_BG = "1e3a5f"
 
     # Row 1 – date of report
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=2)
-    cell(ws, 1, 1, f"Date of Report: {date_cls.today().strftime('%d-%b-%Y')}",
-         bg="FFFFFF", bold=True, align=lft)
+    cell(
+        ws,
+        1,
+        1,
+        f"Date of Report: {date_cls.today().strftime('%d-%b-%Y')}",
+        bg="FFFFFF",
+        bold=True,
+        align=lft,
+    )
 
     # Row 2 – state headers
-    cell(ws, 2, 1, "Stages",  bg=HDR_BG, fg=HDR_FG, bold=True)
-    cell(ws, 2, 2, "Status",  bg=HDR_BG, fg=HDR_FG, bold=True)
+    cell(ws, 2, 1, "Stages", bg=HDR_BG, fg=HDR_FG, bold=True)
+    cell(ws, 2, 2, "Status", bg=HDR_BG, fg=HDR_FG, bold=True)
     col_cur = 3
     for gi, grp in enumerate(all_entries):
-        bg = GRAND_BG if gi == len(all_entries) - 1 else ("DDEBF7" if gi % 2 == 0 else "EBF3FB")
+        bg = (
+            GRAND_BG
+            if gi == len(all_entries) - 1
+            else ("DDEBF7" if gi % 2 == 0 else "EBF3FB")
+        )
         fg = "FFFFFF" if gi == len(all_entries) - 1 else "1e293b"
-        ws.merge_cells(start_row=2, start_column=col_cur,
-                       end_row=2,   end_column=col_cur + len(SUB_COLS) - 1)
+        ws.merge_cells(
+            start_row=2,
+            start_column=col_cur,
+            end_row=2,
+            end_column=col_cur + len(SUB_COLS) - 1,
+        )
         cell(ws, 2, col_cur, grp, bg=bg, fg=fg, bold=True)
         col_cur += len(SUB_COLS)
 
@@ -2596,7 +2841,11 @@ def download_field_overall_excel(from_date=None, to_date=None):
     cell(ws, 3, 2, "Status", bg=HDR_BG, fg=HDR_FG, bold=True)
     col_cur = 3
     for gi in range(len(all_entries)):
-        bg = GRAND_BG if gi == len(all_entries) - 1 else ("DDEBF7" if gi % 2 == 0 else "EBF3FB")
+        bg = (
+            GRAND_BG
+            if gi == len(all_entries) - 1
+            else ("DDEBF7" if gi % 2 == 0 else "EBF3FB")
+        )
         fg = "FFFFFF" if gi == len(all_entries) - 1 else "374151"
         for sc in SUB_COLS:
             cell(ws, 3, col_cur, sc, bg=bg, fg=fg, bold=(sc == "Total"))
@@ -2625,18 +2874,29 @@ def download_field_overall_excel(from_date=None, to_date=None):
                     row_total += v
                     col_cur += 1
 
-                tot_bg = ("0a1d30" if is_total else "16304d") if is_grand else (
-                    "9E9E9E" if is_total else TOT_BG)
+                tot_bg = (
+                    ("0a1d30" if is_total else "16304d")
+                    if is_grand
+                    else ("9E9E9E" if is_total else TOT_BG)
+                )
                 tot_fg = "FFFFFF" if is_grand else "000000"
-                cell(ws, row_cur, col_cur, row_total if row_total else "",
-                     bg=tot_bg, fg=tot_fg, bold=True)
+                cell(
+                    ws,
+                    row_cur,
+                    col_cur,
+                    row_total if row_total else "",
+                    bg=tot_bg,
+                    fg=tot_fg,
+                    bold=True,
+                )
                 col_cur += 1
 
             row_cur += 1
 
         # Stage label with rowspan
-        ws.merge_cells(start_row=row_start, start_column=1,
-                       end_row=row_cur - 1,  end_column=1)
+        ws.merge_cells(
+            start_row=row_start, start_column=1, end_row=row_cur - 1, end_column=1
+        )
         cell(ws, row_start, 1, stage_name, bg=stage_hex, bold=True)
 
     # Column widths
@@ -2760,12 +3020,32 @@ _STD_STATUS_TO_KEY = {
 }
 
 _STD_ALL_KEYS = [
-    "total_received", "cv_shortlist", "cv_regret", "cv_pending",
-    "written_select", "written_regret", "written_scheduled", "written_absent", "written_pending",
-    "recruiter_select", "recruiter_regret", "recruiter_scheduled", "recruiter_pending",
-    "functional_select", "functional_regret", "functional_scheduled", "functional_pending",
-    "final_select", "final_regret", "final_scheduled", "final_pending",
-    "offer_made", "offer_accepted", "offer_declined", "offer_revoked", "joined",
+    "total_received",
+    "cv_shortlist",
+    "cv_regret",
+    "cv_pending",
+    "written_select",
+    "written_regret",
+    "written_scheduled",
+    "written_absent",
+    "written_pending",
+    "recruiter_select",
+    "recruiter_regret",
+    "recruiter_scheduled",
+    "recruiter_pending",
+    "functional_select",
+    "functional_regret",
+    "functional_scheduled",
+    "functional_pending",
+    "final_select",
+    "final_regret",
+    "final_scheduled",
+    "final_pending",
+    "offer_made",
+    "offer_accepted",
+    "offer_declined",
+    "offer_revoked",
+    "joined",
 ]
 
 _STD_DEFAULT_SUBJECTS = [
@@ -2810,11 +3090,15 @@ def download_school_teacher_excel(from_date=None, to_date=None, schools=None):
     _school_list = []
     if schools:
         try:
-            _school_list = _json.loads(schools) if schools.startswith('[') else [s.strip() for s in schools.split(',') if s.strip()]
+            _school_list = (
+                _json.loads(schools)
+                if schools.startswith("[")
+                else [s.strip() for s in schools.split(",") if s.strip()]
+            )
         except Exception:
-            _school_list = [s.strip() for s in schools.split(',') if s.strip()]
+            _school_list = [s.strip() for s in schools.split(",") if s.strip()]
     if _school_list:
-        placeholders = ','.join(['%s'] * len(_school_list))
+        placeholders = ",".join(["%s"] * len(_school_list))
         conditions.append("`test_location` IN ({0})".format(placeholders))
         params.extend(_school_list)
 
@@ -2822,14 +3106,20 @@ def download_school_teacher_excel(from_date=None, to_date=None, schools=None):
     table = "tabField Registration Form1"
     try:
         rows = frappe.db.sql(
-            "SELECT `written_subject`, `application_status` FROM `{0}` WHERE {1}".format(table, where_clause),
-            params, as_dict=True,
+            "SELECT `written_subject`, `application_status` FROM `{0}` WHERE {1}".format(
+                table, where_clause
+            ),
+            params,
+            as_dict=True,
         )
     except Exception:
         table = "tabField Registration Form"
         rows = frappe.db.sql(
-            "SELECT `written_subject`, `application_status` FROM `{0}` WHERE {1}".format(table, where_clause),
-            params, as_dict=True,
+            "SELECT `written_subject`, `application_status` FROM `{0}` WHERE {1}".format(
+                table, where_clause
+            ),
+            params,
+            as_dict=True,
         )
 
     # Collect unique subjects
@@ -2867,7 +3157,9 @@ def download_school_teacher_excel(from_date=None, to_date=None, schools=None):
     thin = Side(style="thin", color="AAAAAA")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    def _cell(r, c, val, bg="FFFFFF", fg="000000", bold=False, wrap=False, align="center"):
+    def _cell(
+        r, c, val, bg="FFFFFF", fg="000000", bold=False, wrap=False, align="center"
+    ):
         cell = ws.cell(row=r, column=c, value=val)
         cell.fill = PatternFill("solid", fgColor=bg)
         cell.font = Font(color=fg, bold=bold, size=10)
@@ -2909,18 +3201,31 @@ def download_school_teacher_excel(from_date=None, to_date=None, schools=None):
             is_total = row_cfg.get("is_total", False)
             row_bg = "D9D9D9" if is_total else stage_hex
 
-            _cell(row_cur, 2, row_cfg["label"], bg=row_bg, bold=is_total, align="left", wrap=True)
+            _cell(
+                row_cur,
+                2,
+                row_cfg["label"],
+                bg=row_bg,
+                bold=is_total,
+                align="left",
+                wrap=True,
+            )
 
             for ci, col_name in enumerate(all_cols):
                 val = data[col_name].get(key, 0)
-                col_bg = "BBBBBB" if (is_total and ci == 0) else ("D9D9D9" if ci == 0 else row_bg)
+                col_bg = (
+                    "BBBBBB"
+                    if (is_total and ci == 0)
+                    else ("D9D9D9" if ci == 0 else row_bg)
+                )
                 _cell(row_cur, 3 + ci, val if val else "", bg=col_bg, bold=(ci == 0))
 
             row_cur += 1
 
         # Stage label with merge
-        ws.merge_cells(start_row=row_start, start_column=1,
-                       end_row=row_cur - 1, end_column=1)
+        ws.merge_cells(
+            start_row=row_start, start_column=1, end_row=row_cur - 1, end_column=1
+        )
         _cell(row_start, 1, stage_cfg["stage"], bg=stage_hex, bold=True, wrap=True)
 
     output = io.BytesIO()
@@ -2931,3 +3236,298 @@ def download_school_teacher_excel(from_date=None, to_date=None, schools=None):
     frappe.local.response.filecontent = output.read()
     frappe.local.response.type = "binary"
 
+
+# ── BGV Document Collection ────────────────────────────────────────────────────
+
+
+@frappe.whitelist()
+def get_bgv_document_collection(application_id):
+    """
+    Return document collection status for the BGV Request linked to a Field Registration Form.
+    Returns required documents, uploaded documents, and missing documents.
+    """
+    bgv_list = frappe.get_all(
+        "BGV Request",
+        filters={"job_applicant": application_id},
+        fields=["name", "status", "candidate_name", "consent_received"],
+        order_by="creation desc",
+        limit=1,
+    )
+    if not bgv_list:
+        return {
+            "error": "No BGV Request found for this application.",
+            "bgv_request": None,
+        }
+
+    bgv_doc = frappe.get_doc("BGV Request", bgv_list[0]["name"])
+    required = bgv_doc.get_required_documents()
+    missing = bgv_doc.get_missing_documents()
+
+    uploaded = [
+        {
+            "document_type": row.document_type,
+            "document_file": row.document_file,
+            "uploaded_on": str(row.uploaded_on or ""),
+            "uploaded_by": row.uploaded_by or "",
+            "remarks": row.remarks or "",
+        }
+        for row in (bgv_doc.documents or [])
+    ]
+
+    return {
+        "bgv_request": bgv_doc.name,
+        "status": bgv_doc.status,
+        "candidate_name": bgv_doc.candidate_name,
+        "consent_received": bgv_doc.consent_received,
+        "required_documents": required,
+        "uploaded_documents": uploaded,
+        "missing_documents": missing,
+    }
+
+
+@frappe.whitelist()
+def save_bgv_document(bgv_request_name, document_type, document_file, remarks=None):
+    """
+    Add or update a document row in the BGV Request documents child table.
+    If a row for document_type already exists it is updated; otherwise a new row is appended.
+    """
+    from frappe.utils import today
+
+    doc = frappe.get_doc("BGV Request", bgv_request_name)
+
+    for row in doc.documents:
+        if row.document_type == document_type:
+            row.document_file = document_file
+            if remarks:
+                row.remarks = remarks
+            row.uploaded_on = today()
+            row.uploaded_by = frappe.session.user
+            doc.save(ignore_permissions=True)
+            frappe.db.commit()
+            return {"message": f"{document_type} updated successfully."}
+
+    doc.append(
+        "documents",
+        {
+            "document_type": document_type,
+            "document_file": document_file,
+            "remarks": remarks or "",
+            "uploaded_on": today(),
+            "uploaded_by": frappe.session.user,
+        },
+    )
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+    return {"message": f"{document_type} uploaded successfully."}
+
+
+@frappe.whitelist()
+def get_bgv_missing_documents(bgv_request_name):
+    """Return required, uploaded, and missing document lists for a BGV Request."""
+    doc = frappe.get_doc("BGV Request", bgv_request_name)
+    return {
+        "missing": doc.get_missing_documents(),
+        "required": doc.get_required_documents(),
+        "uploaded": doc.get_uploaded_document_types(),
+    }
+
+
+@frappe.whitelist(allow_guest=True)
+def notify_others_on_feedback_submission(
+    application_id,
+    submitted_by_email,
+    interview_round=None,
+    feedback_data=None,
+    secret=None,
+):
+    """
+    Called by a Webhook configured on the external feedback-form site
+    (careers.frappe.cloud) right after an interviewer submits their feedback.
+    Emails the remaining interviewers on the matching Field Interview Schedule
+    a copy of the submitted feedback, excluding whoever just submitted it.
+    """
+    import json
+
+    expected_secret = frappe.conf.get("feedback_webhook_secret")
+    if expected_secret and secret != expected_secret:
+        frappe.throw("Invalid webhook secret", frappe.PermissionError)
+
+    application_id = (application_id or "").strip()
+    submitted_by_email = (submitted_by_email or "").strip().lower()
+    if not application_id or not submitted_by_email:
+        frappe.throw("application_id and submitted_by_email are required")
+
+    if isinstance(feedback_data, str):
+        try:
+            feedback_data = json.loads(feedback_data)
+        except Exception:
+            feedback_data = {"Feedback": feedback_data}
+    feedback_data = feedback_data or {}
+
+    filters = {"application_id": application_id}
+    if interview_round:
+        filters["interview_round"] = interview_round
+
+    schedules = frappe.get_all(
+        "Field Interview Schedule",
+        filters=filters,
+        fields=["name", "applicants_name"],
+        order_by="modified desc",
+        limit=1,
+    )
+    if not schedules:
+        frappe.log_error(
+            f"No Field Interview Schedule found for application_id={application_id}",
+            "Feedback Notify: Schedule Not Found",
+        )
+        return {"status": "error", "message": "Field Interview Schedule not found"}
+
+    schedule = frappe.get_doc("Field Interview Schedule", schedules[0]["name"])
+    all_emails = [
+        row.interviewer_email
+        for row in (schedule.interviewer_email or [])
+        if row.interviewer_email
+    ]
+    other_emails = [e for e in all_emails if e.strip().lower() != submitted_by_email]
+
+    if not other_emails:
+        return {"status": "skipped", "message": "No other interviewers to notify"}
+
+    rows_html = "".join(
+        f"<tr><td style='padding:4px 12px;font-weight:600;vertical-align:top;'>{k}</td>"
+        f"<td style='padding:4px 12px;'>{v}</td></tr>"
+        for k, v in feedback_data.items()
+    )
+    message = f"""
+        <p>Hi,</p>
+        <p><b>{submitted_by_email}</b> has submitted their interview feedback for
+        <b>{schedule.applicants_name or application_id}</b> (Application ID: {application_id}).</p>
+        <table style="border-collapse:collapse;">{rows_html}</table>
+        <p>Regards,<br>People Function</p>
+    """
+
+    frappe.sendmail(
+        recipients=other_emails,
+        subject=f"Feedback Submitted - {schedule.applicants_name or application_id}",
+        message=message,
+    )
+
+    return {"status": "success", "notified": other_emails}
+
+
+def send_leader_final_round_feedback_pdf(doc, method=None):
+    """
+    Hooked to "Leader Final Round Feedback Form" after_insert (see hooks.py).
+    Every time an interviewer submits feedback for an applicant, this merges
+    ALL submissions received so far for that applicant into a single PDF
+    (one section per submission) and emails it to every interviewer on the
+    matching Field Interview Schedule (Leader Round-2) — so a second/third
+    submission does not fire a separate, isolated email but a combined one.
+    """
+    from frappe.utils.pdf import get_pdf
+
+    applicant_id = (doc.applicant_id or "").strip()
+    applicant_name = (doc.applicant_name or "").strip()
+
+    filters = {"interview_round": "Leader Round-2"}
+    if applicant_id:
+        filters["application_id"] = applicant_id
+    elif applicant_name:
+        filters["applicants_name"] = applicant_name
+    else:
+        frappe.log_error(
+            f"Leader Final Round Feedback Form {doc.name}: no applicant_id/applicant_name to match a schedule",
+            "Leader Feedback PDF: No Applicant Info",
+        )
+        return
+
+    schedules = frappe.get_all(
+        "Field Interview Schedule",
+        filters=filters,
+        fields=["name"],
+        order_by="modified desc",
+        limit=1,
+    )
+    if not schedules:
+        frappe.log_error(
+            f"Leader Final Round Feedback Form {doc.name}: no matching Field Interview Schedule for {filters}",
+            "Leader Feedback PDF: Schedule Not Found",
+        )
+        return
+
+    schedule = frappe.get_doc("Field Interview Schedule", schedules[0]["name"])
+    interviewer_emails = [
+        row.interviewer_email
+        for row in (schedule.interviewer_email or [])
+        if row.interviewer_email
+    ]
+    if not interviewer_emails:
+        return
+
+    # Pull every submission received so far for this applicant, not just this one.
+    match_filters = (
+        {"applicant_id": applicant_id}
+        if applicant_id
+        else {"applicant_name": applicant_name}
+    )
+    submissions = frappe.get_all(
+        "Leader Final Round Feedback Form",
+        filters=match_filters,
+        fields=["name"],
+        order_by="creation asc",
+    )
+
+    meta = frappe.get_meta(doc.doctype)
+    skip_fieldtypes = {"Section Break", "Column Break", "Tab Break", "HTML", "Button"}
+
+    def _render_feedback_table(fb_doc):
+        rows_html = ""
+        for df in meta.fields:
+            if df.fieldtype in skip_fieldtypes:
+                continue
+            value = fb_doc.get(df.fieldname)
+            if not value:
+                continue
+            rows_html += (
+                f"<tr><td style='padding:4px 12px;font-weight:600;vertical-align:top;'>{df.label or df.fieldname}</td>"
+                f"<td style='padding:4px 12px;'>{value}</td></tr>"
+            )
+        return (
+            f"<table style='border-collapse:collapse;width:100%;'>{rows_html}</table>"
+        )
+
+    display_name = doc.applicant_name or applicant_name or applicant_id
+    sections_html = ""
+    for idx, row in enumerate(submissions, start=1):
+        fb_doc = (
+            doc
+            if row["name"] == doc.name
+            else frappe.get_doc("Leader Final Round Feedback Form", row["name"])
+        )
+        sections_html += (
+            f"<h3>Submission {idx} ({fb_doc.name})</h3>"
+            f"{_render_feedback_table(fb_doc)}"
+            f"<hr>"
+        )
+
+    html = f"""
+        <h2>Leader Final Round Feedback</h2>
+        <p><b>Applicant:</b> {display_name}</p>
+        {sections_html}
+    """
+
+    pdf_content = get_pdf(html)
+    filename = f"Leader-Final-Round-Feedback-{applicant_id or applicant_name}.pdf"
+
+    frappe.sendmail(
+        recipients=interviewer_emails,
+        subject=f"Leader Final Round Feedback (Merged) - {display_name}",
+        message=(
+            f"<p>Hi,</p>"
+            f"<p>Feedback for <b>{display_name}</b>'s Leader Round-2 interview has been "
+            f"updated ({len(submissions)} submission(s) so far). Please find the combined "
+            f"details attached as PDF.</p>"
+            f"<p>Regards,<br>People Function</p>"
+        ),
+        attachments=[{"fname": filename, "fcontent": pdf_content}],
+    )
