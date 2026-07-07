@@ -1986,9 +1986,30 @@ comments/recommendations for the calibration process and final selection decisio
             candidate_advice_html=candidate_advice_html,
         )
 
-        # Send candidate email FROM the field recruitment mailbox — the
-        # interviewer/organizer mailbox is used only for the interviewer
-        # email, never for the candidate-facing one.
+        # Send candidate email FROM whatever address is filled into the
+        # "Candidate email Sendar" field (candidate_email_sendar) on this
+        # record. Falls back to the field recruitment mailbox if that field
+        # is left blank. The interviewer/organizer mailbox is never used
+        # here — it's only for the interviewer-facing email.
+        _candidate_sender_email = _CANDIDATE_SENDER_EMAIL
+        if doc_name:
+            try:
+                _configured_sender = (
+                    frappe.db.get_value(
+                        "Field Interview Schedule", doc_name, "candidate_email_sendar"
+                    )
+                    or ""
+                ).strip()
+                if _configured_sender:
+                    _candidate_sender_email = _configured_sender
+            except Exception:
+                pass
+        _candidate_sender = (
+            _CANDIDATE_SENDER
+            if _candidate_sender_email == _CANDIDATE_SENDER_EMAIL
+            else _candidate_sender_email
+        )
+
         # Skip if candidate is the same person as the organizer or any interviewer
         # (they already received the interviewer email; sending a second one is confusing).
         _all_interviewer_emails_lower = {
@@ -2014,11 +2035,11 @@ comments/recommendations for the calibration process and final selection decisio
                 "toRecipients": [{"emailAddress": {"address": interviewee_email}}],
             }
 
-            # Attempt 1: send directly from the field recruitment mailbox via Graph.
+            # Attempt 1: send directly from the candidate sender mailbox via Graph.
             _gc1_err = ""
             try:
                 _gc1 = requests.post(
-                    f"https://graph.microsoft.com/v1.0/users/{_CANDIDATE_SENDER_EMAIL}/sendMail",
+                    f"https://graph.microsoft.com/v1.0/users/{_candidate_sender_email}/sendMail",
                     headers=headers,
                     json={"message": _cand_msg, "saveToSentItems": True},
                     timeout=30,
@@ -2036,13 +2057,39 @@ comments/recommendations for the calibration process and final selection decisio
                     pass
 
             # Attempt 2: frappe.sendmail via Frappe's own outgoing Email Account.
-            # The field recruitment mailbox is always forced as sender here —
-            # unlike the organizer/interviewer mailbox (which varies per
-            # interview and is only trusted as sender when a matching
-            # outgoing Email Account exists), this address is fixed and
-            # already has an Email Account record, so it is always used.
+            # IMPORTANT: only claim the candidate sender mailbox as the From
+            # address if a matching Email Account has real, working outgoing
+            # credentials (enable_outgoing=1). Without that, Frappe has to
+            # authenticate via some OTHER account's SMTP session while
+            # stamping a From header that account isn't allowed to send as —
+            # the mail server then rejects it with SMTPDataError deep inside
+            # the Email Queue flush, a step that runs outside this
+            # try/except and crashes the entire "schedule interview" request
+            # with a 500. Until the intended sender mailbox has its own
+            # working outgoing Email Account (or Send-As delegation), it's
+            # safer to fall back to whichever account already works, and
+            # just log that fact.
             if not _graph_cand_sent:
-                _cand_sender_arg = {"sender": _CANDIDATE_SENDER}
+                _cand_sender_arg = {}
+                if frappe.db.exists(
+                    "Email Account",
+                    {"email_id": _candidate_sender_email, "enable_outgoing": 1},
+                ):
+                    _cand_sender_arg = {"sender": _candidate_sender}
+                else:
+                    try:
+                        frappe.log_error(
+                            title="Candidate Email Sender Fallback",
+                            message=(
+                                f"No working outgoing Email Account for "
+                                f"{_candidate_sender_email}; candidate email for "
+                                f"{interviewee_email} was sent from the site's "
+                                f"default outgoing Email Account instead to avoid "
+                                f"an SMTP SendAsDenied crash."
+                            ),
+                        )
+                    except Exception:
+                        pass
                 try:
                     frappe.sendmail(
                         recipients=[interviewee_email],
