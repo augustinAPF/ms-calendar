@@ -1448,7 +1448,32 @@ comments/recommendations for the calibration process and final selection decisio
     res = _requests_with_retry(
         "POST", create_url + "?sendUpdates=none", headers=headers, json=draft_payload
     )
-    res.raise_for_status()
+    if not res.ok:
+        try:
+            _cr_err = res.json().get("error", {})
+            _cr_code = _cr_err.get("code", "")
+            _cr_msg = _cr_err.get("message", res.text)
+        except Exception:
+            _cr_code = ""
+            _cr_msg = res.text
+        if res.status_code == 404:
+            frappe.throw(
+                f"Organizer Email <b>{Organizer_email}</b> was not found in Microsoft 365 (404). "
+                "Please check the Organizer Email field on this record — it must be a real, "
+                f"active mailbox in your organisation's M365 tenant. Details: {_cr_msg}"
+            )
+        elif res.status_code == 403 or _cr_code in (
+            "ErrorAccessDenied",
+            "Authorization_RequestDenied",
+        ):
+            frappe.throw(
+                f"Access denied by Microsoft Graph API (403) while creating the event as "
+                f"<b>{Organizer_email}</b>. Details: {_cr_msg}"
+            )
+        else:
+            frappe.throw(
+                f"Microsoft Graph API error ({res.status_code}) while creating the event: {_cr_msg}"
+            )
     event_id = res.json()["id"]
 
     # ATTACH FILES  (CV / feedback form)
