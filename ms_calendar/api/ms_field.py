@@ -56,7 +56,7 @@ _EDUCATION_FEEDBACK_URLS = {
     (
         "resource person",
         "education capacity round",
-    ): "https://careers.frappe.cloud/educational-capacity-interview---feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    ): "https://careers.frappe.clo  ud/educational-capacity-interview---feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
     (
         "resource person",
         "leader round-1",
@@ -1971,7 +1971,7 @@ comments/recommendations for the calibration process and final selection decisio
     # (only the interviewer receives an email in that scenario)
     # ----------------------------------------
     if not is_calibration_arp:
-        candidate_email_subject = f"Interview Scheduled \u2013 {Applicants_name} | {round_label} for {Applicants_Role} {candidate_phone}"
+        candidate_email_subject = f"Interview Scheduled \u2013 {Applicants_name} | {round_label} for {Applicants_Role}"
 
         candidate_email_body = candidate_template.format(
             Applicants_name=Applicants_name,
@@ -1987,21 +1987,38 @@ comments/recommendations for the calibration process and final selection decisio
         )
 
         # Send candidate email FROM whatever address is filled into the
-        # "Candidate email Sendar" field (candidate_email_sendar) on this
-        # record. Falls back to the field recruitment mailbox if that field
-        # is left blank. The interviewer/organizer mailbox is never used
-        # here — it's only for the interviewer-facing email.
+        # candidate-sender field on this record. Different sites have ended
+        # up with different auto-generated fieldnames for the same "Candidate
+        # Email Sender" label (e.g. candidate_email_sendar vs
+        # candidate_email_sender), so check the doctype meta for whichever
+        # one actually exists here instead of hardcoding a single name.
+        # Falls back to the field recruitment mailbox if no such field
+        # exists or it's left blank. The interviewer/organizer mailbox is
+        # never used here — it's only for the interviewer-facing email.
         _candidate_sender_email = _CANDIDATE_SENDER_EMAIL
         if doc_name:
             try:
-                _configured_sender = (
-                    frappe.db.get_value(
-                        "Field Interview Schedule", doc_name, "candidate_email_sendar"
-                    )
-                    or ""
-                ).strip()
-                if _configured_sender:
-                    _candidate_sender_email = _configured_sender
+                _fis_meta = frappe.get_meta("Field Interview Schedule")
+                _sender_fieldname = next(
+                    (
+                        fn
+                        for fn in (
+                            "candidate_email_sendar",
+                            "candidate_email_sender",
+                        )
+                        if _fis_meta.has_field(fn)
+                    ),
+                    None,
+                )
+                if _sender_fieldname:
+                    _configured_sender = (
+                        frappe.db.get_value(
+                            "Field Interview Schedule", doc_name, _sender_fieldname
+                        )
+                        or ""
+                    ).strip()
+                    if _configured_sender:
+                        _candidate_sender_email = _configured_sender
             except Exception:
                 pass
         _candidate_sender = (
@@ -3619,4 +3636,270 @@ def send_leader_final_round_feedback_pdf(doc, method=None):
             f"<p>Regards,<br>People Function</p>"
         ),
         attachments=[{"fname": filename, "fcontent": pdf_content}],
+    )
+
+
+def send_leader_final_round_feedback_pdf_to_registration_form(doc, method=None):
+    """
+    Hooked to "Leader Final Round Feedback Form" after_insert (see
+    hooks.py), alongside send_leader_final_round_feedback_pdf. Saves the
+    merged PDF into the "Round Two Feedback Form" attach field on the
+    matching Field Registration Form.
+    """
+    _merge_feedback_submissions_to_registration_form(
+        doc, "round_two_feedback_form", "Leader Final Round Feedback Form"
+    )
+
+
+def _merge_feedback_submissions_to_registration_form(doc, target_field, pdf_title):
+    """
+    Shared by every "<some> Feedback Form" doctype that should merge ALL of
+    its submissions for one applicant into a single PDF (one section per
+    submission) and save it into a specific attach field on the matching
+    Field Registration Form — so a second/third submission for the same
+    applicant replaces the attachment with a combined PDF instead of piling
+    up separate ones. applicant_id on these doctypes is a Link to Field
+    Registration Form and its value is that record's name, so the match is
+    a direct lookup.
+    """
+    from frappe.utils.pdf import get_pdf
+
+    applicant_id = (doc.applicant_id or "").strip()
+    if not applicant_id:
+        frappe.log_error(
+            f"{doc.doctype} {doc.name}: no applicant_id to match a Field Registration Form",
+            f"{doc.doctype} PDF: No Applicant ID",
+        )
+        return
+
+    if not frappe.db.exists("Field Registration Form", applicant_id):
+        frappe.log_error(
+            f"{doc.doctype} {doc.name}: Field Registration Form {applicant_id} not found",
+            f"{doc.doctype} PDF: Registration Form Not Found",
+        )
+        return
+
+    try:
+        # Pull every submission received so far for this applicant, not just this one.
+        submissions = frappe.get_all(
+            doc.doctype,
+            filters={"applicant_id": applicant_id},
+            fields=["name"],
+            order_by="creation asc",
+        )
+
+        meta = frappe.get_meta(doc.doctype)
+        skip_fieldtypes = {
+            "Section Break",
+            "Column Break",
+            "Tab Break",
+            "HTML",
+            "Button",
+        }
+
+        def _render_feedback_table(fb_doc):
+            rows_html = ""
+            for i, df in enumerate(meta.fields):
+                if df.fieldtype in skip_fieldtypes:
+                    continue
+                value = fb_doc.get(df.fieldname)
+                if not value:
+                    continue
+                row_bg = "#f7f8fa" if i % 2 == 0 else "#ffffff"
+                rows_html += (
+                    f"<tr style='background:{row_bg};'>"
+                    f"<td style='padding:8px 14px;font-weight:600;color:#333;width:38%;"
+                    f"vertical-align:top;border-bottom:1px solid #e5e7eb;'>{df.label or df.fieldname}</td>"
+                    f"<td style='padding:8px 14px;color:#111;vertical-align:top;"
+                    f"border-bottom:1px solid #e5e7eb;'>{value}</td></tr>"
+                )
+            return (
+                "<table style='border-collapse:collapse;width:100%;"
+                "border:1px solid #e5e7eb;font-size:12px;'>" + rows_html + "</table>"
+            )
+
+        display_name = doc.applicant_name or applicant_id
+        sections_html = ""
+        for idx, row in enumerate(submissions, start=1):
+            fb_doc = (
+                doc
+                if row["name"] == doc.name
+                else frappe.get_doc(doc.doctype, row["name"])
+            )
+            submitted_on = frappe.utils.format_datetime(
+                fb_doc.creation, "d MMM yyyy, h:mm a"
+            )
+            sections_html += f"""
+                <div style="margin-top:22px;">
+                    <div style="background:#1d4ed8;color:#ffffff;padding:8px 14px;
+                                border-radius:4px 4px 0 0;font-size:13px;font-weight:600;">
+                        Submission {idx} &middot; {fb_doc.name} &middot; {submitted_on}
+                    </div>
+                    {_render_feedback_table(fb_doc)}
+                </div>
+            """
+
+        html = f"""
+            <html>
+            <head>
+                <style>
+                    body {{ font-family: 'Helvetica', 'Arial', sans-serif; color:#1a1a1a; }}
+                </style>
+            </head>
+            <body>
+                <div style="border-bottom:3px solid #1d4ed8;padding-bottom:14px;margin-bottom:18px;">
+                    <div style="font-size:11px;letter-spacing:1px;color:#6b7280;text-transform:uppercase;">
+                        Azim Premji Foundation
+                    </div>
+                    <h1 style="margin:4px 0 10px 0;font-size:20px;color:#111827;">{pdf_title}</h1>
+                    <table style="font-size:12px;color:#374151;">
+                        <tr>
+                            <td style="padding:2px 10px 2px 0;font-weight:600;">Applicant</td>
+                            <td style="padding:2px 0;">{display_name}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:2px 10px 2px 0;font-weight:600;">Applicant ID</td>
+                            <td style="padding:2px 0;">{applicant_id}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:2px 10px 2px 0;font-weight:600;">Submissions</td>
+                            <td style="padding:2px 0;">{len(submissions)}</td>
+                        </tr>
+                    </table>
+                </div>
+                {sections_html}
+            </body>
+            </html>
+        """
+
+        pdf_content = get_pdf(html)
+        filename = f"{pdf_title.replace(' ', '-')}-{applicant_id}.pdf"
+
+        # Remove any previously attached PDF for this field so re-submissions
+        # don't pile up multiple stale files against the same record.
+        old_files = frappe.get_all(
+            "File",
+            filters={
+                "attached_to_doctype": "Field Registration Form",
+                "attached_to_name": applicant_id,
+                "attached_to_field": target_field,
+            },
+            fields=["name"],
+        )
+        for old_file in old_files:
+            frappe.delete_doc(
+                "File", old_file["name"], ignore_permissions=True, force=True
+            )
+
+        file_doc = frappe.get_doc(
+            {
+                "doctype": "File",
+                "file_name": filename,
+                "attached_to_doctype": "Field Registration Form",
+                "attached_to_name": applicant_id,
+                "attached_to_field": target_field,
+                "content": pdf_content,
+                "is_private": 0,
+            }
+        )
+        file_doc.insert(ignore_permissions=True)
+
+        frappe.db.set_value(
+            "Field Registration Form",
+            applicant_id,
+            target_field,
+            file_doc.file_url,
+            update_modified=False,
+        )
+    except Exception as e:
+        frappe.log_error(
+            title=f"{doc.doctype} PDF: Generation Failed",
+            message=f"{doc.doctype} {doc.name}, applicant {applicant_id}: {e}",
+        )
+
+
+def send_recruiter_feedback_pdf_to_registration_form(doc, method=None):
+    """Hooked to "Recruiter Feedback Form" after_insert (see hooks.py)."""
+    _merge_feedback_submissions_to_registration_form(
+        doc, "recruiter_round_feedback_form", "Recruiter Feedback Form"
+    )
+
+
+def send_educational_capacity_feedback_pdf_to_registration_form(doc, method=None):
+    """
+    Hooked to "Educational Capacity Interview - Feedback Form" after_insert
+    (see hooks.py). Saves into the same "Round One Feedback Form" attach
+    field used by the Subject Round feedback for other roles.
+    """
+    _merge_feedback_submissions_to_registration_form(
+        doc, "round_one_feedback_from", "Educational Capacity Interview Feedback Form"
+    )
+
+
+def send_school_teacher_feedback_pdf_to_registration_form(doc, method=None):
+    """
+    Hooked to "School Teacher Feedback Form" after_insert (see hooks.py).
+    Saves into the same "Round One Feedback Form" attach field used by the
+    Educational Capacity Round feedback for other roles.
+    """
+    _merge_feedback_submissions_to_registration_form(
+        doc, "round_one_feedback_from", "School Teacher Feedback Form"
+    )
+
+
+def send_demo_lesson_observation_feedback_pdf_to_registration_form(doc, method=None):
+    """
+    Hooked to "Demo Lesson Observation Feedback Form" after_insert (see
+    hooks.py). Saves into the "Round Two Feedback Form" attach field on the
+    matching Field Registration Form.
+    """
+    _merge_feedback_submissions_to_registration_form(
+        doc, "round_two_feedback_form", "Demo Lesson Observation Feedback Form"
+    )
+
+
+def send_arp_feedback_pdf_to_registration_form(doc, method=None):
+    """
+    Hooked to "Feedback Form - Associate Resource Person" after_insert (see
+    hooks.py). Saves into the same "Recruiter Round Feedback Form" attach
+    field used by the Recruiter Feedback Form for other roles.
+    """
+    _merge_feedback_submissions_to_registration_form(
+        doc,
+        "recruiter_round_feedback_form",
+        "Feedback Form - Associate Resource Person",
+    )
+
+
+def send_recruiter_assessment_pdf_to_registration_form(doc, method=None):
+    """
+    Hooked to "Recruiter Assessment Form" after_insert (see hooks.py).
+    Saves into the same "Recruiter Round Feedback Form" attach field used
+    by the Recruiter Feedback Form for other roles.
+    """
+    _merge_feedback_submissions_to_registration_form(
+        doc, "recruiter_round_feedback_form", "Recruiter Assessment Form"
+    )
+
+
+def send_functional_round_feedback_pdf_to_registration_form(doc, method=None):
+    """
+    Hooked to "Functional Round Feedback Form" after_insert (see hooks.py).
+    Saves into the same "Round One Feedback Form" attach field used by the
+    Subject Round / Educational Capacity Round feedback for other roles
+    (this is the Round-1 equivalent for Health/Livelihood applicants).
+    """
+    _merge_feedback_submissions_to_registration_form(
+        doc, "round_one_feedback_from", "Functional Round Feedback Form"
+    )
+
+
+def send_final_round_feedback_pdf_to_registration_form(doc, method=None):
+    """
+    Hooked to "Final Round Feedback Form" after_insert (see hooks.py).
+    Saves into the same "Round Two Feedback Form" attach field used by the
+    Leader Final Round / Demo Lesson Observation feedback for other roles.
+    """
+    _merge_feedback_submissions_to_registration_form(
+        doc, "round_two_feedback_form", "Final Round Feedback Form"
     )

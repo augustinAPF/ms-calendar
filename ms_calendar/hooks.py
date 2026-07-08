@@ -33,6 +33,36 @@ doc_events = {
     "Scholarship Recruitment Form": {
         "validate": "ms_calendar.api.resume_rename.on_scholarship_registration"
     },
+    "Leader Final Round Feedback Form": {
+        "after_insert": [
+            "ms_calendar.api.ms_field.send_leader_final_round_feedback_pdf",
+            "ms_calendar.api.ms_field.send_leader_final_round_feedback_pdf_to_registration_form",
+        ]
+    },
+    "Recruiter Feedback Form": {
+        "after_insert": "ms_calendar.api.ms_field.send_recruiter_feedback_pdf_to_registration_form"
+    },
+    "Educational Capacity Interview - Feedback Form": {
+        "after_insert": "ms_calendar.api.ms_field.send_educational_capacity_feedback_pdf_to_registration_form"
+    },
+    "School Teacher Feedback Form": {
+        "after_insert": "ms_calendar.api.ms_field.send_school_teacher_feedback_pdf_to_registration_form"
+    },
+    "Demo Lesson Observation Feedback Form": {
+        "after_insert": "ms_calendar.api.ms_field.send_demo_lesson_observation_feedback_pdf_to_registration_form"
+    },
+    "Feedback Form - Associate Resource Person": {
+        "after_insert": "ms_calendar.api.ms_field.send_arp_feedback_pdf_to_registration_form"
+    },
+    "Recruiter Assessment Form": {
+        "after_insert": "ms_calendar.api.ms_field.send_recruiter_assessment_pdf_to_registration_form"
+    },
+    "Functional Round Feedback Form": {
+        "after_insert": "ms_calendar.api.ms_field.send_functional_round_feedback_pdf_to_registration_form"
+    },
+    "Final Round Feedback Form": {
+        "after_insert": "ms_calendar.api.ms_field.send_final_round_feedback_pdf_to_registration_form"
+    },
 }
 
 # required_apps = []
@@ -71,8 +101,8 @@ doc_events = {
 
 # include js in doctype views
 doctype_js = {"Job Opening": "public/js/job_opening.js"}
-doctype_list_js = {"Field Registration Form": "public/js/field_registration_form_list.js"}
-app_include_js = ["/assets/ms_calendar/js/field_registration_form_list.js"]
+doctype_list_js = {"Field Registration Form": "public/js/frf_list.js"}
+app_include_js = ["/assets/ms_calendar/js/frf_list.js"]
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
