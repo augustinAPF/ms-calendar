@@ -43,11 +43,11 @@ _EDUCATION_FEEDBACK_URLS = {
     (
         "school teacher",
         "leader round-1",
-    ): "https://pathways.azimpremjifoundation.org/leader-final-round-feedback-form/new?applicant_id={app_id}&applicant_name={applicant_name}",
+    ): "https://careers.frappe.cloud/leader-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
     (
         "school teacher",
         "leader round-2",
-    ): "https://pathways.azimpremjifoundation.org/leader-final-feedback/new?applicant_id={app_id}&applicant_name={applicant_name}",
+    ): "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
     # ── Resource Person ─────────────────────────────────────────────────
     (
         "resource person",
@@ -56,24 +56,24 @@ _EDUCATION_FEEDBACK_URLS = {
     (
         "resource person",
         "education capacity round",
-    ): "https://careers.frappe.clo  ud/educational-capacity-interview---feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    ): "https://careers.frappe.cloud/educational-capacity-interview---feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
     (
         "resource person",
         "leader round-1",
-    ): "https://pathways.azimpremjifoundation.org/leader-final-feedback/new?applicant_id={app_id}&applicant_name={applicant_name}",
+    ): "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
     (
         "resource person",
         "leader round-2",
-    ): "https://pathways.azimpremjifoundation.org/leader-final-feedback/new?applicant_id={app_id}&applicant_name={applicant_name}",
+    ): "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
     # ── Associate Resource Person ────────────────────────────────────────
     (
         "associate resource person",
         "leader round-1",
-    ): "https://pathways.azimpremjifoundation.org/campus-associate-feedback-form/new?applicant_id={app_id}&applicant_name={applicant_name}",
+    ): "https://careers.frappe.cloud/campus-associate-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
     (
         "associate resource person",
         "leader round-2",
-    ): "https://pathways.azimpremjifoundation.org/campus-associate-feedback-form/new?applicant_id={app_id}&applicant_name={applicant_name}",
+    ): "https://careers.frappe.cloud/campus-associate-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
     (
         "associate resource person",
         "calibration process",
@@ -84,16 +84,16 @@ _EDUCATION_FEEDBACK_URLS = {
 _LIVELIHOOD_FEEDBACK_URLS = {
     "recruiter round": "https://careers.frappe.cloud/livelihoods-recruiter-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
     "functional round": "https://careers.frappe.cloud/livelihoods-functional-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    "leader round-1": "https://pathways.azimpremjifoundation.org/livelihoods-final-round-feedback-form/new?applicant_id={app_id}&applicant_name={applicant_name}",
-    "leader round-2": "https://pathways.azimpremjifoundation.org/livelihoods-final-round-feedback-form/new?applicant_id={app_id}&applicant_name={applicant_name}",
+    "leader round-1": "https://careers.frappe.cloud/livelihoods-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "leader round-2": "https://careers.frappe.cloud/livelihoods-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
 }
 
 # Health: keyed by round_lower
 _HEALTH_FEEDBACK_URLS = {
     "recruiter round": "https://careers.frappe.cloud/health-recruitment-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
     "functional round": "https://careers.frappe.cloud/health-functional-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    "leader round-1": "https://pathways.azimpremjifoundation.org/health-final-round-feedback-form/new?applicant_id={app_id}&applicant_name={applicant_name}",
-    "leader round-2": "https://pathways.azimpremjifoundation.org/health-final-round-feedback-form/new?applicant_id={app_id}&applicant_name={applicant_name}",
+    "leader round-1": "https://careers.frappe.cloud/health-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "leader round-2": "https://careers.frappe.cloud/health-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
 }
 
 
@@ -3626,12 +3626,8 @@ def send_leader_final_round_feedback_pdf(doc, method=None):
     _submitted_by = (getattr(doc, "submitted_by", "") or "").strip().lower()
     _interviewer_emails_lower = {e.strip().lower() for e in interviewer_emails}
     if _submitted_by and _submitted_by in _interviewer_emails_lower:
-        _to = [
-            e for e in interviewer_emails if e.strip().lower() == _submitted_by
-        ]
-        _cc = [
-            e for e in interviewer_emails if e.strip().lower() != _submitted_by
-        ]
+        _to = [e for e in interviewer_emails if e.strip().lower() == _submitted_by]
+        _cc = [e for e in interviewer_emails if e.strip().lower() != _submitted_by]
     else:
         _to = interviewer_emails
         _cc = []
