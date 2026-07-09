@@ -43,11 +43,11 @@ _EDUCATION_FEEDBACK_URLS = {
     (
         "school teacher",
         "leader round-1",
-    ): "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
+    ): "https://pathways.azimpremjifoundation.org/leader-final-round-feedback-form/new?applicant_id={app_id}&applicant_name={applicant_name}",
     (
         "school teacher",
         "leader round-2",
-    ): "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
+    ): "https://pathways.azimpremjifoundation.org/leader-final-feedback/new?applicant_id={app_id}&applicant_name={applicant_name}",
     # ── Resource Person ─────────────────────────────────────────────────
     (
         "resource person",
@@ -60,20 +60,20 @@ _EDUCATION_FEEDBACK_URLS = {
     (
         "resource person",
         "leader round-1",
-    ): "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
+    ): "https://pathways.azimpremjifoundation.org/leader-final-feedback/new?applicant_id={app_id}&applicant_name={applicant_name}",
     (
         "resource person",
         "leader round-2",
-    ): "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
+    ): "https://pathways.azimpremjifoundation.org/leader-final-feedback/new?applicant_id={app_id}&applicant_name={applicant_name}",
     # ── Associate Resource Person ────────────────────────────────────────
     (
         "associate resource person",
         "leader round-1",
-    ): "https://careers.frappe.cloud/campus-associate-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    ): "https://pathways.azimpremjifoundation.org/campus-associate-feedback-form/new?applicant_id={app_id}&applicant_name={applicant_name}",
     (
         "associate resource person",
         "leader round-2",
-    ): "https://careers.frappe.cloud/campus-associate-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    ): "https://pathways.azimpremjifoundation.org/campus-associate-feedback-form/new?applicant_id={app_id}&applicant_name={applicant_name}",
     (
         "associate resource person",
         "calibration process",
@@ -84,16 +84,16 @@ _EDUCATION_FEEDBACK_URLS = {
 _LIVELIHOOD_FEEDBACK_URLS = {
     "recruiter round": "https://careers.frappe.cloud/livelihoods-recruiter-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
     "functional round": "https://careers.frappe.cloud/livelihoods-functional-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    "leader round-1": "https://careers.frappe.cloud/livelihoods-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    "leader round-2": "https://careers.frappe.cloud/livelihoods-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "leader round-1": "https://pathways.azimpremjifoundation.org/livelihoods-final-round-feedback-form/new?applicant_id={app_id}&applicant_name={applicant_name}",
+    "leader round-2": "https://pathways.azimpremjifoundation.org/livelihoods-final-round-feedback-form/new?applicant_id={app_id}&applicant_name={applicant_name}",
 }
 
 # Health: keyed by round_lower
 _HEALTH_FEEDBACK_URLS = {
     "recruiter round": "https://careers.frappe.cloud/health-recruitment-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
     "functional round": "https://careers.frappe.cloud/health-functional-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    "leader round-1": "https://careers.frappe.cloud/health-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    "leader round-2": "https://careers.frappe.cloud/health-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "leader round-1": "https://pathways.azimpremjifoundation.org/health-final-round-feedback-form/new?applicant_id={app_id}&applicant_name={applicant_name}",
+    "leader round-2": "https://pathways.azimpremjifoundation.org/health-final-round-feedback-form/new?applicant_id={app_id}&applicant_name={applicant_name}",
 }
 
 
@@ -1986,46 +1986,11 @@ comments/recommendations for the calibration process and final selection decisio
             candidate_advice_html=candidate_advice_html,
         )
 
-        # Send candidate email FROM whatever address is filled into the
-        # candidate-sender field on this record. Different sites have ended
-        # up with different auto-generated fieldnames for the same "Candidate
-        # Email Sender" label (e.g. candidate_email_sendar vs
-        # candidate_email_sender), so check the doctype meta for whichever
-        # one actually exists here instead of hardcoding a single name.
-        # Falls back to the field recruitment mailbox if no such field
-        # exists or it's left blank. The interviewer/organizer mailbox is
-        # never used here — it's only for the interviewer-facing email.
+        # Send candidate email FROM the field recruitment mailbox — always.
+        # The interviewer/organizer mailbox (Organizer_email) is never used
+        # here — it's only for the interviewer-facing email above.
         _candidate_sender_email = _CANDIDATE_SENDER_EMAIL
-        if doc_name:
-            try:
-                _fis_meta = frappe.get_meta("Field Interview Schedule")
-                _sender_fieldname = next(
-                    (
-                        fn
-                        for fn in (
-                            "candidate_email_sendar",
-                            "candidate_email_sender",
-                        )
-                        if _fis_meta.has_field(fn)
-                    ),
-                    None,
-                )
-                if _sender_fieldname:
-                    _configured_sender = (
-                        frappe.db.get_value(
-                            "Field Interview Schedule", doc_name, _sender_fieldname
-                        )
-                        or ""
-                    ).strip()
-                    if _configured_sender:
-                        _candidate_sender_email = _configured_sender
-            except Exception:
-                pass
-        _candidate_sender = (
-            _CANDIDATE_SENDER
-            if _candidate_sender_email == _CANDIDATE_SENDER_EMAIL
-            else _candidate_sender_email
-        )
+        _candidate_sender = _CANDIDATE_SENDER
 
         # Skip if candidate is the same person as the organizer or any interviewer
         # (they already received the interviewer email; sending a second one is confusing).
@@ -3525,17 +3490,17 @@ def send_leader_final_round_feedback_pdf(doc, method=None):
     """
     Hooked to "Leader Final Round Feedback Form" after_insert (see hooks.py).
     Every time an interviewer submits feedback for an applicant, this merges
-    ALL submissions received so far for that applicant into a single PDF
-    (one section per submission) and emails it to every interviewer on the
-    matching Field Interview Schedule (Leader Round-2) — so a second/third
-    submission does not fire a separate, isolated email but a combined one.
+    ALL submissions received so far for that applicant into one combined
+    write-up (one section per submission) and emails it — inline in the
+    email body, not as a PDF attachment — to every interviewer on the
+    matching Field Interview Schedule (Leader Round-2), all together in one
+    email, so a second/third submission does not fire a separate, isolated
+    email but a combined one.
     """
-    from frappe.utils.pdf import get_pdf
-
     applicant_id = (doc.applicant_id or "").strip()
     applicant_name = (doc.applicant_name or "").strip()
 
-    filters = {"interview_round": "Leader Round-2"}
+    filters = {"interview_round": ["in", ["Leader Round-1", "Leader Round-2"]]}
     if applicant_id:
         filters["application_id"] = applicant_id
     elif applicant_name:
@@ -3588,18 +3553,23 @@ def send_leader_final_round_feedback_pdf(doc, method=None):
 
     def _render_feedback_table(fb_doc):
         rows_html = ""
-        for df in meta.fields:
+        for i, df in enumerate(meta.fields):
             if df.fieldtype in skip_fieldtypes:
                 continue
             value = fb_doc.get(df.fieldname)
             if not value:
                 continue
+            row_bg = "#f7f8fa" if i % 2 == 0 else "#ffffff"
             rows_html += (
-                f"<tr><td style='padding:4px 12px;font-weight:600;vertical-align:top;'>{df.label or df.fieldname}</td>"
-                f"<td style='padding:4px 12px;'>{value}</td></tr>"
+                f"<tr style='background:{row_bg};'>"
+                f"<td style='padding:8px 14px;font-weight:600;color:#333;width:38%;"
+                f"vertical-align:top;border-bottom:1px solid #e5e7eb;'>{df.label or df.fieldname}</td>"
+                f"<td style='padding:8px 14px;color:#111;vertical-align:top;"
+                f"border-bottom:1px solid #e5e7eb;'>{value}</td></tr>"
             )
         return (
-            f"<table style='border-collapse:collapse;width:100%;'>{rows_html}</table>"
+            "<table style='border-collapse:collapse;width:100%;"
+            "border:1px solid #e5e7eb;font-size:12px;'>" + rows_html + "</table>"
         )
 
     display_name = doc.applicant_name or applicant_name or applicant_id
@@ -3610,33 +3580,99 @@ def send_leader_final_round_feedback_pdf(doc, method=None):
             if row["name"] == doc.name
             else frappe.get_doc("Leader Final Round Feedback Form", row["name"])
         )
-        sections_html += (
-            f"<h3>Submission {idx} ({fb_doc.name})</h3>"
-            f"{_render_feedback_table(fb_doc)}"
-            f"<hr>"
+        submitted_on = frappe.utils.format_datetime(
+            fb_doc.creation, "d MMM yyyy, h:mm a"
         )
+        sections_html += f"""
+            <div style="margin-top:18px;">
+                <div style="background:#1d4ed8;color:#ffffff;padding:8px 14px;
+                            border-radius:4px 4px 0 0;font-size:13px;font-weight:600;">
+                    Submission {idx} &middot; {fb_doc.name} &middot; {submitted_on}
+                </div>
+                {_render_feedback_table(fb_doc)}
+            </div>
+        """
 
-    html = f"""
-        <h2>Leader Final Round Feedback</h2>
-        <p><b>Applicant:</b> {display_name}</p>
-        {sections_html}
-    """
+    # Thread this as a reply to the email sent for the previous submission
+    # (if any), instead of a brand-new email each time, so all updates for
+    # this applicant land in one conversation in the interviewers' inbox.
+    _in_reply_to = None
+    if len(submissions) > 1:
+        _prev_submission_name = submissions[-2]["name"]
+        _prev_comm = frappe.get_all(
+            "Communication",
+            filters={
+                "reference_doctype": "Leader Final Round Feedback Form",
+                "reference_name": _prev_submission_name,
+                "communication_type": "Communication",
+            },
+            fields=["name"],
+            order_by="creation desc",
+            limit=1,
+        )
+        if _prev_comm:
+            _in_reply_to = _prev_comm[0]["name"]
 
-    pdf_content = get_pdf(html)
-    filename = f"Leader-Final-Round-Feedback-{applicant_id or applicant_name}.pdf"
+    _email_subject = f"Leader Final Round Feedback (Merged) - {display_name}"
+    # Must be RFC 5322 compliant ("<unique-id@domain>") or Exchange/Outlook
+    # will not recognize it for conversation threading — a bare id with no
+    # "@domain" (what this used to be) is silently ignored by Outlook.
+    _this_message_id = f"leader-final-{doc.name}@{frappe.local.site}"
+
+    # Whoever submitted this round of feedback is the primary recipient;
+    # the rest of the interviewers are CC'd. Only do this split when
+    # submitted_by is filled in and actually matches one of the schedule's
+    # interviewers — otherwise fall back to sending to everyone together.
+    _submitted_by = (getattr(doc, "submitted_by", "") or "").strip().lower()
+    _interviewer_emails_lower = {e.strip().lower() for e in interviewer_emails}
+    if _submitted_by and _submitted_by in _interviewer_emails_lower:
+        _to = [
+            e for e in interviewer_emails if e.strip().lower() == _submitted_by
+        ]
+        _cc = [
+            e for e in interviewer_emails if e.strip().lower() != _submitted_by
+        ]
+    else:
+        _to = interviewer_emails
+        _cc = []
 
     frappe.sendmail(
-        recipients=interviewer_emails,
-        subject=f"Leader Final Round Feedback (Merged) - {display_name}",
-        message=(
-            f"<p>Hi,</p>"
-            f"<p>Feedback for <b>{display_name}</b>'s Leader Round-2 interview has been "
-            f"updated ({len(submissions)} submission(s) so far). Please find the combined "
-            f"details attached as PDF.</p>"
-            f"<p>Regards,<br>People Function</p>"
-        ),
-        attachments=[{"fname": filename, "fcontent": pdf_content}],
+        recipients=_to,
+        cc=_cc,
+        subject=_email_subject,
+        message=f"""
+            <p>Hi,</p>
+            <p>Feedback for <b>{display_name}</b>'s Leader Round-2 interview has been
+            updated ({len(submissions)} submission(s) so far). Combined details below.</p>
+            {sections_html}
+            <p>Regards,<br>People Function</p>
+        """,
+        reference_doctype=doc.doctype,
+        reference_name=doc.name,
+        message_id=_this_message_id,
+        in_reply_to=_in_reply_to,
+        expose_recipients="header",
     )
+
+    # frappe.sendmail() doesn't create a Communication record on its own —
+    # record one now so the NEXT submission's email can look it up and
+    # thread as a reply to THIS one via in_reply_to above.
+    try:
+        frappe.get_doc(
+            {
+                "doctype": "Communication",
+                "communication_type": "Communication",
+                "communication_medium": "Email",
+                "sent_or_received": "Sent",
+                "reference_doctype": doc.doctype,
+                "reference_name": doc.name,
+                "subject": _email_subject,
+                "content": sections_html,
+                "message_id": f"<{_this_message_id}>",
+            }
+        ).insert(ignore_permissions=True)
+    except Exception:
+        pass
 
 
 def send_leader_final_round_feedback_pdf_to_registration_form(doc, method=None):
