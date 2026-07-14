@@ -169,12 +169,19 @@ def import_from_excel(file_url, doctype="Phil Registration Form"):
                 doc.insert(ignore_permissions=True)
                 created.append(match_value)
         except Exception as e:
-            frappe.log_error(title="Zayam Data Import Error", message=f"{match_value}: {e}")
+            frappe.log_error(
+                title="Zayam Data Import Error", message=f"{match_value}: {e}"
+            )
             failed.append(match_value)
 
     frappe.db.commit()
 
-    return {"created": created, "updated": updated, "skipped": skipped, "failed": failed}
+    return {
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "failed": failed,
+    }
 
 
 @frappe.whitelist()
@@ -208,3 +215,6 @@ def attach_application_pdf(file_url, file_name=None, doctype="Phil Registration 
     frappe.db.commit()
 
     return {"zayam_id": match_value, "status": "attached", "docname": docname}
+
+
+##testing

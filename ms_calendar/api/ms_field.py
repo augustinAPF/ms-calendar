@@ -1,6 +1,6 @@
-import frappe, requests, io, base64, time as _time
+import frappe, requests, io, base64, re, time as _time
 from datetime import timedelta
-from frappe.utils import get_datetime
+from frappe.utils import get_datetime, getdate
 
 _TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
 
@@ -3935,3 +3935,382 @@ def send_final_round_feedback_pdf_to_registration_form(doc, method=None):
     _merge_feedback_submissions_to_registration_form(
         doc, "round_two_feedback_form", "Final Round Feedback Form"
     )
+
+
+##testing
+
+
+# ── Duplicate registration check (across all four registration forms) ──
+# Field/Health/Phil Registration Forms use different fieldnames for the
+# same real-world data (see mapping below), so we normalize before
+# comparing rather than relying on a single SQL query.
+_REGISTRATION_DUPLICATE_FIELD_MAP = {
+    "Field Registration Form": {
+        "name": "full_name_aadhaar",
+        "dob": "dob",
+        "phone": "phone_number",
+        "email": "email_address",
+    },
+    "Field Registration Form1": {
+        "name": "full_name_aadhaar",
+        "dob": "dob",
+        "phone": "phone_number",
+        "email": "email_address",
+    },
+    "Health Registration Form": {
+        "name": "full_name",
+        "dob": "date_of_birth",
+        "phone": "phone_number",
+        "email": "email_address",
+    },
+    "Phil Registration Form": {
+        "name": "name1",
+        "dob": "date_of_birth",
+        "phone": "phone",
+        "email": "email",
+    },
+}
+
+
+def _normalize_reg_name(value):
+    return " ".join((value or "").strip().split()).lower()
+
+
+def _normalize_reg_phone(value):
+    digits = re.sub(r"\D", "", value or "")
+    return digits[-10:] if len(digits) >= 10 else digits
+
+
+def _normalize_reg_email(value):
+    return (value or "").strip().lower()
+
+
+def _normalize_reg_dob(value):
+    if not value:
+        return None
+    return str(getdate(value))
+
+
+def _find_registration_duplicate(
+    target_name,
+    target_dob,
+    target_phone,
+    target_email,
+    exclude_doctype=None,
+    exclude_name=None,
+):
+    """Return {"doctype": ..., "name": ...} for the first matching record
+    across all four registration forms, or None if no match is found."""
+    for doctype, field_map in _REGISTRATION_DUPLICATE_FIELD_MAP.items():
+        rows = frappe.get_all(
+            doctype,
+            fields=[
+                "name",
+                f"{field_map['name']} as reg_name",
+                f"{field_map['dob']} as reg_dob",
+                f"{field_map['phone']} as reg_phone",
+                f"{field_map['email']} as reg_email",
+            ],
+        )
+        for row in rows:
+            if doctype == exclude_doctype and row.name == exclude_name:
+                continue
+            if (
+                _normalize_reg_name(row.reg_name) == target_name
+                and _normalize_reg_dob(row.reg_dob) == target_dob
+                and _normalize_reg_phone(row.reg_phone) == target_phone
+                and _normalize_reg_email(row.reg_email) == target_email
+            ):
+                return {"doctype": doctype, "name": row.name}
+    return None
+
+
+@frappe.whitelist(allow_guest=True)
+def check_duplicate_registration(
+    full_name,
+    date_of_birth,
+    phone_number,
+    email_address,
+    exclude_doctype=None,
+    exclude_name=None,
+):
+    """
+    Check whether a person with the same Name + Date of Birth + Phone
+    Number + Email already has an application in any of the four
+    registration forms (Field / Field1 / Health / Phil).
+
+    Called by the candidate-facing registration form before submission,
+    and by the Desk form's live check (see the "... Duplicate Check"
+    Client Script records for these four doctypes), so it can show a
+    "you already have an application" popup.
+
+    exclude_doctype/exclude_name let the Desk form exclude the record
+    currently being viewed/edited from matching against itself.
+
+    Returns:
+        {"duplicate": False}
+        or
+        {"duplicate": True, "doctype": "<matching doctype>", "name": "<matching record name>"}
+    """
+    target_name = _normalize_reg_name(full_name)
+    target_dob = _normalize_reg_dob(date_of_birth)
+    target_phone = _normalize_reg_phone(phone_number)
+    target_email = _normalize_reg_email(email_address)
+
+    if not (target_name and target_dob and target_phone and target_email):
+        frappe.throw(
+            "Name, Date of Birth, Phone Number and Email are all required to check for duplicate applications."
+        )
+
+    match = _find_registration_duplicate(
+        target_name,
+        target_dob,
+        target_phone,
+        target_email,
+        exclude_doctype=exclude_doctype,
+        exclude_name=exclude_name,
+    )
+    if match:
+        return {"duplicate": True, "doctype": match["doctype"], "name": match["name"]}
+    return {"duplicate": False}
+
+
+def check_registration_duplicate_on_save(doc, method=None):
+    """
+    Hooked to the `validate` event of Field Registration Form,
+    Field Registration Form1, Health Registration Form and Phil
+    Registration Form (see hooks.py).
+
+    Warns (does not block save) if the same person (matched on Name +
+    Date of Birth + Phone Number + Email, all four) already has an
+    application in any of the four registration forms. This is a
+    fallback for saves that don't go through the Desk form's live
+    client-side check (e.g. API inserts, data imports).
+    """
+    field_map = _REGISTRATION_DUPLICATE_FIELD_MAP.get(doc.doctype)
+    if not field_map:
+        return
+
+    target_name = _normalize_reg_name(doc.get(field_map["name"]))
+    target_dob = _normalize_reg_dob(doc.get(field_map["dob"]))
+    target_phone = _normalize_reg_phone(doc.get(field_map["phone"]))
+    target_email = _normalize_reg_email(doc.get(field_map["email"]))
+
+    if not (target_name and target_dob and target_phone and target_email):
+        return
+
+    match = _find_registration_duplicate(
+        target_name,
+        target_dob,
+        target_phone,
+        target_email,
+        exclude_doctype=doc.doctype,
+        exclude_name=doc.name,
+    )
+    if match:
+        frappe.msgprint(
+            f"An application with the same Name, Date of Birth, Phone Number and Email "
+            f"already exists ({match['doctype']} {match['name']}). "
+            f"They may already have an application submitted for this recruitment process.",
+            title="Possible Duplicate Application",
+            indicator="orange",
+        )
+
+
+# ── Bulk resume upload → auto-match to Field Registration Form ─────────
+# Lets a recruiter select many resume files at once (e.g. one per
+# candidate) and have each one auto-attached to the right applicant by
+# matching the filename against full_name_aadhaar, instead of opening
+# every record and attaching resumes one by one.
+_RESUME_FILENAME_NOISE_WORDS = {
+    "resume",
+    "cv",
+    "curriculum",
+    "vitae",
+    "final",
+    "updated",
+    "update",
+    "new",
+    "copy",
+    "latest",
+}
+
+
+def _match_and_attach_resume_file(file_doc_name, file_name, web_path):
+    """
+    Shared by bulk_match_resumes_to_registrations and
+    auto_match_resume_on_file_upload. Normalizes file_name (minus
+    extension, punctuation, digits, and noise words like "resume"/"cv")
+    and checks it against every Field Registration Form's
+    full_name_aadhaar. On exactly one match, attaches the file to that
+    record's resume_upload field.
+
+    Returns one of:
+      {"status": "matched", "application_id": ...}
+      {"status": "ambiguous", "candidates": [...]}
+      {"status": "unmatched"}
+    """
+    candidates = frappe.get_all(
+        "Field Registration Form", fields=["name", "full_name_aadhaar"]
+    )
+    candidate_words = [
+        (c.name, set(_normalize_reg_name(c.full_name_aadhaar).split()))
+        for c in candidates
+        if _normalize_reg_name(c.full_name_aadhaar)
+    ]
+
+    base = re.sub(r"\.[^.]+$", "", file_name)
+    base = re.sub(r"[^A-Za-z]+", " ", base)
+    file_words = {
+        w
+        for w in _normalize_reg_name(base).split()
+        if w not in _RESUME_FILENAME_NOISE_WORDS
+    }
+
+    hits = [
+        name for name, words in candidate_words if words and words.issubset(file_words)
+    ]
+
+    if len(hits) == 1:
+        reg_name = hits[0]
+        frappe.db.set_value(
+            "File",
+            file_doc_name,
+            {
+                "attached_to_doctype": "Field Registration Form",
+                "attached_to_name": reg_name,
+                "attached_to_field": "resume_upload",
+            },
+            update_modified=False,
+        )
+        frappe.db.set_value(
+            "Field Registration Form",
+            reg_name,
+            "resume_upload",
+            web_path,
+            update_modified=False,
+        )
+        return {"status": "matched", "application_id": reg_name}
+    elif len(hits) > 1:
+        return {"status": "ambiguous", "candidates": hits}
+    else:
+        return {"status": "unmatched"}
+
+
+@frappe.whitelist()
+def bulk_match_resumes_to_registrations(file_urls):
+    """
+    Takes the file_url of resumes that were just bulk-uploaded (already
+    saved as File records, but not yet attached to any Field
+    Registration Form), and auto-attaches each one to the applicant
+    whose full_name_aadhaar is found in the filename, e.g.
+    "Mahaveer_Ram_Resume_2024.pdf" matches an applicant named
+    "Mahaveer Ram".
+
+    file_urls: list (or JSON-encoded string) of file_url values for
+    already-uploaded, unattached File records.
+
+    Returns {"matched": [...], "ambiguous": [...], "unmatched": [...]}
+    so the caller can show the recruiter a summary of what happened.
+    """
+    if isinstance(file_urls, str):
+        import json
+
+        try:
+            file_urls = json.loads(file_urls)
+        except Exception:
+            file_urls = [file_urls]
+
+    if not isinstance(file_urls, list) or not file_urls:
+        frappe.throw("file_urls must be a non-empty list of uploaded file URLs.")
+
+    matched, ambiguous, unmatched = [], [], []
+
+    for web_path in file_urls:
+        _fd = frappe.get_all(
+            "File",
+            filters={"file_url": web_path},
+            fields=["name", "file_name"],
+            limit=1,
+        )
+        if not _fd:
+            unmatched.append({"file_url": web_path, "reason": "File record not found"})
+            continue
+
+        file_doc_name = _fd[0]["name"]
+        file_name = _fd[0]["file_name"] or web_path.split("/")[-1]
+
+        result = _match_and_attach_resume_file(file_doc_name, file_name, web_path)
+
+        if result["status"] == "matched":
+            matched.append(
+                {
+                    "file_url": web_path,
+                    "file_name": file_name,
+                    "application_id": result["application_id"],
+                }
+            )
+        elif result["status"] == "ambiguous":
+            ambiguous.append(
+                {
+                    "file_url": web_path,
+                    "file_name": file_name,
+                    "candidates": result["candidates"],
+                }
+            )
+        else:
+            unmatched.append(
+                {
+                    "file_url": web_path,
+                    "file_name": file_name,
+                    "reason": "No matching applicant name found in filename",
+                }
+            )
+
+    return {"matched": matched, "ambiguous": ambiguous, "unmatched": unmatched}
+
+
+_RESUME_AUTO_MATCH_EXTENSIONS = (".pdf", ".doc", ".docx")
+
+
+def auto_match_resume_on_file_upload(doc, method=None):
+    """
+    Hooked to the File doctype's `after_insert` event (see hooks.py).
+
+    Lets a recruiter drop resumes straight into File Manager (or any
+    generic multi-file uploader) and have each one auto-attach itself
+    to the right Field Registration Form record by matching the
+    candidate's full_name_aadhaar against the filename — no need to
+    open each application and attach the resume by hand.
+
+    Only considers files that aren't already attached to something
+    (attached_to_doctype empty) and that look like resumes by
+    extension, so it doesn't interfere with files attached normally
+    through other forms (those already have attached_to_* set at
+    insert time).
+    """
+    if doc.attached_to_doctype or doc.attached_to_name:
+        return
+
+    file_name = doc.file_name or ""
+    if not file_name.lower().endswith(_RESUME_AUTO_MATCH_EXTENSIONS):
+        return
+
+    try:
+        result = _match_and_attach_resume_file(doc.name, file_name, doc.file_url)
+        if result["status"] == "ambiguous":
+            frappe.log_error(
+                title="Resume Auto-Match Ambiguous",
+                message=(
+                    f"File {doc.name} ({file_name}) matched multiple applicants: "
+                    f"{result['candidates']}"
+                ),
+            )
+    except Exception as e:
+        frappe.log_error(
+            title="Resume Auto-Match Failed",
+            message=f"File {doc.name} ({file_name}): {e}",
+        )
+
+
+##testing

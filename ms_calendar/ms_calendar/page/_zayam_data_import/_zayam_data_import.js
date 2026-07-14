@@ -276,9 +276,9 @@ function show_import_results(page, { created, updated, skipped, failed }) {
 					`
 				)
 				.join('') +
-				(failed.length
-					? `<div class="failed-ids">${__('Failed Zayam Ids')}: ${frappe.utils.escape_html(failed.join(', '))}</div>`
-					: '')
+			(failed.length
+				? `<div class="failed-ids">${__('Failed Zayam Ids')}: ${frappe.utils.escape_html(failed.join(', '))}</div>`
+				: '')
 		)
 		.show();
 }
@@ -302,9 +302,11 @@ function show_pdf_progress(page, { attached, not_found, not_found_ids }) {
 					`
 				)
 				.join('') +
-				(not_found_ids.length
-					? `<div class="not-found-ids">${__('Unmatched filenames')}: ${frappe.utils.escape_html(not_found_ids.join(', '))}</div>`
-					: '')
+			(not_found_ids.length
+				? `<div class="not-found-ids">${__('Unmatched filenames')}: ${frappe.utils.escape_html(not_found_ids.join(', '))}</div>`
+				: '')
 		)
 		.show();
 }
+
+
