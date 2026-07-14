@@ -334,3 +334,4 @@ scheduler_events = {"daily": ["ms_calendar.api.authbridge_v2.poll_pending_cases"
 # default_log_clearing_doctypes = {
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
+## testing

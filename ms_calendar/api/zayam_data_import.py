@@ -127,6 +127,9 @@ def import_from_excel(file_url, doctype="Phil Registration Form"):
     workbook = load_workbook(file_doc.get_full_path())
     sheet = workbook.active
 
+    if sheet.max_row < 1:
+        frappe.throw("The uploaded file is empty.")
+
     header_row = next(sheet.iter_rows(min_row=1, max_row=1))
     col_field_map = {}
     raw_headers = []
@@ -144,7 +147,7 @@ def import_from_excel(file_url, doctype="Phil Registration Form"):
 
     created, updated, skipped, failed = [], [], [], []
 
-    for row in sheet.iter_rows(min_row=2):
+    for i, row in enumerate(sheet.iter_rows(min_row=2), start=1):
         row_values = {}
         for idx, fieldname in col_field_map.items():
             if idx < len(row):
@@ -173,6 +176,11 @@ def import_from_excel(file_url, doctype="Phil Registration Form"):
                 title="Zayam Data Import Error", message=f"{match_value}: {e}"
             )
             failed.append(match_value)
+
+        # Commit periodically so progress survives a request timeout on
+        # large imports instead of losing everything in one big transaction.
+        if i % 25 == 0:
+            frappe.db.commit()
 
     frappe.db.commit()
 
