@@ -14,21 +14,37 @@ doc_events = {
     "Field Registration Form": {
         "after_insert": "ms_calendar.ms_calendar.sms_utils.send_registration_form_after_insert",
         "on_update": "ms_calendar.ms_calendar.sms_utils.send_registration_form_on_update",
+        "validate": [
+            "ms_calendar.api.resume_rename.on_field_registration",
+            "ms_calendar.api.ms_field.check_registration_duplicate_on_save",
+        ],
     },
     "BGV Document": {
         "after_insert": "ms_calendar.ms_calendar.doctype.bgv_request.bgv_request.on_document_upload"
     },
-    "Phil Registration Form": {
-        "validate": "ms_calendar.api.resume_rename.on_phil_registration"
+    "File": {
+        "after_insert": "ms_calendar.api.ms_field.auto_match_resume_on_file_upload"
     },
-    "Field Registration Form": {
-        "validate": "ms_calendar.api.resume_rename.on_field_registration"
+    "Phil Registration Form": {
+        "validate": [
+            "ms_calendar.api.resume_rename.on_phil_registration",
+            "ms_calendar.api.ms_field.check_registration_duplicate_on_save",
+        ]
     },
     "Field Registration Form1": {
-        "validate": "ms_calendar.api.resume_rename.on_field_registration"
+        "validate": [
+            "ms_calendar.api.resume_rename.on_field_registration",
+            "ms_calendar.api.ms_field.check_registration_duplicate_on_save",
+        ]
     },
     "Health Registration Form": {
-        "validate": "ms_calendar.api.resume_rename.on_health_registration"
+        "validate": [
+            "ms_calendar.api.resume_rename.on_health_registration",
+            "ms_calendar.api.ms_field.check_registration_duplicate_on_save",
+        ]
+    },
+    "Health Document Collection": {
+        "on_update": "ms_calendar.api.resume_rename.on_health_document_collection"
     },
     "Scholarship Recruitment Form": {
         "validate": "ms_calendar.api.resume_rename.on_scholarship_registration"
@@ -65,6 +81,27 @@ doc_events = {
     },
 }
 
+# Client Script records that must exist on any site running this app
+# (the four Registration Forms are custom doctypes, so their client-side
+# duplicate-check script lives as data, not a file — export/import via fixtures).
+fixtures = [
+    {
+        "dt": "Client Script",
+        "filters": [
+            [
+                "name",
+                "in",
+                [
+                    "Field Registration Form Duplicate Check",
+                    "Field Registration Form1 Duplicate Check",
+                    "Health Registration Form Duplicate Check",
+                    "Phil Registration Form Duplicate Check",
+                ],
+            ]
+        ],
+    }
+]
+
 # required_apps = []
 
 # Each item in the list will be shown as an app in the apps page
@@ -100,9 +137,18 @@ doc_events = {
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-doctype_js = {"Job Opening": "public/js/job_opening.js"}
-doctype_list_js = {"Field Registration Form": "public/js/frf_list.js"}
-app_include_js = ["/assets/ms_calendar/js/frf_list.js"]
+doctype_js = {
+    "Job Opening": "public/js/job_opening.js",
+    "Health Document Collection": "public/js/health_document_collection.js",
+}
+doctype_list_js = {
+    "Field Registration Form": "public/js/frf_list.js",
+    "Phil Registration Form": "public/js/phil_registration_form_list.js",
+}
+app_include_js = [
+    "/assets/ms_calendar/js/frf_list.js",
+    "/assets/ms_calendar/js/phil_registration_form_list.js",
+]
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
