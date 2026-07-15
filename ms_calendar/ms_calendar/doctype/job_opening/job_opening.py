@@ -74,6 +74,8 @@ class JobOpening(WebsiteGenerator):
             params["themes"] = self.theme
         if getattr(self, "geo", None):
             params["geo"] = self.geo
+        if getattr(self, "job_code", None):
+            params["job_code"] = self.job_code
         url = f"https://careers.frappe.cloud/{form_slug}/new"
         if params:
             url += "?" + urlencode(params)

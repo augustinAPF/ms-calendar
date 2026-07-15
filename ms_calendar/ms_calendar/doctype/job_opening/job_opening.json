@@ -2,7 +2,7 @@
  "actions": [],
  "allow_guest_to_view": 1,
  "allow_import": 1,
- "autoname": "APF-OPNf-.YYYY.-.####",
+ "autoname": "APF-OPNF-.YYYY.-.####",
  "creation": "2026-05-12 11:13:39.610185",
  "default_view": "List",
  "description": "Description of a Job Opening",
@@ -26,6 +26,7 @@
   "location",
   "experience",
   "employment_type",
+  "job_code",
   "references_section",
   "staffing_plan",
   "planned_vacancies",
@@ -132,8 +133,7 @@
   {
    "fieldname": "experience",
    "fieldtype": "Data",
-   "label": "Experience",
-   "options": "Experience Years"
+   "label": "Experience"
   },
   {
    "fieldname": "employment_type",
@@ -263,13 +263,19 @@
    "fieldname": "publish_salary_range",
    "fieldtype": "Check",
    "label": "Publish Salary Range"
+  },
+  {
+   "fieldname": "job_code",
+   "fieldtype": "Data",
+   "label": "Job Code",
+   "unique": 1
   }
  ],
  "has_web_view": 1,
  "icon": "fa fa-bookmark",
  "is_published_field": "publish",
  "links": [],
- "modified": "2026-06-10 14:49:35.330111",
+ "modified": "2026-07-14 02:06:02.799640",
  "modified_by": "Administrator",
  "module": "Ms Calendar",
  "name": "Job Opening",
