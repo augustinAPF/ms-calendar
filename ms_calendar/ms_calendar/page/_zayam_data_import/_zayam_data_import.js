@@ -1,8 +1,3 @@
-const ZAYAM_TARGET_DOCTYPES = [
-	{ value: 'Phil Registration Form', label: __('Phil Registration Form') },
-	{ value: 'Field Registration Form', label: __('Field Registration Form') }
-];
-
 frappe.pages['-zayam-data-import'].on_page_load = function (wrapper) {
 	var page = frappe.ui.make_app_page({
 		parent: wrapper,
@@ -13,39 +8,73 @@ frappe.pages['-zayam-data-import'].on_page_load = function (wrapper) {
 	render_import_card(page);
 };
 
-function doctype_toggle_html(toggle_class, selected) {
-	const buttons = ZAYAM_TARGET_DOCTYPES.map(
-		(opt) => `
-			<button
-				type="button"
-				class="zayam-toggle-btn ${opt.value === selected ? 'active' : ''}"
-				data-value="${opt.value}"
-			>${opt.label}</button>
-		`
-	).join('');
-	return `<div class="zayam-toggle ${toggle_class}" data-selected="${selected}">${buttons}</div>`;
+function make_doctype_picker($container, opts) {
+	const control = frappe.ui.form.make_control({
+		parent: $container.get(0),
+		df: {
+			fieldtype: 'Link',
+			fieldname: opts.fieldname,
+			options: 'DocType',
+			placeholder: __('Search doctype...'),
+			get_query: () => ({
+				query: 'ms_calendar.api.zayam_data_import.get_zayam_enabled_doctypes'
+			}),
+			change: () => {
+				const value = control.get_value();
+				if (value) opts.on_change(value);
+			}
+		},
+		only_input: true,
+		render_input: true
+	});
+	control.refresh();
+	control.set_value(opts.default);
+	return control;
 }
 
-function wire_toggle(page, toggle_class, on_change) {
-	$(page.body)
-		.find(`.${toggle_class} .zayam-toggle-btn`)
-		.on('click', function () {
-			const $btn = $(this);
-			const $toggle = $btn.closest('.zayam-toggle');
-			$toggle.find('.zayam-toggle-btn').removeClass('active');
-			$btn.addClass('active');
-			$toggle.attr('data-selected', $btn.data('value'));
-			if (on_change) on_change($btn.data('value'));
-		});
-}
+const ZAYAM_OVERRIDE_FIELDS = [
+	{ fieldname: 'geo', label: __('Geography'), options: 'Geo Master' },
+	{ fieldname: 'themes', label: __('Theme'), options: 'Theme Master' },
+	{ fieldname: 'location', label: __('Location'), options: 'Recruitment Location' },
+	{ fieldname: 'role', label: __('Role'), options: 'Recruitment Designation' }
+];
 
-function selected_doctype(page, toggle_class) {
-	return $(page.body).find(`.${toggle_class}`).attr('data-selected');
+function make_override_picker($container, opts) {
+	const control = frappe.ui.form.make_control({
+		parent: $container.get(0),
+		df: {
+			fieldtype: 'Link',
+			fieldname: `zayam_override_${opts.fieldname}`,
+			options: opts.options,
+			placeholder: __('Leave blank to keep each row\'s own {0}', [opts.label])
+		},
+		only_input: true,
+		render_input: true
+	});
+	control.refresh();
+	return control;
 }
 
 function update_records_link(page, link_class, doctype) {
 	const route = frappe.router.slug(doctype);
 	$(page.body).find(`.${link_class}`).attr('href', `/app/${route}`).text(doctype);
+}
+
+function entry_label(entry) {
+	const id = entry.zayam_id || __('(no Zayam Id)');
+	return entry.name ? `${entry.name} — ${id}` : id;
+}
+
+function simple_list_group_html(cls, icon, label, items) {
+	if (!items.length) return '';
+	return `
+		<div class="zayam-detail-group">
+			<div class="zayam-detail-group-title ${cls}">${icon} ${label} (${items.length})</div>
+			<ul class="zayam-detail-list">
+				${items.map((item) => `<li><span>${frappe.utils.escape_html(item)}</span></li>`).join('')}
+			</ul>
+		</div>
+	`;
 }
 
 function render_import_card(page) {
@@ -61,25 +90,26 @@ function render_import_card(page) {
 				from { opacity: 0; transform: translateY(10px); }
 				to { opacity: 1; transform: translateY(0); }
 			}
-			.zayam-page { max-width: 1100px; margin: 0 auto; padding: 40px 20px 56px; }
+			.zayam-page { max-width: 1360px; margin: 0 auto; padding: 40px 20px 56px; }
 			.zayam-grid {
-				display: grid;
-				grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+				display: flex;
+				flex-direction: column;
 				gap: 24px;
-				align-items: start;
 			}
 			.zayam-panel {
+				display: flex;
+				flex-direction: column;
 				background: var(--card-bg);
 				border: 1px solid var(--border-color);
 				border-top: 3px solid var(--zayam-accent-import);
 				border-radius: 14px;
 				box-shadow: var(--shadow-base);
 				overflow: hidden;
-				animation: zayamFadeUp 0.35s ease both;
-				transition: transform 0.15s ease, box-shadow 0.15s ease;
+				animation: zayamFadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+				transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 			}
-			.zayam-grid .zayam-panel:nth-child(2) { animation-delay: 0.08s; }
-			.zayam-panel:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg, 0 8px 24px rgba(0,0,0,0.12)); }
+			.zayam-grid .zayam-panel:nth-child(2) { animation-delay: 0.1s; }
+			.zayam-panel:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg, 0 10px 28px rgba(0,0,0,0.14)); }
 			.zayam-panel.panel-pdf { border-top-color: var(--zayam-accent-pdf); }
 			.zayam-panel-header {
 				display: flex;
@@ -107,19 +137,19 @@ function render_import_card(page) {
 			.zayam-panel-header h3 { margin: 0 0 3px; font-size: 16px; letter-spacing: -0.01em; color: var(--zayam-accent-import); }
 			.zayam-panel.panel-pdf .zayam-panel-header h3 { color: var(--zayam-accent-pdf); }
 			.zayam-panel-header p { margin: 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
-			.zayam-panel-body { padding: 24px 28px 28px; }
+			.zayam-panel-body { padding: 30px 34px 34px; flex: 1 1 auto; }
 			.zayam-field-label {
 				display: block;
-				font-size: 12px;
+				font-size: 13px;
 				font-weight: 600;
 				color: var(--text-muted);
-				margin-bottom: 6px;
+				margin-bottom: 7px;
 			}
 			.zayam-panel-body .description {
 				color: var(--text-muted);
-				margin-bottom: 20px;
-				font-size: 13px;
-				line-height: 1.65;
+				margin-bottom: 22px;
+				font-size: 14px;
+				line-height: 1.7;
 			}
 			.zayam-panel-body .description code {
 				background: var(--zayam-accent-import-soft);
@@ -132,76 +162,168 @@ function render_import_card(page) {
 				background: var(--zayam-accent-pdf-soft);
 				color: var(--zayam-accent-pdf);
 			}
-			.zayam-toggle {
-				display: flex;
-				margin: 0 0 20px;
-				background: var(--subtle-fg, rgba(128, 128, 128, 0.08));
-				border-radius: 8px;
-				padding: 3px;
-				gap: 3px;
+			.zayam-doctype-link { margin-bottom: 20px; }
+			.zayam-doctype-link .form-control {
+				font-size: 14px;
+				padding: 8px 12px;
+				height: auto;
+				transition: border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 			}
-			.zayam-toggle-btn {
-				flex: 1;
-				border: none;
-				background: transparent;
+			.zayam-doctype-link .form-control:focus {
+				border-color: var(--zayam-accent-import);
+				box-shadow: 0 0 0 3px var(--zayam-accent-import-soft);
+			}
+			.panel-pdf .zayam-doctype-link .form-control:focus {
+				border-color: var(--zayam-accent-pdf);
+				box-shadow: 0 0 0 3px var(--zayam-accent-pdf-soft);
+			}
+			.zayam-override-panel {
+				border: 1px dashed var(--border-color);
+				border-radius: 10px;
+				padding: 16px 18px 4px;
+				margin-bottom: 20px;
+				background: var(--subtle-fg, rgba(128, 128, 128, 0.03));
+			}
+			.zayam-override-panel-title {
+				font-size: 12.5px;
+				font-weight: 700;
+				color: var(--text-color);
+				margin-bottom: 14px;
+			}
+			.zayam-override-panel-title span {
+				font-weight: 400;
 				color: var(--text-muted);
-				font-size: 12px;
-				font-weight: 600;
-				padding: 7px 10px;
-				border-radius: 6px;
-				cursor: pointer;
-				transition: background 0.15s ease, color 0.15s ease;
-				white-space: nowrap;
-				overflow: hidden;
-				text-overflow: ellipsis;
+				text-transform: none;
 			}
-			.zayam-toggle-btn:focus-visible { outline: 2px solid var(--zayam-accent-import); outline-offset: 1px; }
-			.panel-import .zayam-toggle-btn.active { background: var(--zayam-accent-import); color: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
-			.panel-pdf .zayam-toggle-btn.active { background: var(--zayam-accent-pdf); color: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
+			.zayam-override-grid {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+				gap: 16px;
+				margin-bottom: 16px;
+			}
+			.zayam-override-grid .zayam-doctype-link { margin-bottom: 0; }
+			.zayam-override-label {
+				display: block;
+				font-size: 12.5px;
+				font-weight: 600;
+				color: var(--text-muted);
+				margin-bottom: 5px;
+			}
+			.zayam-import-btn-row { display: flex; gap: 10px; }
 			.zayam-panel-body .btn-import,
-			.zayam-panel-body .btn-attach-pdfs {
-				width: 100%;
-				padding: 10px 24px;
+			.zayam-panel-body .btn-attach-pdfs,
+			.zayam-panel-body .btn-export-template {
+				padding: 13px 26px;
 				border: none;
 				border-radius: 8px;
-				color: #fff;
 				font-weight: 600;
-				font-size: 13px;
+				font-size: 14px;
 				letter-spacing: 0.01em;
 				box-shadow: 0 1px 2px rgba(0,0,0,0.08);
-				transition: opacity 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+				transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.12s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+			}
+			.zayam-panel-body .btn-attach-pdfs { width: 100%; color: #fff; }
+			.zayam-import-btn-row .btn-import { flex: 2; color: #fff; }
+			.zayam-import-btn-row .btn-export-template {
+				flex: 1;
+				color: var(--zayam-accent-import);
+				background: var(--zayam-accent-import-soft);
+				white-space: nowrap;
 			}
 			.zayam-panel-body .btn-import:hover,
-			.zayam-panel-body .btn-attach-pdfs:hover {
+			.zayam-panel-body .btn-attach-pdfs:hover,
+			.zayam-panel-body .btn-export-template:hover {
 				opacity: 0.9;
-				color: #fff;
 				box-shadow: 0 2px 6px rgba(0,0,0,0.14);
 			}
 			.zayam-panel-body .btn-import:active,
-			.zayam-panel-body .btn-attach-pdfs:active { transform: translateY(1px); }
+			.zayam-panel-body .btn-attach-pdfs:active,
+			.zayam-panel-body .btn-export-template:active { transform: translateY(1px); }
 			.zayam-panel-body .btn-import { background: var(--zayam-accent-import); }
 			.zayam-panel-body .btn-attach-pdfs { background: var(--zayam-accent-pdf); }
-			.zayam-import-results, .zayam-pdf-progress { margin-top: 22px; text-align: left; }
-			.zayam-import-results .stat-row, .zayam-pdf-progress .stat-row {
+			.zayam-preview { margin-top: 22px; text-align: left; animation: zayamFadeUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
+			.zayam-preview-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+			.zayam-preview-unmatched {
+				font-size: 12px;
+				color: var(--yellow-600, #b45309);
+				margin-bottom: 10px;
+			}
+			.zayam-preview-table-wrap {
+				max-height: 320px;
+				overflow: auto;
+				border: 1px solid var(--border-color);
+				border-radius: 6px;
+			}
+			.zayam-preview-table { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
+			.zayam-preview-table th, .zayam-preview-table td {
+				padding: 10px 16px;
+				border-bottom: 1px solid var(--border-color);
+				text-align: left;
+			}
+			.zayam-preview-table thead th {
+				position: sticky;
+				top: 0;
+				background: var(--subtle-fg, rgba(128, 128, 128, 0.08));
+				font-weight: 600;
+			}
+			.zayam-preview-field { font-weight: 400; color: var(--text-muted); font-size: 10.5px; }
+			.zayam-preview-sr { color: var(--text-muted); }
+			.zayam-preview-actions { display: flex; gap: 10px; margin-top: 14px; }
+			.zayam-preview-actions .btn { flex: 1; padding: 8px 16px; font-size: 12.5px; border-radius: 8px; border: none; font-weight: 600; }
+			.zayam-preview-actions .btn-preview-cancel { background: var(--subtle-fg, rgba(128, 128, 128, 0.12)); color: var(--text-color); }
+			.zayam-preview-actions .btn-preview-confirm { background: var(--zayam-accent-import); color: #fff; }
+			.zayam-import-results { margin-top: 22px; text-align: left; animation: zayamFadeUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
+			.zayam-pdf-preview { margin-top: 22px; text-align: left; animation: zayamFadeUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
+			.zayam-import-results .stat-row {
 				display: flex;
 				justify-content: space-between;
 				padding: 8px 2px;
 				border-bottom: 1px solid var(--border-color);
 				font-size: 13px;
 			}
-			.zayam-import-results .stat-row:last-child, .zayam-pdf-progress .stat-row:last-child { border-bottom: none; }
-			.zayam-import-results .stat-row.is-failed .stat-value,
-			.zayam-pdf-progress .stat-row.is-failed .stat-value { color: var(--red-500); }
+			.zayam-import-results .stat-row:last-child { border-bottom: none; }
+			.zayam-import-results .stat-row.is-failed .stat-value { color: var(--red-500); }
 			.zayam-import-results .stat-row.is-created .stat-value,
-			.zayam-import-results .stat-row.is-updated .stat-value,
-			.zayam-pdf-progress .stat-row.is-attached .stat-value { color: var(--green-500); }
-			.zayam-import-results .stat-label, .zayam-pdf-progress .stat-label { color: var(--text-muted); }
-			.zayam-import-results .stat-value, .zayam-pdf-progress .stat-value { font-weight: 700; }
-			.zayam-import-results .failed-ids, .zayam-pdf-progress .not-found-ids {
-				margin-top: 12px;
-				font-size: 12px;
+			.zayam-import-results .stat-row.is-updated .stat-value { color: var(--green-500); }
+			.zayam-import-results .stat-label { color: var(--text-muted); }
+			.zayam-import-results .stat-value { font-weight: 700; }
+			.zayam-preview-table td.is-attached { color: var(--green-500); font-weight: 600; }
+			.zayam-preview-table td.is-failed { color: var(--red-500); font-weight: 600; }
+			.zayam-detail-group { margin-top: 14px; }
+			.zayam-detail-group-title {
+				font-size: 11px;
+				font-weight: 700;
+				text-transform: uppercase;
+				letter-spacing: 0.04em;
 				color: var(--text-muted);
-				word-break: break-word;
+				margin-bottom: 4px;
+			}
+			.zayam-detail-group-title.is-created, .zayam-detail-group-title.is-updated, .zayam-detail-group-title.is-attached {
+				color: var(--green-500);
+			}
+			.zayam-detail-group-title.is-failed { color: var(--red-500); }
+			.zayam-detail-group-title.is-unmatched, .stat-row.is-unmatched .stat-value { color: var(--yellow-600, #b45309); }
+			.zayam-detail-list {
+				margin: 0;
+				padding: 0;
+				list-style: none;
+				max-height: 140px;
+				overflow-y: auto;
+				border: 1px solid var(--border-color);
+				border-radius: 6px;
+			}
+			.zayam-detail-list li {
+				display: flex;
+				flex-direction: column;
+				gap: 2px;
+				padding: 6px 10px;
+				font-size: 12.5px;
+				border-bottom: 1px solid var(--border-color);
+			}
+			.zayam-detail-list li:last-child { border-bottom: none; }
+			.zayam-detail-error {
+				font-size: 11px;
+				color: var(--red-500);
 			}
 			.zayam-panel-footer {
 				padding: 12px 28px;
@@ -212,24 +334,139 @@ function render_import_card(page) {
 				text-align: center;
 			}
 			.zayam-panel-footer a { font-weight: 600; }
+			.zayam-how {
+				margin-bottom: 24px;
+				background: var(--card-bg);
+				border: 1px solid var(--border-color);
+				border-radius: 12px;
+				box-shadow: var(--shadow-base);
+				overflow: hidden;
+			}
+			.zayam-how-summary {
+				padding: 16px 24px;
+				font-size: 13px;
+				font-weight: 600;
+				cursor: pointer;
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				user-select: none;
+			}
+			.zayam-how-arrow {
+				display: inline-block;
+				color: var(--text-muted);
+				transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+			}
+			.zayam-how-summary.is-open .zayam-how-arrow { transform: rotate(90deg); }
+			.zayam-how-body-wrap {
+				max-height: 0;
+				overflow: hidden;
+				transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+			}
+			.zayam-how-body {
+				padding: 4px 24px 20px;
+				border-top: 1px solid var(--border-color);
+			}
+			.zayam-step {
+				display: flex;
+				gap: 14px;
+				margin-top: 14px;
+			}
+			.zayam-step-number {
+				flex-shrink: 0;
+				width: 62px;
+				font-size: 11px;
+				font-weight: 700;
+				text-transform: uppercase;
+				letter-spacing: 0.03em;
+				color: var(--zayam-accent-import);
+				background: var(--zayam-accent-import-soft);
+				border-radius: 20px;
+				padding: 4px 0;
+				text-align: center;
+				height: fit-content;
+			}
+			.zayam-step-text { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+			.zayam-step-text b { color: var(--text-color); }
+			.zayam-step-number-inline {
+				display: inline-block;
+				width: auto;
+				padding: 2px 10px;
+				margin-bottom: 6px;
+			}
+			.panel-pdf .zayam-step-number-inline { color: var(--zayam-accent-pdf); background: var(--zayam-accent-pdf-soft); }
 		</style>
 		<div class="zayam-page">
+			<div class="zayam-how">
+				<div class="zayam-how-summary"><span class="zayam-how-arrow">▸</span> ${__('How this works')}</div>
+				<div class="zayam-how-body-wrap">
+				<div class="zayam-how-body">
+					<div class="zayam-step">
+						<span class="zayam-step-number">${__('Step 1')}</span>
+						<span class="zayam-step-text"><b>${__('Download the template')}</b> — ${__('pick a doctype and click "Download Template" to get a blank Excel file with one column per field, already labeled correctly.')}</span>
+					</div>
+					<div class="zayam-step">
+						<span class="zayam-step-number">${__('Step 2')}</span>
+						<span class="zayam-step-text"><b>${__('Fill in the data')}</b> — ${__('add one row per applicant. The Zayam Id column is required; every other column is optional.')}</span>
+					</div>
+					<div class="zayam-step">
+						<span class="zayam-step-number">${__('Step 3')}</span>
+						<span class="zayam-step-text"><b>${__('Pick a doctype')}</b> — ${__('the search box only lists doctypes that already have a Zayam Id field, so an incompatible doctype can never be chosen by mistake.')}</span>
+					</div>
+					<div class="zayam-step">
+						<span class="zayam-step-number">${__('Step 4')}</span>
+						<span class="zayam-step-text"><b>${__('Columns are matched automatically')}</b> — ${__('every field on the chosen doctype (its name and its label) is a recognised Excel column header. If a column heading doesn\'t match any field, it\'s listed under "Unmatched Columns" instead of being silently dropped.')}</span>
+					</div>
+					<div class="zayam-step">
+						<span class="zayam-step-number">${__('Step 5')}</span>
+						<span class="zayam-step-text"><b>${__('Rows are matched by Zayam Id')}</b> — ${__('an existing record with the same Zayam Id is updated; a new Zayam Id creates a new record.')}</span>
+					</div>
+					<div class="zayam-step">
+						<span class="zayam-step-number">${__('Step 6')}</span>
+						<span class="zayam-step-text"><b>${__('Each row is isolated')}</b> — ${__('if one row fails (e.g. a duplicate check or validation error), only that row is rolled back and its exact error is shown — earlier successful rows in the same import are not affected.')}</span>
+					</div>
+					<div class="zayam-step">
+						<span class="zayam-step-number">${__('Step 7')}</span>
+						<span class="zayam-step-text"><b>${__('PDF filenames encode the Zayam Id')}</b> — ${__('the leading digits of each filename (e.g.')} <code>6213236-ClariceTPaul-Copy.pdf</code> → <code>6213236</code>) ${__('are used to find the matching record and attach the file to its resume field.')}</span>
+					</div>
+				</div>
+				</div>
+			</div>
+
 			<div class="zayam-grid">
 				<div class="zayam-panel panel-import">
 					<div class="zayam-panel-header">
 						<div class="zayam-panel-badge">📥</div>
 						<div>
+							<span class="zayam-step-number zayam-step-number-inline">${__('Step 1')}</span>
 							<h3>${__('Zayam Data Import')}</h3>
 							<p>${__('Bring Zayam Excel exports into registration records.')}</p>
 						</div>
 					</div>
 					<div class="zayam-panel-body">
 						<label class="zayam-field-label">${__('Import into')}</label>
-						${doctype_toggle_html('toggle-import-doctype', 'Phil Registration Form')}
+						<div class="zayam-doctype-link zayam-doctype-link-import"></div>
+						<div class="zayam-override-panel">
+							<div class="zayam-override-panel-title">⚙️ ${__('Set for all rows')} <span>(${__('optional')})</span></div>
+							<div class="zayam-override-grid">
+								${ZAYAM_OVERRIDE_FIELDS.map(
+									(f) => `
+										<div>
+											<span class="zayam-override-label">${f.label}</span>
+											<div class="zayam-doctype-link zayam-override-${f.fieldname}"></div>
+										</div>
+									`
+								).join('')}
+							</div>
+						</div>
 						<p class="description">
-							${__('Upload a Zayam Excel export (.xlsx/.xls). Rows are matched to existing records by Zayam Id — matching rows are updated, new Zayam Ids create new records.')}
+							${__('Upload a Zayam Excel export (.xlsx/.xls). Rows are matched to existing records by Zayam Id — matching rows are updated, new Zayam Ids create new records. Search any doctype that already has a Zayam Id field. Any value set above (Geography/Theme/Location/Role) is force-applied to every imported row, overriding whatever is in the file for that column.')}
 						</p>
-						<button class="btn btn-import">${__('Choose File & Import')}</button>
+						<div class="zayam-import-btn-row">
+							<button class="btn btn-import">${__('Choose File & Import')}</button>
+							<button class="btn btn-export-template">${__('Download Template')}</button>
+						</div>
+						<div class="zayam-preview" style="display: none;"></div>
 						<div class="zayam-import-results" style="display: none;"></div>
 					</div>
 					<div class="zayam-panel-footer">
@@ -241,20 +478,21 @@ function render_import_card(page) {
 					<div class="zayam-panel-header">
 						<div class="zayam-panel-badge">📎</div>
 						<div>
+							<span class="zayam-step-number zayam-step-number-inline">${__('Step 2')}</span>
 							<h3>${__('Bulk Attach Resumes (CV)')}</h3>
 							<p>${__('Match applicant PDFs to records by filename.')}</p>
 						</div>
 					</div>
 					<div class="zayam-panel-body">
 						<label class="zayam-field-label">${__('Attach into')}</label>
-						${doctype_toggle_html('toggle-pdf-doctype', 'Phil Registration Form')}
+						<div class="zayam-doctype-link zayam-doctype-link-pdf"></div>
 						<p class="description">
 							${__('Select all the PDF files at once — the Zayam Id is read from the start of each filename, e.g.')}
 							<code>6213236-ClariceTPaul-Copy.pdf</code> ${__('matches Zayam Id')} <code>6213236</code>.
-							${__('Each PDF is attached as the resume field on that record.')}
+							${__('Each PDF is attached to that record\'s first Attach field.')}
 						</p>
 						<button class="btn btn-attach-pdfs">${__('Choose PDF Files')}</button>
-						<div class="zayam-pdf-progress" style="display: none;"></div>
+						<div class="zayam-pdf-preview" style="display: none;"></div>
 					</div>
 					<div class="zayam-panel-footer">
 						${__('View records:')} <a class="zayam-records-link-pdf" href="/app/phil-registration-form" target="_blank">${__('Phil Registration Form')}</a>
@@ -264,25 +502,86 @@ function render_import_card(page) {
 		</div>
 	`);
 
-	wire_toggle(page, 'toggle-import-doctype', (doctype) => update_records_link(page, 'zayam-records-link-import', doctype));
-	wire_toggle(page, 'toggle-pdf-doctype', (doctype) => update_records_link(page, 'zayam-records-link-pdf', doctype));
+	$(page.body).find('.zayam-how-summary').on('click', function () {
+		const $summary = $(this);
+		const $wrap = $summary.siblings('.zayam-how-body-wrap');
+		const is_open = $summary.hasClass('is-open');
+
+		if (is_open) {
+			$wrap.css('max-height', $wrap[0].scrollHeight + 'px');
+			// eslint-disable-next-line no-unused-expressions
+			$wrap[0].offsetHeight; // force reflow so the collapse actually animates
+			$wrap.css('max-height', '0px');
+			$summary.removeClass('is-open');
+		} else {
+			$summary.addClass('is-open');
+			$wrap.css('max-height', $wrap[0].scrollHeight + 'px');
+			$wrap.one('transitionend', () => {
+				if ($summary.hasClass('is-open')) $wrap.css('max-height', 'none');
+			});
+		}
+	});
+
+	const import_doctype = make_doctype_picker($(page.body).find('.zayam-doctype-link-import'), {
+		fieldname: 'zayam_import_doctype',
+		default: 'Phil Registration Form',
+		on_change: (doctype) => update_records_link(page, 'zayam-records-link-import', doctype)
+	});
+	const override_controls = {};
+	ZAYAM_OVERRIDE_FIELDS.forEach((f) => {
+		override_controls[f.fieldname] = make_override_picker(
+			$(page.body).find(`.zayam-override-${f.fieldname}`),
+			f
+		);
+	});
+
+	function get_overrides() {
+		const overrides = {};
+		Object.entries(override_controls).forEach(([fieldname, control]) => {
+			const value = control.get_value();
+			if (value) overrides[fieldname] = value;
+		});
+		return overrides;
+	}
+	const pdf_doctype = make_doctype_picker($(page.body).find('.zayam-doctype-link-pdf'), {
+		fieldname: 'zayam_pdf_doctype',
+		default: 'Phil Registration Form',
+		on_change: (doctype) => update_records_link(page, 'zayam-records-link-pdf', doctype)
+	});
 	update_records_link(page, 'zayam-records-link-import', 'Phil Registration Form');
 	update_records_link(page, 'zayam-records-link-pdf', 'Phil Registration Form');
 
+	$(page.body).find('.btn-export-template').on('click', () => {
+		const doctype = import_doctype.get_value();
+		if (!doctype) {
+			frappe.msgprint(__('Please choose a doctype to export a template for.'));
+			return;
+		}
+		window.open(
+			'/api/method/ms_calendar.api.zayam_data_import.export_template?doctype=' + encodeURIComponent(doctype)
+		);
+	});
+
 	$(page.body).find('.btn-import').on('click', () => {
-		const doctype = selected_doctype(page, 'toggle-import-doctype');
+		const doctype = import_doctype.get_value();
+		if (!doctype) {
+			frappe.msgprint(__('Please choose a doctype to import into.'));
+			return;
+		}
+		const overrides = get_overrides();
 		new frappe.ui.FileUploader({
 			folder: 'Home',
 			restrictions: { allowed_file_types: ['.xlsx', '.xls'] },
 			on_success(file_doc) {
+				$(page.body).find('.zayam-import-results').hide();
 				frappe.call({
-					method: 'ms_calendar.api.zayam_data_import.import_from_excel',
-					args: { file_url: file_doc.file_url, doctype },
+					method: 'ms_calendar.api.zayam_data_import.preview_excel',
+					args: { file_url: file_doc.file_url, doctype, overrides },
 					freeze: true,
-					freeze_message: __('Importing Zayam data...'),
+					freeze_message: __('Reading file...'),
 					callback(r) {
 						if (!r.message) return;
-						show_import_results(page, r.message);
+						show_preview(page, file_doc.file_url, doctype, overrides, r.message);
 					}
 				});
 			}
@@ -290,33 +589,32 @@ function render_import_card(page) {
 	});
 
 	$(page.body).find('.btn-attach-pdfs').on('click', () => {
-		const doctype = selected_doctype(page, 'toggle-pdf-doctype');
-		const tally = { attached: 0, not_found: 0, not_found_ids: [] };
+		const doctype = pdf_doctype.get_value();
+		if (!doctype) {
+			frappe.msgprint(__('Please choose a doctype to attach into.'));
+			return;
+		}
+		const pending = [];
+		$(page.body).find('.zayam-pdf-preview').empty().hide();
 		new frappe.ui.FileUploader({
 			folder: 'Home',
 			allow_multiple: true,
 			restrictions: { allowed_file_types: ['.pdf'] },
 			on_success(file_doc) {
 				frappe.call({
-					method: 'ms_calendar.api.zayam_data_import.attach_application_pdf',
+					method: 'ms_calendar.api.zayam_data_import.preview_pdf_match',
 					args: { file_url: file_doc.file_url, file_name: file_doc.file_name, doctype },
 					callback(r) {
 						if (!r.message) return;
-						if (r.message.status === 'attached') {
-							tally.attached += 1;
-							frappe.show_alert({
-								message: __('{0} attached successfully', [r.message.zayam_id]),
-								indicator: 'green'
-							});
-						} else {
-							tally.not_found += 1;
-							tally.not_found_ids.push(r.message.zayam_id);
-							frappe.show_alert({
-								message: __('No record found for Zayam Id {0}', [r.message.zayam_id]),
-								indicator: 'red'
-							});
-						}
-						show_pdf_progress(page, tally);
+						pending.push({
+							file_url: file_doc.file_url,
+							file_name: file_doc.file_name,
+							zayam_id: r.message.zayam_id,
+							name: r.message.name,
+							found: r.message.found,
+							status: 'pending'
+						});
+						show_pdf_preview(page, doctype, pending);
 					}
 				});
 			}
@@ -324,18 +622,127 @@ function render_import_card(page) {
 	});
 }
 
-function show_import_results(page, { created, updated, skipped, failed }) {
-	const rows = [
+function show_preview(page, file_url, doctype, overrides, { columns, rows, total_rows, unmatched_columns }) {
+	const $preview = $(page.body).find('.zayam-preview');
+	const shown = rows.length;
+	const override_entries = Object.entries(overrides || {});
+
+	const header_html = columns.map((c) => `<th>${frappe.utils.escape_html(c.header)}<br><span class="zayam-preview-field">${c.fieldname}</span></th>`).join('');
+	const rows_html = rows
+		.map(
+			(row, i) => `
+				<tr>
+					<td class="zayam-preview-sr">${i + 1}</td>
+					${row.map((cell) => `<td>${cell === null || cell === undefined ? '' : frappe.utils.escape_html(String(cell))}</td>`).join('')}
+				</tr>
+			`
+		)
+		.join('');
+
+	$preview
+		.html(`
+			<div class="zayam-preview-title">${__('Preview')} — ${__('showing')} ${shown} ${__('of')} ${total_rows} ${__('rows')}</div>
+			${override_entries.length
+				? `<div class="zayam-preview-unmatched">${__('Every row below will be set to')}: ${override_entries
+						.map(([fieldname, value]) => `<b>${frappe.utils.escape_html(fieldname)} = ${frappe.utils.escape_html(value)}</b>`)
+						.join(', ')}</div>`
+				: ''}
+			${unmatched_columns.length
+				? `<div class="zayam-preview-unmatched">${__('Unmatched columns (will be ignored):')} ${frappe.utils.escape_html(unmatched_columns.join(', '))}</div>`
+				: ''}
+			<div class="zayam-preview-table-wrap">
+				<table class="zayam-preview-table">
+					<thead><tr><th class="zayam-preview-sr">${__('Sr. No')}</th>${header_html}</tr></thead>
+					<tbody>${rows_html}</tbody>
+				</table>
+			</div>
+			<div class="zayam-preview-actions">
+				<button class="btn btn-preview-cancel">${__('Cancel')}</button>
+				<button class="btn btn-preview-confirm">${__('Confirm Import')} (${total_rows})</button>
+			</div>
+		`)
+		.show();
+
+	$preview.find('.btn-preview-cancel').on('click', () => {
+		$preview.empty().hide();
+	});
+
+	$preview.find('.btn-preview-confirm').on('click', () => {
+		frappe.call({
+			method: 'ms_calendar.api.zayam_data_import.import_from_excel',
+			args: { file_url, doctype, overrides },
+			freeze: true,
+			freeze_message: __('Importing Zayam data...'),
+			callback(r) {
+				if (!r.message) return;
+				$preview.empty().hide();
+				show_import_results(page, r.message);
+			}
+		});
+	});
+}
+
+function data_table_group_html(cls, icon, label, entries, columns) {
+	if (!entries.length) return '';
+	const show_error = entries.some((e) => e.error);
+	const header_html = columns.map((c) => `<th>${frappe.utils.escape_html(c.header)}</th>`).join('');
+	const rows_html = entries
+		.map(
+			(e) => `
+				<tr>
+					<td>${frappe.utils.escape_html(e.zayam_id || '')}</td>
+					${columns
+						.map((c) => {
+							const value = e.data ? e.data[c.fieldname] : null;
+							return `<td>${value === null || value === undefined ? '' : frappe.utils.escape_html(String(value))}</td>`;
+						})
+						.join('')}
+					${show_error ? `<td class="zayam-detail-error">${e.error ? frappe.utils.escape_html(e.error) : ''}</td>` : ''}
+				</tr>
+			`
+		)
+		.join('');
+
+	return `
+		<div class="zayam-detail-group">
+			<div class="zayam-detail-group-title ${cls}">${icon} ${label} (${entries.length})</div>
+			<div class="zayam-preview-table-wrap">
+				<table class="zayam-preview-table">
+					<thead><tr><th>${__('Zayam Id')}</th>${header_html}${show_error ? `<th>${__('Error')}</th>` : ''}</tr></thead>
+					<tbody>${rows_html}</tbody>
+				</table>
+			</div>
+		</div>
+	`;
+}
+
+function show_import_results(page, { created, updated, skipped, failed, unmatched_columns, columns, new_master_entries }) {
+	unmatched_columns = unmatched_columns || [];
+	columns = columns || [];
+	new_master_entries = new_master_entries || {};
+	const new_master_count = Object.values(new_master_entries).reduce((sum, values) => sum + values.length, 0);
+
+	const counts = [
 		{ cls: 'is-created', label: __('Created'), value: created.length },
 		{ cls: 'is-updated', label: __('Updated'), value: updated.length },
 		{ cls: '', label: __('Skipped (no Zayam Id)'), value: skipped.length },
 		{ cls: 'is-failed', label: __('Failed'), value: failed.length }
 	];
+	if (unmatched_columns.length) {
+		counts.push({ cls: 'is-unmatched', label: __('Unmatched Columns'), value: unmatched_columns.length });
+	}
+	if (new_master_count) {
+		counts.push({ cls: 'is-unmatched', label: __('New Master Values Added'), value: new_master_count });
+	}
+
+	const new_master_html = Object.entries(new_master_entries)
+		.map(([doctype, values]) => simple_list_group_html('is-unmatched', '➕', `${doctype} — ${__('new values')}`, values))
+		.join('');
 
 	const $results = $(page.body).find('.zayam-import-results');
 	$results
 		.html(
-			rows
+			counts
 				.map(
 					(row) => `
 						<div class="stat-row ${row.cls}">
@@ -345,35 +752,99 @@ function show_import_results(page, { created, updated, skipped, failed }) {
 					`
 				)
 				.join('') +
-			(failed.length
-				? `<div class="failed-ids">${__('Failed Zayam Ids')}: ${frappe.utils.escape_html(failed.join(', '))}</div>`
-				: '')
+				data_table_group_html('is-created', '✓', __('Created'), created, columns) +
+				data_table_group_html('is-updated', '↻', __('Updated'), updated, columns) +
+				data_table_group_html('is-failed', '⚠', __('Failed'), failed, columns) +
+				simple_list_group_html('is-unmatched', '❓', __('Unmatched Columns'), unmatched_columns) +
+				new_master_html
 		)
 		.show();
 }
 
-function show_pdf_progress(page, { attached, not_found, not_found_ids }) {
-	const rows = [
-		{ cls: 'is-attached', label: __('Attached'), value: attached },
-		{ cls: 'is-failed', label: __('No matching Zayam Id'), value: not_found }
-	];
+function pdf_row_status(row) {
+	if (!row.found) return { text: __('No match'), cls: 'is-failed' };
+	if (row.status === 'attaching') return { text: __('Attaching…'), cls: '' };
+	if (row.status === 'attached') return { text: __('Attached'), cls: 'is-attached' };
+	if (row.status === 'failed') return { text: row.error ? `${__('Failed')}: ${row.error}` : __('Failed'), cls: 'is-failed' };
+	return { text: __('Ready'), cls: '' };
+}
 
-	const $progress = $(page.body).find('.zayam-pdf-progress');
-	$progress
-		.html(
-			rows
-				.map(
-					(row) => `
-						<div class="stat-row ${row.cls}">
-							<span class="stat-label">${row.label}</span>
-							<span class="stat-value">${row.value}</span>
-						</div>
-					`
-				)
-				.join('') +
-			(not_found_ids.length
-				? `<div class="not-found-ids">${__('Unmatched filenames')}: ${frappe.utils.escape_html(not_found_ids.join(', '))}</div>`
-				: '')
-		)
+function show_pdf_preview(page, doctype, pending) {
+	const $preview = $(page.body).find('.zayam-pdf-preview');
+	const found_count = pending.filter((r) => r.found).length;
+	const not_found_count = pending.length - found_count;
+	const remaining = pending.filter((r) => r.found && r.status === 'pending').length;
+
+	const rows_html = pending
+		.map((row) => {
+			const status = pdf_row_status(row);
+			return `
+				<tr>
+					<td>${frappe.utils.escape_html(row.file_name)}</td>
+					<td>${frappe.utils.escape_html(row.zayam_id || '')}</td>
+					<td>${row.name ? frappe.utils.escape_html(row.name) : '—'}</td>
+					<td class="${status.cls}">${status.text}</td>
+				</tr>
+			`;
+		})
+		.join('');
+
+	$preview
+		.html(`
+			<div class="zayam-preview-title">
+				${__('Preview')} — ${pending.length} ${__('file(s) selected')}, ${found_count} ${__('matched')}, ${not_found_count} ${__('not found')}
+			</div>
+			<div class="zayam-preview-table-wrap">
+				<table class="zayam-preview-table">
+					<thead><tr><th>${__('File')}</th><th>${__('Zayam Id')}</th><th>${__('Match')}</th><th>${__('Status')}</th></tr></thead>
+					<tbody>${rows_html}</tbody>
+				</table>
+			</div>
+			<div class="zayam-preview-actions">
+				<button class="btn btn-preview-cancel">${__('Cancel')}</button>
+				<button class="btn btn-preview-confirm" ${remaining === 0 ? 'disabled' : ''}>${__('Attach Matched Files')} (${remaining})</button>
+			</div>
+		`)
 		.show();
+
+	$preview.find('.btn-preview-cancel').on('click', () => {
+		$preview.empty().hide();
+	});
+
+	$preview.find('.btn-preview-confirm').on('click', () => {
+		attach_pdf_queue(page, doctype, pending);
+	});
+}
+
+function attach_pdf_one(doctype, row) {
+	return new Promise((resolve) => {
+		frappe.call({
+			method: 'ms_calendar.api.zayam_data_import.attach_application_pdf',
+			args: { file_url: row.file_url, file_name: row.file_name, doctype },
+			callback(r) {
+				resolve(r);
+			}
+		});
+	});
+}
+
+async function attach_pdf_queue(page, doctype, pending) {
+	const queue = pending.filter((row) => row.found && row.status === 'pending');
+	for (const row of queue) {
+		row.status = 'attaching';
+		show_pdf_preview(page, doctype, pending);
+
+		const r = await attach_pdf_one(doctype, row);
+		if (r.message) {
+			if (r.message.status === 'attached') {
+				row.status = 'attached';
+				frappe.show_alert({ message: __('{0} attached successfully', [entry_label(row)]), indicator: 'green' });
+			} else {
+				row.status = 'failed';
+				row.error = r.message.error;
+				frappe.show_alert({ message: __('Failed to attach {0}', [entry_label(row)]), indicator: 'red' });
+			}
+		}
+		show_pdf_preview(page, doctype, pending);
+	}
 }

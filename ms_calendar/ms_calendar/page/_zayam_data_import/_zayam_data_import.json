@@ -5,7 +5,7 @@
  "doctype": "Page",
  "icon": "data",
  "idx": 0,
- "modified": "2026-07-14 17:11:10.531491",
+ "modified": "2026-07-15 10:51:53.993626",
  "modified_by": "Administrator",
  "module": "Ms Calendar",
  "name": "-zayam-data-import",
@@ -16,5 +16,5 @@
  "standard": "Yes",
  "style": null,
  "system_page": 0,
- "title": "Zayam Data import"
+ "title": "Data Migration to Pathways"
 }
