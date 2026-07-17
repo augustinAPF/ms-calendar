@@ -8,17 +8,19 @@ frappe.pages['-zayam-data-import'].on_page_load = function (wrapper) {
 	render_import_card(page);
 };
 
+const DOCTYPE_CHOICES = [
+	{ label: __('Select...'), value: '' },
+	{ label: __('Grant'), value: 'Phil Registration Form' },
+	{ label: __('Field'), value: 'Field Registration Form' }
+];
+
 function make_doctype_picker($container, opts) {
 	const control = frappe.ui.form.make_control({
 		parent: $container.get(0),
 		df: {
-			fieldtype: 'Link',
+			fieldtype: 'Select',
 			fieldname: opts.fieldname,
-			options: 'DocType',
-			placeholder: __('Search doctype...'),
-			get_query: () => ({
-				query: 'ms_calendar.api.zayam_data_import.get_zayam_enabled_doctypes'
-			}),
+			options: DOCTYPE_CHOICES.map((c) => ({ label: c.label, value: c.value })),
 			change: () => {
 				const value = control.get_value();
 				if (value) opts.on_change(value);
@@ -33,10 +35,12 @@ function make_doctype_picker($container, opts) {
 }
 
 const ZAYAM_OVERRIDE_FIELDS = [
-	{ fieldname: 'geo', label: __('Geography'), options: 'Geo Master' },
-	{ fieldname: 'themes', label: __('Theme'), options: 'Theme Master' },
-	{ fieldname: 'location', label: __('Location'), options: 'Recruitment Location' },
-	{ fieldname: 'role', label: __('Role'), options: 'Recruitment Designation' }
+	{ key: 'geo', fieldname: 'geo', label: __('Geography'), options: 'Geo Master', doctypes: ['Phil Registration Form'] },
+	{ key: 'themes', fieldname: 'themes', label: __('Theme'), options: 'Theme Master', doctypes: ['Phil Registration Form'] },
+	{ key: 'location', fieldname: 'location', label: __('Location'), options: 'Recruitment Location', doctypes: ['Phil Registration Form', 'Field Registration Form'] },
+	{ key: 'grant_role', fieldname: 'role', label: __('Role'), options: 'Recruitment Designation', doctypes: ['Phil Registration Form'] },
+	{ key: 'field_role', fieldname: 'role', label: __('Role'), options: 'Field Role', doctypes: ['Field Registration Form'] },
+	{ key: 'department', fieldname: 'department', label: __('Department'), options: 'Recruitment Department', doctypes: ['Field Registration Form'] }
 ];
 
 function make_override_picker($container, opts) {
@@ -44,7 +48,7 @@ function make_override_picker($container, opts) {
 		parent: $container.get(0),
 		df: {
 			fieldtype: 'Link',
-			fieldname: `zayam_override_${opts.fieldname}`,
+			fieldname: `zayam_override_${opts.key}`,
 			options: opts.options,
 			placeholder: __('Leave blank to keep each row\'s own {0}', [opts.label])
 		},
@@ -91,6 +95,7 @@ function render_import_card(page) {
 				to { opacity: 1; transform: translateY(0); }
 			}
 			.zayam-page { max-width: 1360px; margin: 0 auto; padding: 40px 20px 56px; }
+			.zayam-page-title { font-size: 22px; font-weight: 700; color: var(--text-color); margin: 0 0 20px; }
 			.zayam-grid {
 				display: flex;
 				flex-direction: column;
@@ -188,7 +193,7 @@ function render_import_card(page) {
 				border-radius: 10px;
 				padding: 16px 18px 4px;
 				margin-bottom: 20px;
-				background: var(--subtle-fg, rgba(128, 128, 128, 0.03));
+				background: rgba(128, 128, 128, 0.1);
 			}
 			.zayam-override-panel-title {
 				font-size: 12.5px;
@@ -217,8 +222,7 @@ function render_import_card(page) {
 			}
 			.zayam-import-btn-row { display: flex; gap: 10px; }
 			.zayam-panel-body .btn-import,
-			.zayam-panel-body .btn-attach-pdfs,
-			.zayam-panel-body .btn-export-template {
+			.zayam-panel-body .btn-attach-pdfs {
 				padding: 13px 26px;
 				border: none;
 				border-radius: 8px;
@@ -229,22 +233,14 @@ function render_import_card(page) {
 				transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.12s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 			}
 			.zayam-panel-body .btn-attach-pdfs { width: 100%; color: #fff; }
-			.zayam-import-btn-row .btn-import { flex: 2; color: #fff; }
-			.zayam-import-btn-row .btn-export-template {
-				flex: 1;
-				color: var(--zayam-accent-import);
-				background: var(--zayam-accent-import-soft);
-				white-space: nowrap;
-			}
+			.zayam-import-btn-row .btn-import { flex: 1; color: #fff; width: 100%; }
 			.zayam-panel-body .btn-import:hover,
-			.zayam-panel-body .btn-attach-pdfs:hover,
-			.zayam-panel-body .btn-export-template:hover {
+			.zayam-panel-body .btn-attach-pdfs:hover {
 				opacity: 0.9;
 				box-shadow: 0 2px 6px rgba(0,0,0,0.14);
 			}
 			.zayam-panel-body .btn-import:active,
-			.zayam-panel-body .btn-attach-pdfs:active,
-			.zayam-panel-body .btn-export-template:active { transform: translateY(1px); }
+			.zayam-panel-body .btn-attach-pdfs:active { transform: translateY(1px); }
 			.zayam-panel-body .btn-import { background: var(--zayam-accent-import); }
 			.zayam-panel-body .btn-attach-pdfs { background: var(--zayam-accent-pdf); }
 			.zayam-preview { margin-top: 22px; text-align: left; animation: zayamFadeUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
@@ -457,36 +453,33 @@ function render_import_card(page) {
 			.panel-pdf .zayam-step-number-inline { color: var(--zayam-accent-pdf); background: var(--zayam-accent-pdf-soft); }
 		</style>
 		<div class="zayam-page">
+			<h2 class="zayam-page-title">${__('Data Migration')}</h2>
 			<div class="zayam-how">
 				<div class="zayam-how-summary"><span class="zayam-how-arrow">▸</span> ${__('How this works')}</div>
 				<div class="zayam-how-body-wrap">
 				<div class="zayam-how-body">
 					<div class="zayam-step">
 						<span class="zayam-step-number">${__('Step 1')}</span>
-						<span class="zayam-step-text"><b>${__('Download the template')}</b> — ${__('pick a doctype and click "Download Template" to get a blank Excel file with one column per field, already labeled correctly.')}</span>
-					</div>
-					<div class="zayam-step">
-						<span class="zayam-step-number">${__('Step 2')}</span>
 						<span class="zayam-step-text"><b>${__('Fill in the data')}</b> — ${__('add one row per applicant. The Zwayam Id column is required; every other column is optional.')}</span>
 					</div>
 					<div class="zayam-step">
-						<span class="zayam-step-number">${__('Step 3')}</span>
-						<span class="zayam-step-text"><b>${__('Pick a doctype')}</b> — ${__('the search box only lists doctypes that already have a Zwayam Id field, so an incompatible doctype can never be chosen by mistake.')}</span>
+						<span class="zayam-step-number">${__('Step 2')}</span>
+						<span class="zayam-step-text"><b>${__('Pick Grant or Field')}</b> — ${__('choose which registration form the file should be imported into.')}</span>
 					</div>
 					<div class="zayam-step">
-						<span class="zayam-step-number">${__('Step 4')}</span>
+						<span class="zayam-step-number">${__('Step 3')}</span>
 						<span class="zayam-step-text"><b>${__('Columns are matched automatically')}</b> — ${__('every field on the chosen doctype (its name and its label) is a recognised Excel column header. If a column heading doesn\'t match any field, it\'s listed under "Unmatched Columns" instead of being silently dropped.')}</span>
 					</div>
 					<div class="zayam-step">
-						<span class="zayam-step-number">${__('Step 5')}</span>
+						<span class="zayam-step-number">${__('Step 4')}</span>
 						<span class="zayam-step-text"><b>${__('Rows are matched by Zwayam Id')}</b> — ${__('an existing record with the same Zwayam Id is updated; a new Zwayam Id creates a new record.')}</span>
 					</div>
 					<div class="zayam-step">
-						<span class="zayam-step-number">${__('Step 6')}</span>
+						<span class="zayam-step-number">${__('Step 5')}</span>
 						<span class="zayam-step-text"><b>${__('Each row is isolated')}</b> — ${__('if one row fails (e.g. a duplicate check or validation error), only that row is rolled back and its exact error is shown — earlier successful rows in the same import are not affected.')}</span>
 					</div>
 					<div class="zayam-step">
-						<span class="zayam-step-number">${__('Step 7')}</span>
+						<span class="zayam-step-number">${__('Step 6')}</span>
 						<span class="zayam-step-text"><b>${__('PDF filenames encode the Zwayam Id')}</b> — ${__('the leading digits of each filename (e.g.')} <code>6213236-ClariceTPaul-Copy.pdf</code> → <code>6213236</code>) ${__('are used to find the matching record and attach the file to its resume field.')}</span>
 					</div>
 				</div>
@@ -506,25 +499,24 @@ function render_import_card(page) {
 					<div class="zayam-panel-body">
 						<label class="zayam-field-label">${__('Import into')}</label>
 						<div class="zayam-doctype-link zayam-doctype-link-import"></div>
-						<div class="zayam-override-panel">
+						<div class="zayam-override-panel" style="display: none;">
 							<div class="zayam-override-panel-title">⚙️ ${__('Set for all rows')} <span>(${__('optional')})</span></div>
 							<div class="zayam-override-grid">
 								${ZAYAM_OVERRIDE_FIELDS.map(
 		(f) => `
-										<div>
+										<div class="zayam-override-wrap-${f.key}" style="display: none;">
 											<span class="zayam-override-label">${f.label}</span>
-											<div class="zayam-doctype-link zayam-override-${f.fieldname}"></div>
+											<div class="zayam-doctype-link zayam-override-${f.key}"></div>
 										</div>
 									`
 	).join('')}
 							</div>
 						</div>
 						<p class="description">
-							${__('Upload a Zwayam Excel export (.xlsx/.xls). Rows are matched to existing records by Zwayam Id — matching rows are updated, new Zwayam Ids create new records. Search any doctype that already has a Zwayam Id field. Any value set above (Geography/Theme/Location/Role) is force-applied to every imported row, overriding whatever is in the file for that column.')}
+							${__('Upload a Zwayam Excel export (.xlsx/.xls). Rows are matched to existing records by Zwayam Id — matching rows are updated, new Zwayam Ids create new records. Any value set above is force-applied to every imported row, overriding whatever is in the file for that column.')}
 						</p>
 						<div class="zayam-import-btn-row">
 							<button class="btn btn-import">${__('Choose File & Import')}</button>
-							<button class="btn btn-export-template">${__('Download Template')}</button>
 						</div>
 						<div class="zayam-preview" style="display: none;"></div>
 						<div class="zayam-import-results" style="display: none;"></div>
@@ -582,45 +574,54 @@ function render_import_card(page) {
 		}
 	});
 
-	const import_doctype = make_doctype_picker($(page.body).find('.zayam-doctype-link-import'), {
-		fieldname: 'zayam_import_doctype',
-		default: 'Phil Registration Form',
-		on_change: (doctype) => update_records_link(page, 'zayam-records-link-import', doctype)
-	});
 	const override_controls = {};
 	ZAYAM_OVERRIDE_FIELDS.forEach((f) => {
-		override_controls[f.fieldname] = make_override_picker(
-			$(page.body).find(`.zayam-override-${f.fieldname}`),
+		override_controls[f.key] = make_override_picker(
+			$(page.body).find(`.zayam-override-${f.key}`),
 			f
 		);
 	});
 
+	function update_override_visibility(doctype) {
+		const $panel = $(page.body).find('.zayam-override-panel');
+		if (!doctype) {
+			$panel.hide();
+			return;
+		}
+		$panel.show();
+		ZAYAM_OVERRIDE_FIELDS.forEach((f) => {
+			const applies = f.doctypes.includes(doctype);
+			$(page.body).find(`.zayam-override-wrap-${f.key}`).toggle(applies);
+			if (!applies) override_controls[f.key].set_value('');
+		});
+	}
+
+	const import_doctype = make_doctype_picker($(page.body).find('.zayam-doctype-link-import'), {
+		fieldname: 'zayam_import_doctype',
+		default: '',
+		on_change: (doctype) => {
+			update_records_link(page, 'zayam-records-link-import', doctype);
+			update_override_visibility(doctype);
+		}
+	});
+
 	function get_overrides() {
+		const doctype = import_doctype.get_value();
 		const overrides = {};
-		Object.entries(override_controls).forEach(([fieldname, control]) => {
-			const value = control.get_value();
-			if (value) overrides[fieldname] = value;
+		ZAYAM_OVERRIDE_FIELDS.forEach((f) => {
+			if (!f.doctypes.includes(doctype)) return;
+			const value = override_controls[f.key].get_value();
+			if (value) overrides[f.fieldname] = value;
 		});
 		return overrides;
 	}
 	const pdf_doctype = make_doctype_picker($(page.body).find('.zayam-doctype-link-pdf'), {
 		fieldname: 'zayam_pdf_doctype',
-		default: 'Phil Registration Form',
+		default: '',
 		on_change: (doctype) => update_records_link(page, 'zayam-records-link-pdf', doctype)
 	});
 	update_records_link(page, 'zayam-records-link-import', 'Phil Registration Form');
 	update_records_link(page, 'zayam-records-link-pdf', 'Phil Registration Form');
-
-	$(page.body).find('.btn-export-template').on('click', () => {
-		const doctype = import_doctype.get_value();
-		if (!doctype) {
-			frappe.msgprint(__('Please choose a doctype to export a template for.'));
-			return;
-		}
-		window.open(
-			'/api/method/ms_calendar.api.zayam_data_import.export_template?doctype=' + encodeURIComponent(doctype)
-		);
-	});
 
 	$(page.body).find('.btn-import').on('click', () => {
 		const doctype = import_doctype.get_value();
