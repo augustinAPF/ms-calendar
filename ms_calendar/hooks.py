@@ -99,7 +99,24 @@ fixtures = [
                 ],
             ]
         ],
-    }
+    },
+    # MeritTrac result doctypes were created as Custom DocTypes directly on
+    # ms.local's DB (no JSON/module file), so any other site running this
+    # app needs them shipped as a fixture too, or merit_trac.py's
+    # test_result_api() fails with a DocType import error on insert.
+    {
+        "dt": "DocType",
+        "filters": [
+            [
+                "name",
+                "in",
+                [
+                    "MeritTrac Test Result",
+                    "Field MeritTrac Test Result",
+                ],
+            ]
+        ],
+    },
 ]
 
 # required_apps = []
