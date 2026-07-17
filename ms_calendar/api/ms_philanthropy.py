@@ -245,7 +245,7 @@ from urllib.parse import quote
 #     {meeting_html}
 #     <p><strong>Feedback form:</strong>
 #     <a href="{feedback_url}" target="_blank">Click here</a></p>
-   
+
 #     {note_html}
 
 #     <p>Regards,<br>
@@ -292,7 +292,6 @@ from urllib.parse import quote
 #     """
 
 
-
 #     # -------- UPDATE EVENT BODY & ATTENDEES (Outlook will notify interviewers) --------
 #     interviewer_list = [i.strip() for i in (interviewer_emails or "").split(",") if i.strip()]
 #     attendees = [{"emailAddress": {"address": i}, "type": "required"} for i in interviewer_list]
@@ -318,6 +317,7 @@ from urllib.parse import quote
 
 #     frappe.msgprint("✅ Event created successfully — Outlook notified automatically.")
 
+
 #     return {
 #         "event_id": event_id,
 #         "join_url": join_web_url,
@@ -341,7 +341,7 @@ def create_interview_event(
     Map_location,
     Comments_for_interviewer,
     Location_adress,
-    attachment_paths=None
+    attachment_paths=None,
 ):
 
     try:
@@ -352,12 +352,12 @@ def create_interview_event(
     Organizer_email = Organizer_email.strip()
 
     start_dt = datetime.fromisoformat(start_datetime)
-    end_dt   = datetime.fromisoformat(end_datetime)
+    end_dt = datetime.fromisoformat(end_datetime)
 
-    interview_date = start_dt.strftime("%d %b %Y").lower()   
+    interview_date = start_dt.strftime("%d %B %Y")
     start_time = start_dt.strftime("%I:%M %p")
     start_time = start_dt.strftime("%I:%M %p")
-    end_time   = end_dt.strftime("%I:%M %p")
+    end_time = end_dt.strftime("%I:%M %p")
     mode_label = "Teams Meeting" if is_online == 1 else "In-Person"
 
     # -------- GRAPH AUTH --------
@@ -369,15 +369,15 @@ def create_interview_event(
             "grant_type": "client_credentials",
             "client_id": creds.client_id,
             "client_secret": creds.get_password("client_secret"),
-            "scope": "https://graph.microsoft.com/.default"
-        }
+            "scope": "https://graph.microsoft.com/.default",
+        },
     )
     token.raise_for_status()
     access_token = token.json()["access_token"]
 
     headers = {
         "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
 
     # -------- helper: get room displayName --------
@@ -412,10 +412,12 @@ def create_interview_event(
         "start": {"dateTime": start_datetime, "timeZone": "Asia/Kolkata"},
         "end": {"dateTime": end_datetime, "timeZone": "Asia/Kolkata"},
         "location": {"displayName": meeting_room} if meeting_room else None,
-        "locations": [
-            {"displayName": meeting_room, "locationType": "conferenceRoom"}
-        ] if meeting_room else [],
-        "body": {"contentType": "HTML", "content": "<p>Interview scheduled.</p>"}
+        "locations": (
+            [{"displayName": meeting_room, "locationType": "conferenceRoom"}]
+            if meeting_room
+            else []
+        ),
+        "body": {"contentType": "HTML", "content": "<p>Interview scheduled.</p>"},
     }
 
     res = requests.post(create_url, headers=headers, json=draft_payload)
@@ -423,7 +425,9 @@ def create_interview_event(
     event = res.json()
     event_id = event["id"]
 
-    event_url = f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/events/{event_id}"
+    event_url = (
+        f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/events/{event_id}"
+    )
 
     # -------- FETCH MEETING DETAILS --------
     join_web_url = ""
@@ -470,7 +474,7 @@ def create_interview_event(
             if values:
                 m = values[0]
                 join_meeting_id = m.get("joinMeetingId", "") or join_meeting_id
-                join_passcode   = m.get("passcode", "") or join_passcode
+                join_passcode = m.get("passcode", "") or join_passcode
 
     meeting_html = (
         f"""
@@ -479,7 +483,8 @@ def create_interview_event(
         <p><b>Meeting ID:</b> {join_meeting_id}<br>
         <b>Passcode:</b> {join_passcode}</p>
         """
-        if is_online == 1 and join_web_url else ""
+        if is_online == 1 and join_web_url
+        else ""
     )
 
     # -------- ATTACH FILES --------
@@ -496,7 +501,7 @@ def create_interview_event(
         file_doc = frappe.get_all(
             "File",
             filters={"file_url": web_path},
-            fields=["file_url", "file_name", "is_private"]
+            fields=["file_url", "file_name", "is_private"],
         )
         if not file_doc:
             continue
@@ -504,9 +509,7 @@ def create_interview_event(
         file_doc = file_doc[0]
         file_name = file_doc.file_name
         file_path = frappe.get_site_path(
-            "private" if file_doc.is_private else "public",
-            "files",
-            file_name
+            "private" if file_doc.is_private else "public", "files", file_name
         )
         if not os.path.isfile(file_path):
             continue
@@ -524,8 +527,8 @@ def create_interview_event(
             json={
                 "@odata.type": "#microsoft.graph.fileAttachment",
                 "name": fname,
-                "contentBytes": fb64
-            }
+                "contentBytes": fb64,
+            },
         )
 
     # -------- LOGO --------
@@ -541,7 +544,8 @@ def create_interview_event(
 
     meeting_room_html = (
         f'<p style="margin:6px 0;"><strong>Meeting room:</strong> {meeting_room}</p>'
-        if meeting_room else ""
+        if meeting_room
+        else ""
     )
 
     Map_location_html = (
@@ -552,8 +556,9 @@ def create_interview_event(
     map_html = Map_location_html if is_online == 0 else ""
 
     note_html = (
-        f'<p><strong>For your information:</strong> {Comments_for_interviewer}</p>'
-        if Comments_for_interviewer else ""
+        f"<p><strong>For your information:</strong> {Comments_for_interviewer}</p>"
+        if Comments_for_interviewer
+        else ""
     )
 
     interviewer_body = f"""
@@ -590,8 +595,12 @@ def create_interview_event(
     <img src="data:image/png;base64,{logo_base64}" style="height:48px;">
     """
 
-    interviewer_list = [i.strip() for i in (interviewer_emails or "").split(",") if i.strip()]
-    attendees = [{"emailAddress": {"address": i}, "type": "required"} for i in interviewer_list]
+    interviewer_list = [
+        i.strip() for i in (interviewer_emails or "").split(",") if i.strip()
+    ]
+    attendees = [
+        {"emailAddress": {"address": i}, "type": "required"} for i in interviewer_list
+    ]
 
     requests.patch(
         event_url,
@@ -599,8 +608,8 @@ def create_interview_event(
         json={
             "attendees": attendees,
             "body": {"contentType": "HTML", "content": interviewer_body},
-            "showAs": "busy"
-        }
+            "showAs": "busy",
+        },
     )
 
     frappe.sendmail(
@@ -608,7 +617,7 @@ def create_interview_event(
         sender=Organizer_email,
         subject=f"Discussion – Azim Premji Foundation ({interview_date})",
         message=candidate_body,
-        delayed=False
+        delayed=False,
     )
 
     frappe.msgprint("✅ Event created successfully — Outlook notified automatically.")
@@ -618,5 +627,5 @@ def create_interview_event(
         "join_url": join_web_url,
         "meeting_id": join_meeting_id,
         "passcode": join_passcode,
-        "is_online": is_online
+        "is_online": is_online,
     }
