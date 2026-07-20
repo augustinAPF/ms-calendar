@@ -541,6 +541,7 @@ def create_interview_event(
     Applicants_Role,
     application_id,
     interviewee_email=None,
+    cc_emails=None,
     interview_mode=None,
     Map_location=None,
     address=None,
@@ -1035,6 +1036,18 @@ def create_interview_event(
     room_list = list(
         dict.fromkeys([r.strip() for r in (room_emails or "").split(",") if r.strip()])
     )
+    cc_list = list(
+        dict.fromkeys([c.strip() for c in (cc_emails or "").split(",") if c.strip()])
+    )
+    # Graph calendar attendees don't render as a visible "Cc:" line in the invite
+    # Outlook shows to the recipient, so print it explicitly in the email body too.
+    cc_line = f"<b>Cc:</b> {', '.join(cc_list)}<br>" if cc_list else ""
+    cc_row = (
+        f'<tr><th style="text-align:left; background:#f5f5f5; padding:8px 16px;">Cc</th>'
+        f'<td style="padding:8px 16px;">{", ".join(cc_list)}</td></tr>'
+        if cc_list
+        else ""
+    )
 
     _org_email_lower = Organizer_email.strip().lower()
     attendees = []
@@ -1044,6 +1057,12 @@ def create_interview_event(
         # Graph API returns 400 / silently drops the send when organizer is added as attendee
         if i.strip().lower() != _org_email_lower:
             attendees.append({"emailAddress": {"address": i}, "type": "required"})
+    for c in cc_list:
+        # Graph calendar events have no true "cc" — "optional" attendees still get
+        # the invite/updates, just marked non-mandatory, which is the closest match
+        # to a CC on the interviewer's calendar invite.
+        if c.strip().lower() != _org_email_lower:
+            attendees.append({"emailAddress": {"address": c}, "type": "optional"})
     # NOTE: the candidate is deliberately NOT added as a calendar attendee.
     # Attendees get Microsoft's own auto-generated invite email, which uses
     # the interviewer-oriented body (feedback form link, meeting passcode,
@@ -1261,7 +1280,8 @@ Please find the details of the interview below.</p>
 {phone_info}
 <b>Interview Round:</b> {round_label}<br>
 <b>Interview Time:</b> {interview_time_str} – {end_time_str}<br>
-<b>Interviewers:</b> {InterviewersName}
+<b>Interviewers:</b> {InterviewersName}<br>
+{cc_line}
 </p>
 
 {Map_html}
@@ -1328,7 +1348,8 @@ Please find the details of the interview below.</p>
 {phone_info}
 <b>Interview Round:</b> {round_label}<br>
 <b>Interview Time:</b> {interview_time_str} – {end_time_str}<br>
-<b>Interviewers:</b> {InterviewersName}
+<b>Interviewers:</b> {InterviewersName}<br>
+{cc_line}
 </p>
 
 {Map_html}
@@ -1365,6 +1386,7 @@ comments/recommendations for the calibration process and final selection decisio
     <th style="text-align:left; background:#f5f5f5; padding:8px 16px;">Interview Date</th>
     <td style="padding:8px 16px;">{interview_date_str}</td>
   </tr>
+  {cc_row}
 </table>
 
 {feedback_html_block}
@@ -1382,6 +1404,7 @@ comments/recommendations for the calibration process and final selection decisio
             InterviewersName=InterviewersName,
             interview_date_str=interview_date_str,
             feedback_html_block=feedback_html_block,
+            cc_row=cc_row,
         )
     elif is_round1:
         calendar_subject = f"Interview Scheduled – {Applicants_name} | {round_label} for {Applicants_Role} {candidate_phone}"
@@ -1406,6 +1429,7 @@ comments/recommendations for the calibration process and final selection decisio
             feedback_html_block=feedback_html_block,
             demo_feedback_html=demo_feedback_html,
             Note_to_interviewer_html=note_to_interviewer_html,
+            cc_line=cc_line,
         )
 
     else:
@@ -1427,6 +1451,7 @@ comments/recommendations for the calibration process and final selection decisio
             Map_html=interviewer_location_html,
             feedback_html_block=feedback_html_block,
             Note_to_interviewer_html=note_to_interviewer_html,
+            cc_line=cc_line,
         )
 
     create_url = f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/events"
@@ -1649,6 +1674,7 @@ comments/recommendations for the calibration process and final selection decisio
             InterviewersName=InterviewersName,
             interview_date_str=interview_date_str,
             feedback_html_block=feedback_html_block,
+            cc_row=cc_row,
         )
     elif is_round1:
         final_body = round1_interviewer_template.format(
@@ -1666,6 +1692,7 @@ comments/recommendations for the calibration process and final selection decisio
             feedback_html_block=feedback_html_block,
             demo_feedback_html=demo_feedback_html,
             Note_to_interviewer_html=note_to_interviewer_html,
+            cc_line=cc_line,
         )
 
     elif is_round2:
@@ -1686,6 +1713,7 @@ comments/recommendations for the calibration process and final selection decisio
             Map_html=interviewer_location_html,
             feedback_html_block=feedback_html_block,
             Note_to_interviewer_html=note_to_interviewer_html,
+            cc_line=cc_line,
         )
 
     else:
@@ -1709,6 +1737,7 @@ comments/recommendations for the calibration process and final selection decisio
             Map_html=interviewer_location_html,
             feedback_html_block=feedback_html_block,
             Note_to_interviewer_html=note_to_interviewer_html,
+            cc_line=cc_line,
         )
 
     # ── Single PATCH — no retry. Retrying sendUpdates sends duplicate invites.
@@ -1829,7 +1858,8 @@ comments/recommendations for the calibration process and final selection decisio
                     "subject": calendar_subject,
                     "body": {"contentType": "HTML", "content": final_body},
                     "toRecipients": [{"emailAddress": {"address": _iv_email}}],
-                    "ccRecipients": [{"emailAddress": {"address": Organizer_email}}],
+                    "ccRecipients": [{"emailAddress": {"address": Organizer_email}}]
+                    + [{"emailAddress": {"address": c}} for c in cc_list],
                     "attachments": [
                         {
                             "@odata.type": "#microsoft.graph.fileAttachment",
@@ -1863,7 +1893,7 @@ comments/recommendations for the calibration process and final selection decisio
                 try:
                     frappe.sendmail(
                         recipients=[_iv_email],
-                        cc=[Organizer_email],
+                        cc=[Organizer_email] + cc_list,
                         subject=calendar_subject,
                         message=final_body,
                         delayed=False,

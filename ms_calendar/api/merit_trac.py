@@ -633,22 +633,36 @@ def test_result_api():
             }
 
         # ------------------------------------------------------------
-        # 6. CHECK DOCTYPE (FIXED VERSION)
+        # 6. CHECK DOCTYPE — resolve by actual record existence instead
+        # of candidate ID prefix, since naming conventions (naming
+        # series / autoname) can drift and break a hardcoded prefix
+        # check silently (no log, no result ever inserted).
         # ------------------------------------------------------------
-        if str(candidate_id).startswith("APSRF"):
+        _field_frf_doctype = (
+            "Field Registration Form1"
+            if frappe.db.exists("DocType", "Field Registration Form1")
+            else "Field Registration Form"
+        )
+
+        if frappe.db.exists("Scholarship Recruitment Form", candidate_id):
             application_doctype = "Scholarship Recruitment Form"
             result_doctype = "MeritTrac Test Result"
             update_application_status_and_send_mail_scholarship(candidate_id, percentage)
-        elif str(candidate_id).startswith("APFFRF"):
-            application_doctype = "Field Registration Form"
+        elif frappe.db.exists(_field_frf_doctype, candidate_id):
+            application_doctype = _field_frf_doctype
             result_doctype = "Field MeritTrac Test Result"
+            update_application_status_and_send_mail_field(candidate_id, percentage)
 
         else:
+            frappe.log_error(
+                message=f"No Scholarship Recruitment Form or {_field_frf_doctype} record found for candidateId: {candidate_id}",
+                title="MERIT_TRAC_UNKNOWN_CANDIDATE"
+            )
             frappe.local.response.http_status_code = 400
             return {
                 "status": 400,
                 "http_status": 400,
-                "message": f"Unknown candidate ID prefix: {candidate_id}"
+                "message": f"Unknown candidate ID: {candidate_id}"
             }
 
         frappe.log_error(

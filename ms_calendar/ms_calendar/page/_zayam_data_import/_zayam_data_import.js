@@ -34,6 +34,15 @@ function make_doctype_picker($container, opts) {
 	return control;
 }
 
+const HOW_STEPS = [
+	{ title: __('Fill in the data'), text: __('add one row per applicant. The Zwayam Id column is required; every other column is optional.') },
+	{ title: __('Pick Grant or Field'), text: __('choose which registration form the file should be imported into.') },
+	{ title: __('Columns are matched automatically'), text: __('every field on the chosen doctype (its name and its label) is a recognised Excel column header. If a column heading doesn\'t match any field, it\'s listed under "Unmatched Columns" instead of being silently dropped.') },
+	{ title: __('Rows are matched by Zwayam Id'), text: __('an existing record with the same Zwayam Id is updated; a new Zwayam Id creates a new record.') },
+	{ title: __('Each row is isolated'), text: __('if one row fails (e.g. a duplicate check or validation error), only that row is rolled back and its exact error is shown — earlier successful rows in the same import are not affected.') },
+	{ title: __('PDF filenames encode the Zwayam Id'), text: `${__('the leading digits of each filename (e.g.')} <code>6213236-ClariceTPaul-Copy.pdf</code> → <code>6213236</code>) ${__('are used to find the matching record and attach the file to its resume field.')}` }
+];
+
 const ZAYAM_OVERRIDE_FIELDS = [
 	{ key: 'geo', fieldname: 'geo', label: __('Geography'), options: 'Geo Master', doctypes: ['Phil Registration Form'] },
 	{ key: 'themes', fieldname: 'themes', label: __('Theme'), options: 'Theme Master', doctypes: ['Phil Registration Form'] },
@@ -57,6 +66,15 @@ function make_override_picker($container, opts) {
 	});
 	control.refresh();
 	return control;
+}
+
+function activate_step(page, step) {
+	const $stepper = $(page.body).find('.zayam-stepper');
+	$stepper.find('.zayam-stepper-step').each(function () {
+		const n = Number($(this).data('step'));
+		$(this).toggleClass('is-active', n === step).toggleClass('is-done', n < step);
+	});
+	$stepper.find('.zayam-stepper-line').toggleClass('is-done', step > 1);
 }
 
 function update_records_link(page, link_class, doctype) {
@@ -451,36 +469,100 @@ function render_import_card(page) {
 				margin-bottom: 6px;
 			}
 			.panel-pdf .zayam-step-number-inline { color: var(--zayam-accent-pdf); background: var(--zayam-accent-pdf-soft); }
+			.zayam-stepper {
+				display: flex;
+				align-items: center;
+				gap: 0;
+				margin: 0 0 24px;
+			}
+			.zayam-stepper-step {
+				display: flex;
+				align-items: center;
+				gap: 10px;
+				opacity: 0.45;
+				transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+			}
+			.zayam-stepper-step.is-active, .zayam-stepper-step.is-done { opacity: 1; }
+			.zayam-stepper-num {
+				flex-shrink: 0;
+				width: 28px;
+				height: 28px;
+				border-radius: 50%;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				font-size: 13px;
+				font-weight: 700;
+				background: var(--subtle-fg, rgba(128, 128, 128, 0.15));
+				color: var(--text-muted);
+				transition: background 0.25s cubic-bezier(0.4, 0, 0.2, 1), color 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+			}
+			.zayam-stepper-step.is-active .zayam-stepper-num { background: var(--zayam-accent-import); color: #fff; }
+			.zayam-stepper-step.is-done .zayam-stepper-num { background: var(--green-500); color: #fff; }
+			.zayam-stepper-step[data-step="2"].is-active .zayam-stepper-num { background: var(--zayam-accent-pdf); }
+			.zayam-stepper-label { font-size: 13.5px; font-weight: 600; color: var(--text-color); }
+			.zayam-stepper-line {
+				flex: 1 1 auto;
+				height: 2px;
+				min-width: 40px;
+				margin: 0 14px;
+				background: var(--border-color);
+				position: relative;
+			}
+			.zayam-stepper-line.is-done { background: var(--green-500); }
+			.zayam-how-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+			.zayam-how-tab {
+				border: 1px solid var(--border-color);
+				background: var(--subtle-fg, rgba(128, 128, 128, 0.08));
+				color: var(--text-muted);
+				font-size: 11px;
+				font-weight: 700;
+				text-transform: uppercase;
+				letter-spacing: 0.03em;
+				padding: 6px 14px;
+				border-radius: 20px;
+				cursor: pointer;
+				transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1), color 0.2s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+			}
+			.zayam-how-tab:hover { opacity: 0.85; }
+			.zayam-how-tab.is-active {
+				background: var(--zayam-accent-import);
+				border-color: var(--zayam-accent-import);
+				color: #fff;
+			}
+			.zayam-how-tab-content { margin-top: 16px; }
+			.zayam-how-tab-pane { display: none; font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+			.zayam-how-tab-pane.is-active { display: block; animation: zayamFadeUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) both; }
+			.zayam-how-tab-pane b { color: var(--text-color); }
 		</style>
 		<div class="zayam-page">
 			<h2 class="zayam-page-title">${__('Data Migration')}</h2>
+			<div class="zayam-stepper">
+				<div class="zayam-stepper-step is-active" data-step="1">
+					<span class="zayam-stepper-num">1</span>
+					<span class="zayam-stepper-label">${__('Zwayam Data Import')}</span>
+				</div>
+				<div class="zayam-stepper-line"></div>
+				<div class="zayam-stepper-step" data-step="2">
+					<span class="zayam-stepper-num">2</span>
+					<span class="zayam-stepper-label">${__('Bulk Attach Resumes')}</span>
+				</div>
+			</div>
 			<div class="zayam-how">
 				<div class="zayam-how-summary"><span class="zayam-how-arrow">▸</span> ${__('How this works')}</div>
 				<div class="zayam-how-body-wrap">
 				<div class="zayam-how-body">
-					<div class="zayam-step">
-						<span class="zayam-step-number">${__('Step 1')}</span>
-						<span class="zayam-step-text"><b>${__('Fill in the data')}</b> — ${__('add one row per applicant. The Zwayam Id column is required; every other column is optional.')}</span>
+					<div class="zayam-how-tabs">
+						${HOW_STEPS.map((_, i) => `<button class="zayam-how-tab${i === 0 ? ' is-active' : ''}" data-step="${i + 1}">${__('Step')} ${i + 1}</button>`).join('')}
 					</div>
-					<div class="zayam-step">
-						<span class="zayam-step-number">${__('Step 2')}</span>
-						<span class="zayam-step-text"><b>${__('Pick Grant or Field')}</b> — ${__('choose which registration form the file should be imported into.')}</span>
-					</div>
-					<div class="zayam-step">
-						<span class="zayam-step-number">${__('Step 3')}</span>
-						<span class="zayam-step-text"><b>${__('Columns are matched automatically')}</b> — ${__('every field on the chosen doctype (its name and its label) is a recognised Excel column header. If a column heading doesn\'t match any field, it\'s listed under "Unmatched Columns" instead of being silently dropped.')}</span>
-					</div>
-					<div class="zayam-step">
-						<span class="zayam-step-number">${__('Step 4')}</span>
-						<span class="zayam-step-text"><b>${__('Rows are matched by Zwayam Id')}</b> — ${__('an existing record with the same Zwayam Id is updated; a new Zwayam Id creates a new record.')}</span>
-					</div>
-					<div class="zayam-step">
-						<span class="zayam-step-number">${__('Step 5')}</span>
-						<span class="zayam-step-text"><b>${__('Each row is isolated')}</b> — ${__('if one row fails (e.g. a duplicate check or validation error), only that row is rolled back and its exact error is shown — earlier successful rows in the same import are not affected.')}</span>
-					</div>
-					<div class="zayam-step">
-						<span class="zayam-step-number">${__('Step 6')}</span>
-						<span class="zayam-step-text"><b>${__('PDF filenames encode the Zwayam Id')}</b> — ${__('the leading digits of each filename (e.g.')} <code>6213236-ClariceTPaul-Copy.pdf</code> → <code>6213236</code>) ${__('are used to find the matching record and attach the file to its resume field.')}</span>
+					<div class="zayam-how-tab-content">
+						${HOW_STEPS.map(
+			(s, i) => `
+								<div class="zayam-how-tab-pane${i === 0 ? ' is-active' : ''}" data-step="${i + 1}">
+									<b>${s.title}</b> — ${s.text}
+								</div>
+							`
+		).join('')}
 					</div>
 				</div>
 				</div>
@@ -553,6 +635,14 @@ function render_import_card(page) {
 			</div>
 		</div>
 	`);
+
+	$(page.body).find('.zayam-how-tab').on('click', function () {
+		const step = $(this).data('step');
+		$(page.body).find('.zayam-how-tab').removeClass('is-active');
+		$(this).addClass('is-active');
+		$(page.body).find('.zayam-how-tab-pane').removeClass('is-active');
+		$(page.body).find(`.zayam-how-tab-pane[data-step="${step}"]`).addClass('is-active');
+	});
 
 	$(page.body).find('.zayam-how-summary').on('click', function () {
 		const $summary = $(this);
@@ -629,6 +719,8 @@ function render_import_card(page) {
 			frappe.msgprint(__('Please choose a doctype to import into.'));
 			return;
 		}
+		$(page.body).find('.panel-pdf').show();
+		activate_step(page, 2);
 		const overrides = get_overrides();
 		new frappe.ui.FileUploader({
 			folder: 'Home',
@@ -872,6 +964,7 @@ function show_import_results(page, file_url, doctype, overrides, manual_mapping,
 		.join('');
 
 	$(page.body).find('.panel-pdf').show();
+	activate_step(page, 2);
 
 	const $results = $(page.body).find('.zayam-import-results');
 	$results

@@ -1,6 +1,6 @@
 import frappe
 import os, ast, base64, time, re, requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from frappe.utils import get_url
 from urllib.parse import quote
 
@@ -336,11 +336,12 @@ def create_interview_event(
     Organizer_email,
     InterviewersName,
     Applicants_name,
-    Applicants_Role,
     application_id,
-    Map_location,
-    Comments_for_interviewer,
-    Location_adress,
+    Applicants_Role=None,
+    Map_location=None,
+    Comments_for_interviewer=None,
+    Location_adress=None,
+    cc_emails=None,
     attachment_paths=None,
 ):
 
@@ -350,6 +351,10 @@ def create_interview_event(
         is_online = 0
 
     Organizer_email = Organizer_email.strip()
+    Applicants_Role = Applicants_Role or ""
+    Map_location = Map_location or ""
+    Comments_for_interviewer = Comments_for_interviewer or ""
+    Location_adress = Location_adress or ""
 
     start_dt = datetime.fromisoformat(start_datetime)
     end_dt = datetime.fromisoformat(end_datetime)
@@ -532,13 +537,20 @@ def create_interview_event(
         )
 
     # -------- LOGO --------
-    file_path = frappe.get_site_path("public", "files", "apf email.png")
-    with open(file_path, "rb") as f:
-        logo_base64 = base64.b64encode(f.read()).decode("utf-8")
+    logo_base64 = ""
+    logo_path = frappe.get_site_path("public", "files", "apf email.png")
+    if os.path.isfile(logo_path):
+        with open(logo_path, "rb") as f:
+            logo_base64 = base64.b64encode(f.read()).decode("utf-8")
+    logo_html = (
+        f'<img src="data:image/png;base64,{logo_base64}" style="height:48px;">'
+        if logo_base64
+        else ""
+    )
 
     # ---- EMAIL BODY PARTS ----
-    feedback_url = (
-        f"https://careers.frappe.cloud/philanthrophy-feedback-form/new"
+    feedback_url = get_url(
+        f"/philanthrophy-feedback-form-web-form/new"
         f"?app_id={application_id}&applicant_name={Applicants_name}&role={Applicants_Role}"
     )
 
@@ -577,7 +589,7 @@ def create_interview_event(
     <a href="{feedback_url}" target="_blank">Click here</a></p>
     {note_html}
     <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
-    <img src="data:image/png;base64,{logo_base64}" style="height:48px;">
+    {logo_html}
     """
 
     candidate_body = f"""
@@ -592,15 +604,16 @@ def create_interview_event(
     </div>
     {meeting_html}
     <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
-    <img src="data:image/png;base64,{logo_base64}" style="height:48px;">
+    {logo_html}
     """
 
     interviewer_list = [
         i.strip() for i in (interviewer_emails or "").split(",") if i.strip()
     ]
+    cc_list = [i.strip() for i in (cc_emails or "").split(",") if i.strip()]
     attendees = [
         {"emailAddress": {"address": i}, "type": "required"} for i in interviewer_list
-    ]
+    ] + [{"emailAddress": {"address": i}, "type": "optional"} for i in cc_list]
 
     requests.patch(
         event_url,
@@ -629,3 +642,126 @@ def create_interview_event(
         "passcode": join_passcode,
         "is_online": is_online,
     }
+
+
+def send_interviewer_feedback_reminders():
+    """Runs once daily (see hooks.py scheduler_events["daily"]).
+
+    Starting 1 day after an interview's end time, sends a daily reminder to
+    any interviewer who hasn't yet submitted a matching Philanthrophy
+    Feedback Form. Stops re-checking a schedule (sets reminder_sent) once
+    every interviewer has submitted, or once 7 days have passed since the
+    interview ended, whichever comes first.
+    """
+    now = frappe.utils.now_datetime()
+
+    schedules = frappe.get_all(
+        "Philanthropy Interview Schedule",
+        filters={"reminder_sent": 0},
+        fields=[
+            "name",
+            "application_id",
+            "applicants_name",
+            "role",
+            "organizer_email",
+            "interview_date",
+            "end_time",
+        ],
+    )
+
+    for s in schedules:
+        if not (s.interview_date and s.end_time and s.application_id):
+            continue
+
+        try:
+            end_dt = frappe.utils.get_datetime(f"{s.interview_date} {s.end_time}")
+        except Exception:
+            continue
+
+        elapsed = now - end_dt
+        if elapsed < timedelta(days=1):
+            continue
+
+        doc = frappe.get_doc("Philanthropy Interview Schedule", s.name)
+        interviewer_emails = [
+            row.interviewer_email
+            for row in (doc.interviewer_email or [])
+            if row.interviewer_email
+        ]
+
+        if not interviewer_emails:
+            frappe.db.set_value(
+                "Philanthropy Interview Schedule", s.name, "reminder_sent", 1
+            )
+            frappe.db.commit()
+            continue
+
+        submitted_emails = {
+            (e or "").strip().lower()
+            for e in frappe.get_all(
+                "Philanthrophy Feedback Form",
+                filters={
+                    "applicant_id": s.application_id,
+                    "email": ["in", interviewer_emails],
+                },
+                pluck="email",
+            )
+        }
+        pending_emails = [
+            e for e in interviewer_emails if e.strip().lower() not in submitted_emails
+        ]
+
+        if not pending_emails:
+            # everyone has submitted feedback - nothing left to chase
+            frappe.db.set_value(
+                "Philanthropy Interview Schedule", s.name, "reminder_sent", 1
+            )
+            frappe.db.commit()
+            continue
+
+        if elapsed > timedelta(days=7):
+            # gave it a full week of daily reminders - stop nagging
+            frappe.db.set_value(
+                "Philanthropy Interview Schedule", s.name, "reminder_sent", 1
+            )
+            frappe.db.commit()
+            continue
+
+        feedback_url = get_url(
+            f"/philanthrophy-feedback-form-web-form/new"
+            f"?app_id={s.application_id}&applicant_name={s.applicants_name}&role={s.role or ''}"
+        )
+        reminder_body = f"""
+        <p>Hi,</p>
+        <p>This is a reminder that the interview with <b>{s.applicants_name}</b>
+        for the role of <b>{s.role or ''}</b> has concluded, and your feedback
+        is still pending.</p>
+        <p><strong>Feedback form:</strong>
+        <a href="{feedback_url}" target="_blank">Click here</a></p>
+        <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+        """
+
+        sender_arg = {}
+        if s.organizer_email and frappe.db.exists(
+            "Email Account", {"email_id": s.organizer_email, "enable_outgoing": 1}
+        ):
+            sender_arg = {"sender": s.organizer_email}
+
+        for email in pending_emails:
+            try:
+                frappe.sendmail(
+                    recipients=[email],
+                    subject=f"Reminder: Interview Feedback Pending – {s.applicants_name}",
+                    message=reminder_body,
+                    delayed=False,
+                    **sender_arg,
+                )
+            except Exception:
+                frappe.log_error(
+                    title="Interview Feedback Reminder Error",
+                    message=frappe.get_traceback()[:2000],
+                )
+
+        # Do NOT mark reminder_sent here - keep re-checking daily until
+        # everyone submits or the 7-day window above closes it out.
+        frappe.db.commit()
