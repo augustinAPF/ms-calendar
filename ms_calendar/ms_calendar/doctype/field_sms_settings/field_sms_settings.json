@@ -1,0 +1,86 @@
+{
+ "actions": [],
+ "creation": "2026-06-16 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "auth_key",
+  "otp_section",
+  "otp_sender_id",
+  "otp_template_id",
+  "sms_templates_section",
+  "sms_templates",
+  "whatsapp_templates_section",
+  "whatsapp_templates"
+ ],
+ "fields": [
+  {
+   "fieldname": "auth_key",
+   "fieldtype": "Password",
+   "label": "Auth Key (MSG91)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "otp_section",
+   "fieldtype": "Section Break",
+   "label": "OTP Settings (Field Registration Form)"
+  },
+  {
+   "fieldname": "otp_sender_id",
+   "fieldtype": "Data",
+   "label": "OTP Sender ID",
+   "description": "Sender ID registered with MSG91 for OTP messages"
+  },
+  {
+   "fieldname": "otp_template_id",
+   "fieldtype": "Data",
+   "label": "OTP Template ID",
+   "description": "MSG91 OTP template ID (must contain {otp} variable)"
+  },
+  {
+   "fieldname": "sms_templates_section",
+   "fieldtype": "Section Break",
+   "label": "SMS Templates (Application Status & Interview Rounds)"
+  },
+  {
+   "fieldname": "sms_templates",
+   "fieldtype": "Table",
+   "label": "SMS Templates",
+   "options": "Field SMS Template"
+  },
+  {
+   "fieldname": "whatsapp_templates_section",
+   "fieldtype": "Section Break",
+   "label": "WhatsApp Templates (Application Status & Interview Rounds)"
+  },
+  {
+   "fieldname": "whatsapp_templates",
+   "fieldtype": "Table",
+   "label": "WhatsApp Templates",
+   "options": "Field Whatsapp Template"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-06-16 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Ms Calendar",
+ "name": "Field SMS Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

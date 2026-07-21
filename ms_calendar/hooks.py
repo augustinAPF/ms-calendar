@@ -37,6 +37,13 @@ doc_events = {
             "ms_calendar.api.ms_field.check_registration_duplicate_on_save",
         ]
     },
+    # NOTE: this site's live doctype is "Field Registration Form" (no "1") —
+    # see the "Field Registration Form1" entry above, which is a mismatch left
+    # over from local vs. cloud naming and doesn't fire on this site at all.
+    # OTP enforcement is registered under the name that actually exists here.
+    "Field Registration Form": {
+        "validate": "ms_calendar.api.otp.enforce_otp_verification",
+    },
     "Health Registration Form": {
         "validate": [
             "ms_calendar.api.resume_rename.on_health_registration",
@@ -165,6 +172,7 @@ doctype_list_js = {
 app_include_js = [
     "/assets/ms_calendar/js/frf_list.js",
     "/assets/ms_calendar/js/phil_registration_form_list.js",
+    "/assets/ms_calendar/js/pathways_redirect.js",
 ]
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -179,6 +187,8 @@ app_include_js = [
 
 # application home page (will override Website Settings)
 # home_page = "login"
+
+# on_session_creation = "ms_calendar.overrides.redirect_to_pathways_dashboard"
 
 # website user home page (by Role)
 # role_home_page = {

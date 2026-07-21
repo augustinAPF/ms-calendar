@@ -50,11 +50,12 @@ class JobOpening(WebsiteGenerator):
     def autoname(self):
         set_name_from_naming_options(frappe.get_meta(self.doctype).autoname, self)
 
-    # Maps unit_lower → careers.frappe.cloud form slug
+    # Maps unit_lower (must match a real "Recruitment Units" record name,
+    # lowercased) → careers.frappe.cloud form slug
     _UNIT_FORM_MAP = {
-        "field":                    "field-registration-form",
+        "school education - field": "field-registration-form",
         "grants":                   "philanthropy-registration-form",
-        "azim premji scholarship":  "scholarship-recruitment-form",
+        "scholarship":              "scholarship-recruitment-form",
     }
 
     def _auto_set_job_application_route(self):
@@ -76,6 +77,10 @@ class JobOpening(WebsiteGenerator):
             params["geo"] = self.geo
         if getattr(self, "job_code", None):
             params["job_code"] = self.job_code
+        if getattr(self, "preferred_location", None) and self.location and "/" in self.location:
+            options = [part.strip() for part in self.location.split("/") if part.strip()]
+            if options:
+                params["preferred_location_options"] = ",".join(options)
         url = f"https://careers.frappe.cloud/{form_slug}/new"
         if params:
             url += "?" + urlencode(params)
