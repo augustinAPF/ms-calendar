@@ -550,7 +550,7 @@ def create_interview_event(
 
     # ---- EMAIL BODY PARTS ----
     feedback_url = get_url(
-        f"/philanthrophy-feedback-form-web-form/new"
+        f"/philanthrophy-feedback-form/new"
         f"?app_id={application_id}&applicant_name={Applicants_name}&role={Applicants_Role}"
     )
 
@@ -728,7 +728,7 @@ def send_interviewer_feedback_reminders():
             continue
 
         feedback_url = get_url(
-            f"/philanthrophy-feedback-form-web-form/new"
+            f"/philanthrophy-feedback-form/new"
             f"?app_id={s.application_id}&applicant_name={s.applicants_name}&role={s.role or ''}"
         )
         reminder_body = f"""
