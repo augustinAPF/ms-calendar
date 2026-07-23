@@ -96,6 +96,7 @@ def _build_config(doctype):
     header_aliases = {}
     int_fields = set()
     link_fields = {}
+    assignable_fields = []
     display_field = None
     resume_field = None
 
@@ -119,6 +120,8 @@ def _build_config(doctype):
         if resume_field is None and df.fieldtype == "Attach":
             resume_field = df.fieldname
 
+        assignable_fields.append({"fieldname": df.fieldname, "label": df.label or df.fieldname})
+
     # "Zwayam Id" is a real misspelling that shows up in some exports —
     # recognise it as the same column as the actual Zayam Id field.
     header_aliases["zwayam_id"] = _MATCH_FIELD
@@ -131,6 +134,7 @@ def _build_config(doctype):
         "int_fields": int_fields,
         "header_aliases": header_aliases,
         "link_fields": link_fields,
+        "assignable_fields": assignable_fields,
     }
 
 
@@ -162,14 +166,23 @@ def _ensure_link_value_exists(target_doctype, value):
     return True
 
 
-def _map_headers(sheet, header_aliases):
+def _map_headers(sheet, header_aliases, manual_mapping=None):
     """
     Reads row 1 of the sheet and returns (col_field_map, raw_headers,
     unmatched_columns) — shared by both the preview and the real import
     so the two can never drift out of sync with each other.
+
+    `manual_mapping` (e.g. {"3": "location"}) lets the user assign a
+    field to a column that didn't auto-match by header text — keyed by
+    column index (as a string, since it round-trips through JSON) so it
+    still works even if two columns happen to share the same header text.
     """
     if sheet.max_row < 1:
         frappe.throw("The uploaded file is empty.")
+
+    manual_mapping = manual_mapping or {}
+    if isinstance(manual_mapping, str):
+        manual_mapping = frappe.parse_json(manual_mapping)
 
     header_row = next(sheet.iter_rows(min_row=1, max_row=1))
     col_field_map = {}
@@ -177,13 +190,57 @@ def _map_headers(sheet, header_aliases):
     unmatched_columns = []
     for idx, cell in enumerate(header_row):
         raw_headers.append(cell.value)
-        fieldname = header_aliases.get(_normalize_header(cell.value))
+        # An explicit manual mapping (the user re-assigning a column, whether
+        # it auto-matched or not) always wins over the automatic header guess.
+        fieldname = manual_mapping.get(str(idx)) or header_aliases.get(_normalize_header(cell.value))
         if fieldname:
             col_field_map[idx] = fieldname
         elif cell.value not in (None, ""):
-            unmatched_columns.append(str(cell.value))
+            unmatched_columns.append({"index": idx, "header": str(cell.value)})
 
-    return col_field_map, raw_headers, unmatched_columns
+    return col_field_map, raw_headers, unmatched_columns, manual_mapping
+
+
+def _sample_column_values(sheet, num_cols, scan_rows=15):
+    """First non-empty raw value per column index, read straight off the
+    sheet (not through _cell_value's field-specific coercion) — shown next
+    to each column in the "Map Columns" UI so the user can see the actual
+    data before deciding where it should go.
+    """
+    samples = [""] * num_cols
+    remaining = num_cols
+    for row in sheet.iter_rows(min_row=2, max_row=1 + scan_rows):
+        if remaining <= 0:
+            break
+        for idx in range(min(num_cols, len(row))):
+            if samples[idx]:
+                continue
+            value = row[idx].value
+            if value in (None, ""):
+                continue
+            samples[idx] = str(value).strip()
+            remaining -= 1
+    return samples
+
+
+def _build_all_columns(raw_headers, col_field_map, manual_mapping, samples=None):
+    """
+    Every real column in the file (matched or not), for the "Map Columns"
+    UI — lets the user change ANY column's target field, not just the
+    ones that failed to auto-match (mirrors Frappe's own Data Import tool).
+    """
+    samples = samples or []
+    return [
+        {
+            "index": idx,
+            "header": header,
+            "fieldname": col_field_map.get(idx),
+            "manual": str(idx) in manual_mapping,
+            "sample": samples[idx] if idx < len(samples) else "",
+        }
+        for idx, header in enumerate(raw_headers)
+        if header not in (None, "")
+    ]
 
 
 def _cell_value(cell, fieldname, int_fields):
@@ -265,12 +322,14 @@ def _clean_overrides(overrides):
 
 
 @frappe.whitelist()
-def preview_excel(file_url, doctype="Phil Registration Form", limit=10, overrides=None):
+def preview_excel(file_url, doctype="Phil Registration Form", limit=10, overrides=None, manual_mapping=None):
     """
     Parses the uploaded file the same way import_from_excel would, but
     only reads (never writes) — used to render a preview table before
     the user confirms the actual import. `overrides` (e.g. {"themes": "X",
     "geo": "Y"}) is force-set on every previewed row, same as the real import.
+    `manual_mapping` (e.g. {"3": "location"}) assigns a field to a column
+    that didn't auto-match by header text, keyed by column index.
     """
     limit = int(limit)
     overrides = _clean_overrides(overrides)
@@ -283,7 +342,7 @@ def preview_excel(file_url, doctype="Phil Registration Form", limit=10, override
     workbook = load_workbook(file_doc.get_full_path())
     sheet = workbook.active
 
-    col_field_map, raw_headers, unmatched_columns = _map_headers(sheet, header_aliases)
+    col_field_map, raw_headers, unmatched_columns, manual_mapping = _map_headers(sheet, header_aliases, manual_mapping)
 
     if match_field not in col_field_map.values():
         frappe.throw(
@@ -293,7 +352,10 @@ def preview_excel(file_url, doctype="Phil Registration Form", limit=10, override
 
     # Preserve the original left-to-right column order for the preview table.
     sorted_cols = sorted(col_field_map.items())
-    ordered_columns = [{"header": raw_headers[idx], "fieldname": fieldname} for idx, fieldname in sorted_cols]
+    ordered_columns = [
+        {"header": raw_headers[idx], "fieldname": fieldname, "manual": str(idx) in manual_mapping}
+        for idx, fieldname in sorted_cols
+    ]
 
     rows = []
     total_rows = 0
@@ -301,10 +363,14 @@ def preview_excel(file_url, doctype="Phil Registration Form", limit=10, override
         if all(cell.value in (None, "") for cell in row):
             continue
 
-        row_values = {
-            fieldname: _cell_value(row[idx], fieldname, int_fields) if idx < len(row) else None
-            for idx, fieldname in sorted_cols
-        }
+        row_values = {}
+        for idx, fieldname in sorted_cols:
+            value = _cell_value(row[idx], fieldname, int_fields) if idx < len(row) else None
+            # If two columns map to the same field (e.g. a manually mapped
+            # column collides with an auto-matched one), don't let a blank
+            # later column silently wipe out a value an earlier one set.
+            if value is not None or fieldname not in row_values:
+                row_values[fieldname] = value
         row_values.update(overrides)
 
         total_rows += 1
@@ -316,17 +382,23 @@ def preview_excel(file_url, doctype="Phil Registration Form", limit=10, override
         "rows": rows,
         "total_rows": total_rows,
         "unmatched_columns": unmatched_columns,
+        "all_columns": _build_all_columns(
+            raw_headers, col_field_map, manual_mapping, _sample_column_values(sheet, len(raw_headers))
+        ),
+        "assignable_fields": config["assignable_fields"],
     }
 
 
 @frappe.whitelist()
-def import_from_excel(file_url, doctype="Phil Registration Form", overrides=None):
+def import_from_excel(file_url, doctype="Phil Registration Form", overrides=None, manual_mapping=None):
     """
     Reads an uploaded Zayam Excel export and creates/updates records of
     the given doctype, matched on that doctype's Zayam Id field. Any
     fieldname:value pair in `overrides` (e.g. {"themes": "X", "geo": "Y"})
     is force-set on every row — overriding whatever (if anything) was in
-    the file's own column for that field.
+    the file's own column for that field. `manual_mapping` (e.g.
+    {"3": "location"}) assigns a field to a column that didn't auto-match
+    by header text, keyed by column index — same as preview_excel.
     """
     overrides = _clean_overrides(overrides)
     config = _build_config(doctype)
@@ -340,7 +412,7 @@ def import_from_excel(file_url, doctype="Phil Registration Form", overrides=None
     workbook = load_workbook(file_doc.get_full_path())
     sheet = workbook.active
 
-    col_field_map, raw_headers, unmatched_columns = _map_headers(sheet, header_aliases)
+    col_field_map, raw_headers, unmatched_columns, manual_mapping = _map_headers(sheet, header_aliases, manual_mapping)
 
     if match_field not in col_field_map.values():
         frappe.throw(
@@ -351,7 +423,7 @@ def import_from_excel(file_url, doctype="Phil Registration Form", overrides=None
     # Preserve the original left-to-right column order, same as preview_excel,
     # so the results table lines up with what the user saw before confirming.
     ordered_columns = [
-        {"header": raw_headers[idx], "fieldname": fieldname}
+        {"header": raw_headers[idx], "fieldname": fieldname, "manual": str(idx) in manual_mapping}
         for idx, fieldname in sorted(col_field_map.items())
     ]
 
@@ -421,7 +493,11 @@ def import_from_excel(file_url, doctype="Phil Registration Form", overrides=None
         "failed": failed,
         "unmatched_columns": unmatched_columns,
         "columns": ordered_columns,
+        "all_columns": _build_all_columns(
+            raw_headers, col_field_map, manual_mapping, _sample_column_values(sheet, len(raw_headers))
+        ),
         "new_master_entries": {dt: sorted(values) for dt, values in new_master_entries.items()},
+        "assignable_fields": config["assignable_fields"],
     }
 
 
@@ -450,6 +526,29 @@ def preview_pdf_match(file_url, file_name=None, doctype="Phil Registration Form"
 
     return {
         "zayam_id": match_value,
+        "name": display_name,
+        "docname": docname,
+        "found": bool(docname),
+    }
+
+
+@frappe.whitelist()
+def lookup_zayam_record(doctype, zayam_id):
+    """
+    Looks up a record by an explicitly given Zayam Id — used when the
+    user manually corrects a PDF's filename-derived Zayam Id that didn't
+    auto-match (the "re-match" action in the Bulk Attach Resumes preview).
+    """
+    config = _build_config(doctype)
+    match_field = config["match_field"]
+    display_field = config["display_field"]
+
+    zayam_id = (zayam_id or "").strip()
+    docname = frappe.db.get_value(doctype, {match_field: zayam_id}) if zayam_id else None
+    display_name = frappe.db.get_value(doctype, docname, display_field) if docname else None
+
+    return {
+        "zayam_id": zayam_id,
         "name": display_name,
         "docname": docname,
         "found": bool(docname),

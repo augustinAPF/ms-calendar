@@ -234,7 +234,18 @@ def create_interview_event(
             file_name
         )
         if not os.path.isfile(file_path):
-            continue
+            # `is_private` can be stale vs. where the bytes actually live
+            # (bulk imports / reused "library file" attachments) — check the
+            # other folder before dropping the attachment silently.
+            alt_path = frappe.get_site_path(
+                "public" if file_doc.is_private else "private",
+                "files",
+                file_name
+            )
+            if os.path.isfile(alt_path):
+                file_path = alt_path
+            else:
+                continue
 
         with open(file_path, "rb") as f:
             fb64 = base64.b64encode(f.read()).decode()

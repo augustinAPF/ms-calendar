@@ -504,8 +504,17 @@ def create_interview_event(event_title,
             file_path = frappe.get_site_path("public", "files", file_name)
 
         if not os.path.isfile(file_path):
-            frappe.log_error(f"File missing on disk: {file_path}", "Interview Event File Error")
-            continue
+            # The File doc's `is_private` flag can be stale (e.g. after a bulk
+            # import or a reused "library file" attachment) while the bytes
+            # actually sit in the other folder — check there before giving up,
+            # so the attachment isn't silently dropped from the invite.
+            alt_folder = "public" if file_doc.is_private else "private"
+            alt_path = frappe.get_site_path(alt_folder, "files", file_name)
+            if os.path.isfile(alt_path):
+                file_path = alt_path
+            else:
+                frappe.log_error(f"File missing on disk: {file_path}", "Interview Event File Error")
+                continue
 
         if os.path.getsize(file_path) > 3 * 1024 * 1024:
             frappe.log_error(f"File too large: {file_name}", "Interview Event File Error")

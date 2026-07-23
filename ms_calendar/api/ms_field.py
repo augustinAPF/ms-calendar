@@ -1,6 +1,7 @@
 import frappe, requests, io, base64, re, time as _time
 from datetime import timedelta
 from frappe.utils import get_datetime, getdate
+from ms_calendar.api.file_access_utils import get_file_bytes_resilient
 
 _TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
 
@@ -1096,7 +1097,7 @@ def create_interview_event(
             continue
         try:
             _f_obj = frappe.get_doc("File", _fd[0]["name"])
-            _f_bytes = _f_obj.get_content()
+            _f_bytes = get_file_bytes_resilient(_f_obj)
             if len(_f_bytes) > 3 * 1024 * 1024:
                 frappe.log_error(
                     f"File too large: {_fd[0]['file_name']}",
@@ -1239,7 +1240,7 @@ def create_interview_event(
                         _af_obj = frappe.get_doc("File", _afd[0]["name"])
                     else:
                         _af_obj = frappe.get_doc("File", {"file_url": web_path})
-                    _af_bytes = _af_obj.get_content()
+                    _af_bytes = get_file_bytes_resilient(_af_obj)
                     if len(_af_bytes) > 5 * 1024 * 1024:
                         frappe.log_error(
                             f"Auto-attach file too large: {_af_fname}",
@@ -3965,6 +3966,180 @@ def send_final_round_feedback_pdf_to_registration_form(doc, method=None):
     _merge_feedback_submissions_to_registration_form(
         doc, "round_two_feedback_form", "Final Round Feedback Form"
     )
+
+
+# Which "<Round> Feedback Form" doctype(s) are expected for a given base
+# interview_round on "Field Interview Schedule". Grouped the same way the
+# doc_events hooks above group them (see _merge_feedback_submissions_to_registration_form
+# callers): several role-specific Feedback Form doctypes serve the same round.
+FIELD_FEEDBACK_ROUND_MAP = {
+    "Recruiter Round": [
+        "Recruiter Feedback Form",
+        "Recruiter Assessment Form",
+        "Feedback Form - Associate Resource Person",
+    ],
+    "Education Capacity Round": [
+        "Educational Capacity Interview - Feedback Form",
+        "School Teacher Feedback Form",
+        "Functional Round Feedback Form",
+    ],
+    "Subject Round": [
+        "Educational Capacity Interview - Feedback Form",
+        "School Teacher Feedback Form",
+        "Functional Round Feedback Form",
+    ],
+    "Functional Round": [
+        "Educational Capacity Interview - Feedback Form",
+        "School Teacher Feedback Form",
+        "Functional Round Feedback Form",
+    ],
+    "Leader Round-1": [
+        "Leader Final Round Feedback Form",
+        "Demo Lesson Observation Feedback Form",
+        "Final Round Feedback Form",
+    ],
+    "Leader Round-2": [
+        "Leader Final Round Feedback Form",
+        "Demo Lesson Observation Feedback Form",
+        "Final Round Feedback Form",
+    ],
+}
+
+
+def send_field_interview_feedback_reminders():
+    """Runs once daily (see hooks.py scheduler_events["daily"]).
+
+    Starting 1 day after a "Field Interview Schedule" interview's end time,
+    sends a daily reminder to every interviewer on that schedule until a
+    matching Feedback Form has been submitted for the applicant, or 7 days
+    have passed since the interview ended, whichever comes first.
+
+    Feedback Form doctypes (Recruiter Feedback Form, Leader Final Round
+    Feedback Form, etc.) don't record which interviewer submitted them -
+    only applicant_id - so this can only tell whether ANY feedback has
+    landed for that applicant/round, and reminds ALL interviewers on the
+    schedule until it has. Rounds not in FIELD_FEEDBACK_ROUND_MAP (CV
+    Shortlist, Offer, Document Verification, etc.) have no feedback form
+    step and are skipped.
+    """
+    now = frappe.utils.now_datetime()
+
+    schedules = frappe.get_all(
+        "Field Interview Schedule",
+        filters={"reminder_sent": 0},
+        fields=[
+            "name",
+            "application_id",
+            "applicants_name",
+            "role",
+            "interview_round",
+            "organizer_email",
+            "feedback_form_link",
+            "interview_date",
+            "end_time",
+        ],
+    )
+
+    for s in schedules:
+        if not (s.interview_date and s.end_time and s.application_id):
+            continue
+
+        base_round = re.sub(
+            r"\s+(Select|Reject)$", "", (s.interview_round or "").strip()
+        )
+        feedback_doctypes = FIELD_FEEDBACK_ROUND_MAP.get(base_round)
+        if not feedback_doctypes:
+            # No feedback form step is expected for this round - nothing to chase.
+            frappe.db.set_value(
+                "Field Interview Schedule", s.name, "reminder_sent", 1
+            )
+            frappe.db.commit()
+            continue
+
+        try:
+            end_dt = get_datetime(f"{s.interview_date} {s.end_time}")
+        except Exception:
+            continue
+
+        elapsed = now - end_dt
+        if elapsed < timedelta(days=1):
+            continue
+
+        doc = frappe.get_doc("Field Interview Schedule", s.name)
+        interviewer_emails = [
+            row.interviewer_email
+            for row in (doc.interviewer_email or [])
+            if row.interviewer_email
+        ]
+
+        if not interviewer_emails:
+            frappe.db.set_value(
+                "Field Interview Schedule", s.name, "reminder_sent", 1
+            )
+            frappe.db.commit()
+            continue
+
+        feedback_submitted = any(
+            frappe.db.exists(fb_doctype, {"applicant_id": s.application_id})
+            for fb_doctype in feedback_doctypes
+        )
+
+        if feedback_submitted:
+            frappe.db.set_value(
+                "Field Interview Schedule", s.name, "reminder_sent", 1
+            )
+            frappe.db.commit()
+            continue
+
+        if elapsed > timedelta(days=7):
+            # Gave it a full week of daily reminders - stop nagging.
+            frappe.db.set_value(
+                "Field Interview Schedule", s.name, "reminder_sent", 1
+            )
+            frappe.db.commit()
+            continue
+
+        feedback_link_html = (
+            f'<p><strong>Feedback form:</strong> '
+            f'<a href="{s.feedback_form_link}" target="_blank">Click here</a></p>'
+            if s.feedback_form_link
+            else ""
+        )
+        reminder_body = f"""
+        <p>Hi,</p>
+        <p>This is a reminder that the interview with <b>{s.applicants_name}</b>
+        for the role of <b>{s.role or ''}</b> has concluded, and your feedback
+        is still pending.</p>
+        {feedback_link_html}
+        <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+        """
+
+        sender_arg = {}
+        if s.organizer_email and frappe.db.exists(
+            "Email Account", {"email_id": s.organizer_email, "enable_outgoing": 1}
+        ):
+            sender_arg = {"sender": s.organizer_email}
+
+        for email in interviewer_emails:
+            try:
+                frappe.sendmail(
+                    recipients=[email],
+                    subject=f"Reminder: Interview Feedback Pending – {s.applicants_name}",
+                    message=reminder_body,
+                    delayed=False,
+                    reference_doctype="Field Interview Schedule",
+                    reference_name=s.name,
+                    **sender_arg,
+                )
+            except Exception:
+                frappe.log_error(
+                    title="Field Interview Feedback Reminder Error",
+                    message=frappe.get_traceback()[:2000],
+                )
+
+        # Do NOT mark reminder_sent here - keep re-checking daily until
+        # feedback lands or the 7-day window above closes it out.
+        frappe.db.commit()
 
 
 ##testing

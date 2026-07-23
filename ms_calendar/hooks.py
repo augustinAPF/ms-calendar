@@ -280,6 +280,7 @@ scheduler_events = {
 	"daily": [
 		"ms_calendar.api.authbridge_v2.poll_pending_cases",
 		"ms_calendar.api.ms_philanthropy.send_interviewer_feedback_reminders",
+		"ms_calendar.api.ms_field.send_field_interview_feedback_reminders",
 	],
 }
 
