@@ -4012,7 +4012,10 @@ def send_field_interview_feedback_reminders():
     Starting 1 day after a "Field Interview Schedule" interview's end time,
     sends a daily reminder to every interviewer on that schedule until a
     matching Feedback Form has been submitted for the applicant, or 7 days
-    have passed since the interview ended, whichever comes first.
+    have passed since the interview ended, whichever comes first. The very
+    first reminder (at the 5-minute mark) is sent separately by
+    send_field_interview_first_feedback_reminder() - this job only handles
+    day 1 onward.
 
     Feedback Form doctypes (Recruiter Feedback Form, Leader Final Round
     Feedback Form, etc.) don't record which interviewer submitted them -
@@ -4139,6 +4142,122 @@ def send_field_interview_feedback_reminders():
 
         # Do NOT mark reminder_sent here - keep re-checking daily until
         # feedback lands or the 7-day window above closes it out.
+        frappe.db.commit()
+
+
+def send_field_interview_first_feedback_reminder():
+    """Runs every 5 minutes (see hooks.py scheduler_events["cron"]).
+
+    Sends the FIRST feedback reminder as soon as 5 minutes have passed
+    since a "Field Interview Schedule" interview's end time, if no
+    matching Feedback Form has been submitted yet. Marks
+    first_reminder_sent so this never fires twice for the same schedule -
+    the daily send_field_interview_feedback_reminders() job takes over
+    for all reminders after this first one.
+    """
+    now = frappe.utils.now_datetime()
+
+    schedules = frappe.get_all(
+        "Field Interview Schedule",
+        filters={"reminder_sent": 0, "first_reminder_sent": 0},
+        fields=[
+            "name",
+            "application_id",
+            "applicants_name",
+            "role",
+            "interview_round",
+            "organizer_email",
+            "feedback_form_link",
+            "interview_date",
+            "end_time",
+        ],
+    )
+
+    for s in schedules:
+        if not (s.interview_date and s.end_time and s.application_id):
+            continue
+
+        base_round = re.sub(
+            r"\s+(Select|Reject)$", "", (s.interview_round or "").strip()
+        )
+        feedback_doctypes = FIELD_FEEDBACK_ROUND_MAP.get(base_round)
+        if not feedback_doctypes:
+            # No feedback form step is expected for this round - let the
+            # daily job close it out via reminder_sent.
+            continue
+
+        try:
+            end_dt = get_datetime(f"{s.interview_date} {s.end_time}")
+        except Exception:
+            continue
+
+        elapsed = now - end_dt
+        if elapsed < timedelta(minutes=5):
+            continue
+
+        doc = frappe.get_doc("Field Interview Schedule", s.name)
+        interviewer_emails = [
+            row.interviewer_email
+            for row in (doc.interviewer_email or [])
+            if row.interviewer_email
+        ]
+
+        if not interviewer_emails:
+            continue
+
+        feedback_submitted = any(
+            frappe.db.exists(fb_doctype, {"applicant_id": s.application_id})
+            for fb_doctype in feedback_doctypes
+        )
+
+        if feedback_submitted:
+            frappe.db.set_value(
+                "Field Interview Schedule", s.name, "first_reminder_sent", 1
+            )
+            frappe.db.commit()
+            continue
+
+        feedback_link_html = (
+            f'<p><strong>Feedback form:</strong> '
+            f'<a href="{s.feedback_form_link}" target="_blank">Click here</a></p>'
+            if s.feedback_form_link
+            else ""
+        )
+        reminder_body = f"""
+        <p>Hi,</p>
+        <p>This is a reminder that the interview with <b>{s.applicants_name}</b>
+        for the role of <b>{s.role or ''}</b> has concluded, and your feedback
+        is still pending.</p>
+        {feedback_link_html}
+        <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+        """
+
+        sender_arg = {}
+        if s.organizer_email and frappe.db.exists(
+            "Email Account", {"email_id": s.organizer_email, "enable_outgoing": 1}
+        ):
+            sender_arg = {"sender": s.organizer_email}
+
+        for email in interviewer_emails:
+            try:
+                frappe.sendmail(
+                    recipients=[email],
+                    subject=f"Reminder: Interview Feedback Pending – {s.applicants_name}",
+                    message=reminder_body,
+                    delayed=False,
+                    reference_doctype="Field Interview Schedule",
+                    reference_name=s.name,
+                    **sender_arg,
+                )
+            except Exception:
+                frappe.log_error(
+                    title="Field Interview First Feedback Reminder Error",
+                    message=frappe.get_traceback()[:2000],
+                )
+
+        frappe.db.set_value(
+            "Field Interview Schedule", s.name, "first_reminder_sent", 1
+        )
         frappe.db.commit()
 
 

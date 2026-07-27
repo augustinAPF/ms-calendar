@@ -282,6 +282,11 @@ scheduler_events = {
 		"ms_calendar.api.ms_philanthropy.send_interviewer_feedback_reminders",
 		"ms_calendar.api.ms_field.send_field_interview_feedback_reminders",
 	],
+	"cron": {
+		"*/5 * * * *": [
+			"ms_calendar.api.ms_field.send_field_interview_first_feedback_reminder",
+		],
+	},
 }
 
 # Testing
