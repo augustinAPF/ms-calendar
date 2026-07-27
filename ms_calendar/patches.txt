@@ -7,3 +7,4 @@ ms_calendar.patches.make_fis_editable
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
 ms_calendar.patches.make_field_registration_form_editable
+ms_calendar.patches.sync_field_registration_form_content
