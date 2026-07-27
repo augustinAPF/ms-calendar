@@ -15,70 +15,71 @@ def _normalize_mobile(phone):
     return None
 
 
-@frappe.whitelist(allow_guest=True)
-def send_otp(phone):
-    phone = (phone or "").strip()
-    mobile = _normalize_mobile(phone)
-    if not mobile:
-        return {"success": False, "message": "Enter a valid 10-digit phone number."}
-
-    try:
-        settings = frappe.get_single("Field SMS Settings")
-        auth_key = settings.get_password("auth_key", raise_exception=False)
-        otp_template_id = (settings.otp_template_id or "").strip()
-        otp_sender_id = (settings.otp_sender_id or "").strip()
-    except Exception:
-        return {"success": False, "message": "SMS settings not configured."}
-
-    if not auth_key or not otp_template_id or not otp_sender_id:
-        return {"success": False, "message": "OTP settings not configured. Please set OTP Template ID and Sender ID in Field SMS Settings."}
-
-    otp = str(random.randint(100000, 999999))
-    cache_key = f"field_reg_otp_{mobile}"
-    frappe.cache().set_value(cache_key, otp, expires_in_sec=_OTP_TTL)
-
-    try:
-        resp = requests.post(
-            "https://control.msg91.com/api/v5/otp",
-            params={
-                "template_id": otp_template_id,
-                "mobile": mobile,
-                "authkey": auth_key,
-                "otp": otp,
-                "sender": otp_sender_id,
-            },
-            timeout=10,
-        )
-        resp.raise_for_status()
-        return {"success": True, "message": "OTP sent to your phone number."}
-    except Exception as exc:
-        frappe.log_error(frappe.get_traceback(), "OTP send failed")
-        frappe.cache().delete_value(cache_key)
-        return {"success": False, "message": f"Failed to send OTP: {exc}"}
-
-
-@frappe.whitelist(allow_guest=True)
-def verify_otp(phone, otp):
-    phone = (phone or "").strip()
-    otp = (otp or "").strip()
-    mobile = _normalize_mobile(phone)
-    if not mobile:
-        return {"success": False, "message": "Invalid phone number."}
-    if not otp:
-        return {"success": False, "message": "Please enter the OTP."}
-
-    cache_key = f"field_reg_otp_{mobile}"
-    stored = frappe.cache().get_value(cache_key)
-
-    if not stored:
-        return {"success": False, "message": "OTP expired or not sent. Please request a new OTP."}
-    if stored != otp:
-        return {"success": False, "message": "Incorrect OTP. Please try again."}
-
-    frappe.cache().delete_value(cache_key)
-    # Store a verified flag so the form submission can trust it
-    frappe.cache().set_value(f"field_reg_otp_verified_{mobile}", "1", expires_in_sec=1800)
-    return {"success": True, "message": "Phone number verified successfully."}
+# PHONE OTP DISABLED — not ready yet, commented out for now.
+# @frappe.whitelist(allow_guest=True)
+# def send_otp(phone):
+#     phone = (phone or "").strip()
+#     mobile = _normalize_mobile(phone)
+#     if not mobile:
+#         return {"success": False, "message": "Enter a valid 10-digit phone number."}
+#
+#     try:
+#         settings = frappe.get_single("Field SMS Settings")
+#         auth_key = settings.get_password("auth_key", raise_exception=False)
+#         otp_template_id = (settings.otp_template_id or "").strip()
+#         otp_sender_id = (settings.otp_sender_id or "").strip()
+#     except Exception:
+#         return {"success": False, "message": "SMS settings not configured."}
+#
+#     if not auth_key or not otp_template_id or not otp_sender_id:
+#         return {"success": False, "message": "OTP settings not configured. Please set OTP Template ID and Sender ID in Field SMS Settings."}
+#
+#     otp = str(random.randint(100000, 999999))
+#     cache_key = f"field_reg_otp_{mobile}"
+#     frappe.cache().set_value(cache_key, otp, expires_in_sec=_OTP_TTL)
+#
+#     try:
+#         resp = requests.post(
+#             "https://control.msg91.com/api/v5/otp",
+#             params={
+#                 "template_id": otp_template_id,
+#                 "mobile": mobile,
+#                 "authkey": auth_key,
+#                 "otp": otp,
+#                 "sender": otp_sender_id,
+#             },
+#             timeout=10,
+#         )
+#         resp.raise_for_status()
+#         return {"success": True, "message": "OTP sent to your phone number."}
+#     except Exception as exc:
+#         frappe.log_error(frappe.get_traceback(), "OTP send failed")
+#         frappe.cache().delete_value(cache_key)
+#         return {"success": False, "message": f"Failed to send OTP: {exc}"}
+#
+#
+# @frappe.whitelist(allow_guest=True)
+# def verify_otp(phone, otp):
+#     phone = (phone or "").strip()
+#     otp = (otp or "").strip()
+#     mobile = _normalize_mobile(phone)
+#     if not mobile:
+#         return {"success": False, "message": "Invalid phone number."}
+#     if not otp:
+#         return {"success": False, "message": "Please enter the OTP."}
+#
+#     cache_key = f"field_reg_otp_{mobile}"
+#     stored = frappe.cache().get_value(cache_key)
+#
+#     if not stored:
+#         return {"success": False, "message": "OTP expired or not sent. Please request a new OTP."}
+#     if stored != otp:
+#         return {"success": False, "message": "Incorrect OTP. Please try again."}
+#
+#     frappe.cache().delete_value(cache_key)
+#     # Store a verified flag so the form submission can trust it
+#     frappe.cache().set_value(f"field_reg_otp_verified_{mobile}", "1", expires_in_sec=1800)
+#     return {"success": True, "message": "Phone number verified successfully."}
 
 
 @frappe.whitelist(allow_guest=True)
@@ -149,13 +150,14 @@ def enforce_otp_verification(doc, method=None):
     if frappe.session.user != "Guest" or not doc.is_new():
         return
 
-    mobile = _normalize_mobile(doc.phone_number)
-    if not mobile or not frappe.cache().get_value(f"field_reg_otp_verified_{mobile}"):
-        frappe.throw("Please verify your phone number with the OTP before submitting.")
+    # PHONE OTP DISABLED — not ready yet, commented out for now.
+    # mobile = _normalize_mobile(doc.phone_number)
+    # if not mobile or not frappe.cache().get_value(f"field_reg_otp_verified_{mobile}"):
+    #     frappe.throw("Please verify your phone number with the OTP before submitting.")
 
     email = (doc.email_address or "").strip().lower()
     if not email or not frappe.cache().get_value(f"field_reg_email_otp_verified_{email}"):
         frappe.throw("Please verify your email address with the OTP before submitting.")
 
-    doc.phone_verified = 1
+    # doc.phone_verified = 1
     doc.email_verified = 1
