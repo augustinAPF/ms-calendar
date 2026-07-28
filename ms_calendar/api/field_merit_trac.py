@@ -41,6 +41,7 @@ def test_result_api():
         # 2️⃣ READ JSON BODY
         # ----------------------------------------------------------
         raw = frappe.request.data
+        frappe.log_error(message=f"RAW BODY: {raw}", title="FIELD_MERIT_TRAC_DEBUG")
         if not raw:
             frappe.local.response.http_status_code = 400
             return {
@@ -58,6 +59,10 @@ def test_result_api():
                 "http_status": 400,
                 "message": "Invalid JSON body",
             }
+
+        frappe.log_error(
+            message=f"FULL PAYLOAD: {payload}", title="FIELD_MERIT_TRAC_PAYLOAD"
+        )
 
         # ------------------------------------------------------------
         # 3️⃣ Accept either top-level object or {"data": {...}}
@@ -77,6 +82,8 @@ def test_result_api():
                 "http_status": 400,
                 "message": "Request must be a JSON object with candidateId (either top-level or inside 'data')",
             }
+
+        frappe.log_error(message=f"ITEM: {item}", title="FIELD_MERIT_TRAC_ITEM")
 
         # ------------------------------------------------------------
         # 4️⃣ field extractor + datetime helper
@@ -107,6 +114,14 @@ def test_result_api():
         descriptive_response = item.get("descriptiveResponse") or []
         updated_at = fix_datetime(item.get("updatedAt"))
         created_at = fix_datetime(item.get("createdAt"))
+
+        frappe.log_error(
+            message=(
+                f"sectionWiseScore ({len(section_wise_score)} rows): {section_wise_score}\n\n"
+                f"descriptiveResponse ({len(descriptive_response)} rows): {descriptive_response}"
+            ),
+            title="FIELD_MERIT_TRAC_SECTIONS",
+        )
 
         if not candidate_id:
             frappe.local.response.http_status_code = 400
