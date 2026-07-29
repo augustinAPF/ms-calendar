@@ -689,40 +689,51 @@ def test_result_api():
         # ------------------------------------------------------------
         # 7. INSERT RESULT DOC
         # ------------------------------------------------------------
-        test_doc = frappe.get_doc(
-            {
-                "doctype": result_doctype,  # "MeritTrac Test Result" (APSRF) or "Field MeritTrac Test Result" (APFFRF)
-                "applicant_id": candidate_id,
-                "applicant_name": applicant_name,
-                "score_percentile": percentage,
-                "overall_percentage_score": percentage,
-                "attempt_id": item.get("attemptId"),
-                "assessment_id": item.get("assessmentId"),
-                "attempt_status": item.get("attempt_status"),
-                "score_report": item.get("TnReport"),
-                "total_score": item.get("score"),
-                "max_score": item.get("maxScore"),
-                "total_questions": item.get("totalQuestion"),
-                "total_attempted": item.get("totalAttempted"),
-                "updated_at": fix_datetime(item.get("updatedAt")),
-                "created_at": fix_datetime(item.get("createdAt")),
-                "section_wise_score": [
-                    {
-                        "section_name": section.get("name"),
-                        "score": section.get("score"),
-                        "max_score": section.get("maxScore"),
-                    }
-                    for section in section_wise_score
-                ],
-                "descriptive_response": [
-                    {
-                        "question_text": resp.get("questionText"),
-                        "candidate_response": resp.get("candidateResponse"),
-                    }
-                    for resp in descriptive_response
-                ],
-            }
-        )
+        doc_fields = {
+            "doctype": result_doctype,  # "MeritTrac Test Result" (APSRF) or "Field MeritTrac Test Result" (APFFRF)
+            "applicant_id": candidate_id,
+            "applicant_name": applicant_name,
+            "score_percentile": percentage,
+            "attempt_id": item.get("attemptId"),
+            "assessment_id": item.get("assessmentId"),
+            "attempt_status": item.get("attempt_status"),
+            "score_report": item.get("TnReport"),
+            "total_score": item.get("score"),
+            "max_score": item.get("maxScore"),
+            "total_questions": item.get("totalQuestion"),
+            "total_attempted": item.get("totalAttempted"),
+            "updated_at": fix_datetime(item.get("updatedAt")),
+            "created_at": fix_datetime(item.get("createdAt")),
+        }
+
+        # section_wise_score / descriptive_response / overall_percentage_score
+        # only exist on "Field MeritTrac Test Result" — "MeritTrac Test Result"
+        # (Scholarship) has neither those fields nor a guaranteed matching
+        # payload shape (its descriptiveResponse entries can be plain strings,
+        # not {"questionText":..., "candidateResponse":...} objects), so
+        # building these unconditionally previously crashed every Scholarship
+        # insert. Also skip any non-dict rows defensively either way.
+        if result_doctype == "Field MeritTrac Test Result":
+            doc_fields["overall_percentage_score"] = percentage
+            doc_fields["section_wise_score"] = [
+                {
+                    "section_name": section.get("name"),
+                    "score": section.get("score"),
+                    "max_score": section.get("maxScore"),
+                }
+                for section in section_wise_score
+                if isinstance(section, dict)
+            ]
+            doc_fields["descriptive_response"] = [
+                {
+                    "question_text": resp.get("questionText"),
+                    "candidate_response": resp.get("candidateResponse"),
+                }
+                for resp in descriptive_response
+                if isinstance(resp, dict)
+            ]
+
+        test_doc = frappe.get_doc(doc_fields)
 
         frappe.log_error(
             message=f"""
