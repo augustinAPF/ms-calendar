@@ -66,6 +66,7 @@ frappe.pages['scholarship-dashboard'].on_page_load = function (wrapper) {
 	const FIELDS = [
 		'name', 'creation', 'modified', 'application_status', 'role', 'gender',
 		'state_of_residence', 'highest_level_of_education', 'total_years_of_experience',
+		'full_name_as_per_aadhar', 'email',
 	];
 
 	let ROWS = [];
@@ -169,6 +170,39 @@ frappe.pages['scholarship-dashboard'].on_page_load = function (wrapper) {
 			display:inline-block; animation:sdSpin .7s linear infinite; margin-right:6px; vertical-align:-2px;
 		}
 		@media (max-width: 900px) { .sd-grid2 { grid-template-columns:1fr; } }
+		/* ── records popup (shown on click, before jumping into Frappe) ── */
+		.sd-modal-overlay {
+			position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:9000;
+			display:none; align-items:center; justify-content:center; padding:24px;
+		}
+		.sd-modal-overlay.show { display:flex; }
+		.sd-modal {
+			background:#fff; border-radius:18px; width:min(880px, 100%); max-height:82vh;
+			display:flex; flex-direction:column; box-shadow:0 30px 70px rgba(0,0,0,.28);
+			animation:sdModalIn .22s cubic-bezier(.22,1,.36,1) both;
+		}
+		@keyframes sdModalIn { from { opacity:0; transform:translateY(10px) scale(.98); } to { opacity:1; transform:translateY(0) scale(1); } }
+		.sd-modal-hdr { display:flex; align-items:flex-start; justify-content:space-between; padding:18px 22px; border-bottom:1px solid ${BORD}; }
+		.sd-modal-hdr h4 { margin:0; font-size:15px; font-weight:800; color:${T1}; }
+		.sd-modal-hdr .sd-modal-sub { font-size:12px; color:${T2}; margin-top:3px; }
+		.sd-modal-close { cursor:pointer; width:30px; height:30px; border-radius:8px; flex-shrink:0; display:flex; align-items:center; justify-content:center; color:${T2}; font-size:18px; transition:background .15s; }
+		.sd-modal-close:hover { background:${BG}; }
+		.sd-modal-body { overflow-y:auto; padding:0 22px; flex:1; }
+		table.sd-modal-table { width:100%; border-collapse:collapse; font-size:12.5px; }
+		table.sd-modal-table thead th {
+			position:sticky; top:0; background:#fff; text-align:left; font-size:10.5px; font-weight:700; color:${T2};
+			text-transform:uppercase; letter-spacing:.04em; padding:10px; border-bottom:1px solid ${BORD}; z-index:1;
+		}
+		table.sd-modal-table tbody tr.sd-modal-row { cursor:pointer; transition:background .15s; }
+		table.sd-modal-table tbody tr.sd-modal-row:hover { background:${BG}; }
+		table.sd-modal-table tbody tr.sd-modal-row:hover td:first-child { color:${AC}; }
+		table.sd-modal-table td { padding:10px; border-bottom:1px solid ${BORD}; color:${T1}; white-space:nowrap; }
+		table.sd-modal-table td:first-child { font-weight:700; transition:color .15s; }
+		table.sd-modal-table tbody tr:last-child td { border-bottom:none; }
+		.sd-modal-ftr { display:flex; justify-content:flex-end; gap:10px; padding:16px 22px; border-top:1px solid ${BORD}; }
+		.sd-modal-btn { padding:9px 18px; border-radius:9px; font-size:12.5px; font-weight:700; cursor:pointer; border:1px solid ${BORD}; background:#fff; color:${T1}; transition:opacity .15s; }
+		.sd-modal-btn:hover { opacity:.8; }
+		.sd-modal-btn.primary { background:${AC}; color:#fff; border-color:${AC}; }
 	`;
 	document.head.appendChild(S);
 
@@ -222,22 +256,113 @@ frappe.pages['scholarship-dashboard'].on_page_load = function (wrapper) {
 				<div id="sd-sec-speed" class="sd-section"></div>
 			</div>
 		</div>
+		<div class="sd-modal-overlay" id="sd-modal-overlay">
+			<div class="sd-modal">
+				<div class="sd-modal-hdr">
+					<div><h4 id="sd-modal-title"></h4><div class="sd-modal-sub" id="sd-modal-sub"></div></div>
+					<div class="sd-modal-close" id="sd-modal-close">&times;</div>
+				</div>
+				<div class="sd-modal-body" id="sd-modal-body"></div>
+				<div class="sd-modal-ftr">
+					<div class="sd-modal-btn" id="sd-modal-cancel">Close</div>
+					<div class="sd-modal-btn primary" id="sd-modal-open-frappe">Open in Pathway &rarr;</div>
+				</div>
+			</div>
+		</div>
 	`);
 
 	$(wrapper).find('.sd-nav-item').on('click', function () {
 		setActive($(this).data('sec'));
 	});
 
-	// Every drill-down (KPI tile / funnel row / geo row) just opens the real
-	// Scholarship Recruitment Form list, pre-filtered — delegated so it keeps
-	// working across re-renders.
+	// Every drill-down (KPI tile / funnel row / geo row / bar) opens a popup
+	// showing the matching records first — mirrors the Recruitment Dashboard's
+	// "profile card first, explicit button to Frappe" pattern instead of
+	// jumping straight into the raw Frappe list view on the very first click.
 	function openList(filters) {
 		frappe.route_options = filters || {};
 		frappe.set_route('List', DOCTYPE);
 	}
 	function fmtDate(d) { return d.toISOString().slice(0, 10); }
+
+	// Client-side re-implementation of the filter shapes used throughout this
+	// file ({field: value}, {field: ['in', arr]}, {field: ['<'|'<='|'between', ...]},
+	// {field: ['like', '%']}) — lets the popup preview the same record set
+	// "Open in Frappe" would land on, without a round-trip to the server.
+	function toDate(s) { return new Date(String(s).replace(' ', 'T')); }
+	function rowMatchesFilters(row, filters) {
+		return Object.keys(filters).every(function (field) {
+			var cond = filters[field];
+			var val = row[field];
+			if (!Array.isArray(cond)) return val === cond;
+			var op = cond[0], arg = cond[1];
+			if (op === 'in') return arg.indexOf(val) !== -1;
+			if (op === 'like') return true; // only used for the "match everything" tautology filter
+			if (!val) return false;
+			if (op === '<') return toDate(val) < toDate(arg);
+			if (op === '<=') { var end = toDate(arg); end.setHours(23, 59, 59, 999); return toDate(val) <= end; }
+			if (op === 'between') {
+				var hi = toDate(arg[1]); hi.setHours(23, 59, 59, 999);
+				return toDate(val) >= toDate(arg[0]) && toDate(val) <= hi;
+			}
+			return true;
+		});
+	}
+
+	let MODAL_FILTERS = null;
+	function showRecordsModal(title, filters) {
+		MODAL_FILTERS = filters;
+		var matches = ROWS.filter(function (r) { return rowMatchesFilters(r, filters); });
+		document.getElementById('sd-modal-title').textContent = title;
+		document.getElementById('sd-modal-sub').textContent =
+			matches.length.toLocaleString('en-IN') + (matches.length === 1 ? ' record' : ' records');
+		var body = document.getElementById('sd-modal-body');
+		if (!matches.length) {
+			body.innerHTML = '<div class="sd-nodata">No records match.</div>';
+		} else {
+			// Every matching record, in full — this is a small per-doctype dataset
+			// (a few hundred rows at most), so there's no need to truncate.
+			body.innerHTML = `
+				<table class="sd-modal-table">
+					<thead>
+						<tr>
+							<th>Name</th><th>Role</th><th>Status</th><th>Gender</th><th>State</th><th>Experience</th>
+						</tr>
+					</thead>
+					<tbody>
+						${matches.map(function (r) {
+					return `
+								<tr class="sd-modal-row" data-name="${r.name}">
+									<td>${r.full_name_as_per_aadhar || r.name}</td>
+									<td>${r.role || '&mdash;'}</td>
+									<td>${r.application_status || '&mdash;'}</td>
+									<td>${r.gender || '&mdash;'}</td>
+									<td>${r.state_of_residence || '&mdash;'}</td>
+									<td>${r.total_years_of_experience ? r.total_years_of_experience + ' yrs' : '&mdash;'}</td>
+								</tr>
+							`;
+				}).join('')}
+					</tbody>
+				</table>
+			`;
+		}
+		document.getElementById('sd-modal-overlay').classList.add('show');
+	}
+	function hideRecordsModal() {
+		document.getElementById('sd-modal-overlay').classList.remove('show');
+		MODAL_FILTERS = null;
+	}
+	$(wrapper).on('click', '#sd-modal-close, #sd-modal-cancel', hideRecordsModal);
+	$(wrapper).on('click', '#sd-modal-overlay', function (e) { if (e.target === this) hideRecordsModal(); });
+	$(wrapper).on('click', '#sd-modal-open-frappe', function () { if (MODAL_FILTERS) openList(MODAL_FILTERS); });
+	$(wrapper).on('click', '.sd-modal-row', function () {
+		frappe.set_route('Form', DOCTYPE, $(this).data('name'));
+	});
+
 	$(wrapper).on('click', '.sd-kpi[data-filters], .sd-funnel-row[data-filters], .sd-bar-list-row[data-filters]', function () {
-		openList(JSON.parse(this.getAttribute('data-filters')));
+		var filters = JSON.parse(this.getAttribute('data-filters'));
+		var title = this.getAttribute('data-title') || 'Records';
+		showRecordsModal(title, filters);
 	});
 	// Delegated click on the chart's (stable) container element — reads the
 	// clicked bar's `data-point-index` straight off the SVG rect frappe-charts
@@ -252,8 +377,8 @@ frappe.pages['scholarship-dashboard'].on_page_load = function (wrapper) {
 			if (!bar) return;
 			var idx = parseInt(bar.getAttribute('data-point-index'), 10);
 			if (isNaN(idx)) return;
-			var filters = mapFn(idx);
-			if (filters) openList(filters);
+			var result = mapFn(idx);
+			if (result && result.filters) showRecordsModal(result.title, result.filters);
 		});
 	}
 
@@ -330,7 +455,9 @@ frappe.pages['scholarship-dashboard'].on_page_load = function (wrapper) {
 		var valueHtml = (typeof opts.raw === 'number')
 			? '<span class="sd-cnt" data-target="' + opts.raw + '" data-decimals="' + (opts.decimals || 0) + '">0</span>' + (opts.suffix || '')
 			: (opts.value || '&mdash;');
-		var filtersAttr = opts.filters ? ' data-filters="' + JSON.stringify(opts.filters).replace(/"/g, '&quot;') + '"' : '';
+		var filtersAttr = opts.filters
+			? ' data-filters="' + JSON.stringify(opts.filters).replace(/"/g, '&quot;') + '" data-title="' + opts.label + '"'
+			: '';
 		return `
 			<div class="sd-kpi${opts.filters ? ' sd-kpi-click' : ''}"${filtersAttr}>
 				<div class="sd-kpi-ico" style="background:${pal.bg}; color:${pal.fg}">${ICONK[opts.icon] || ''}</div>
@@ -411,7 +538,7 @@ frappe.pages['scholarship-dashboard'].on_page_load = function (wrapper) {
 			data: { labels: ROLES, datasets: [{ name: 'Applications', values: ROLES.map(function (r) { return roleCounts[r] || 0; }) }] },
 			barOptions: { spaceRatio: 0.3 },
 		});
-		bindBarClick(roleChartEl, function (i) { return { role: ROLES[i] }; });
+		bindBarClick(roleChartEl, function (i) { return { title: ROLES[i], filters: { role: ROLES[i] } }; });
 
 		var statusCounts = countBy(ROWS, 'application_status');
 		var statusEntries = ALL_STATUSES.map(function (s) { return [s, statusCounts[s] || 0]; }).filter(function (e) { return e[1] > 0; });
@@ -439,7 +566,7 @@ frappe.pages['scholarship-dashboard'].on_page_load = function (wrapper) {
 			var color = FUNNEL_COLORS[i % FUNNEL_COLORS.length];
 			var filtersAttr = JSON.stringify({ application_status: ['in', st.reached] }).replace(/"/g, '&quot;');
 			return `
-				<div class="sd-funnel-row sd-clickable" data-filters="${filtersAttr}">
+				<div class="sd-funnel-row sd-clickable" data-filters="${filtersAttr}" data-title="${st.label}">
 					<div class="sd-funnel-idx" style="background:${color}22; color:${color}">${i + 1}</div>
 					<div class="sd-funnel-lbl">${st.label}</div>
 					<div class="sd-funnel-bar-wrap">
@@ -473,7 +600,7 @@ frappe.pages['scholarship-dashboard'].on_page_load = function (wrapper) {
 			data: { labels: rejectEntries.map(function (e) { return e[0].replace('Reject - ', 'R'); }), datasets: [{ name: 'Rejections', values: rejectEntries.map(function (e) { return e[1]; }) }] },
 			barOptions: { spaceRatio: 0.3 },
 		});
-		bindBarClick(rejectChartEl, function (i) { return { application_status: rejectEntries[i][0] }; });
+		bindBarClick(rejectChartEl, function (i) { return { title: rejectEntries[i][0], filters: { application_status: rejectEntries[i][0] } }; });
 
 		var activeRows = ROWS.filter(function (r) { return ACTIVE_STATUSES.indexOf(r.application_status) !== -1; });
 		var roleActive = countBy(activeRows, 'role');
@@ -483,7 +610,9 @@ frappe.pages['scholarship-dashboard'].on_page_load = function (wrapper) {
 			data: { labels: ROLES, datasets: [{ name: 'Active', values: ROLES.map(function (r) { return roleActive[r] || 0; }) }] },
 			barOptions: { spaceRatio: 0.3 },
 		});
-		bindBarClick(rolePipelineChartEl, function (i) { return { role: ROLES[i], application_status: ['in', ACTIVE_STATUSES] }; });
+		bindBarClick(rolePipelineChartEl, function (i) {
+			return { title: ROLES[i] + ' — Active Pipeline', filters: { role: ROLES[i], application_status: ['in', ACTIVE_STATUSES] } };
+		});
 	}
 
 	// ── Demographics ──────────────────────────────────────────────────────────
@@ -542,7 +671,7 @@ frappe.pages['scholarship-dashboard'].on_page_load = function (wrapper) {
 				var color = GEO_COLORS[i % GEO_COLORS.length];
 				var filtersAttr = JSON.stringify({ state_of_residence: e[0] }).replace(/"/g, '&quot;');
 				return `
-					<div class="sd-bar-list-row sd-clickable" data-filters="${filtersAttr}">
+					<div class="sd-bar-list-row sd-clickable" data-filters="${filtersAttr}" data-title="${e[0]}">
 						<div class="sd-bar-list-lbl">${e[0]}</div>
 						<div class="sd-bar-list-track"><div class="sd-bar-list-fill" data-w="${w}" style="background:${color}"></div></div>
 						<div class="sd-bar-list-val">${e[1].toLocaleString('en-IN')}</div>
@@ -612,7 +741,7 @@ frappe.pages['scholarship-dashboard'].on_page_load = function (wrapper) {
 				var lower = fmtDate(new Date(Date.now() - b.max * 86400000));
 				filters.creation = ['between', [lower, upper]];
 			}
-			return filters;
+			return { title: 'Aging: ' + b.label, filters: filters };
 		});
 
 		var roleAge = ROLES.map(function (role) {
@@ -626,6 +755,8 @@ frappe.pages['scholarship-dashboard'].on_page_load = function (wrapper) {
 			data: { labels: ROLES, datasets: [{ name: 'Avg. Days', values: roleAge }] },
 			barOptions: { spaceRatio: 0.3 },
 		});
-		bindBarClick(ageRoleChartEl, function (i) { return { role: ROLES[i], application_status: ['in', ACTIVE_STATUSES] }; });
+		bindBarClick(ageRoleChartEl, function (i) {
+			return { title: ROLES[i] + ' — Active Pipeline', filters: { role: ROLES[i], application_status: ['in', ACTIVE_STATUSES] } };
+		});
 	}
 };

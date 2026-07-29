@@ -132,13 +132,15 @@ def test_result_api():
             }
 
         # ------------------------------------------------------------
-        # 5️⃣ Detect registration form doctype (local vs cloud)
+        # 5️⃣ Registration form doctype
         # ------------------------------------------------------------
-        _frf_doctype = (
-            "Field Registration Form1"
-            if frappe.db.exists("DocType", "Field Registration Form1")
-            else "Field Registration Form"
-        )
+        # NOTE: "Field Registration Form1" is a stale, orphaned leftover
+        # doctype (not used by the Desk UI, the Zwayam importer, or anything
+        # else) that happens to coexist with the real "Field Registration
+        # Form" on this site. Detecting via existence-of-Form1 is wrong —
+        # both can and do exist at the same time — so this is hardcoded to
+        # the doctype every other part of the app actually uses.
+        _frf_doctype = "Field Registration Form"
 
         # Look up applicant name
         _applicant_name = (
@@ -195,7 +197,7 @@ def test_result_api():
         srf = frappe.db.get_value(
             _frf_doctype,
             {"name": candidate_id},
-            ["name", "full_name_aadhaar", "email_address", "srt_mail"],
+            ["name", "full_name_aadhaar", "email_address", "field_mail"],
             as_dict=True,
         )
 
@@ -223,8 +225,8 @@ def test_result_api():
         applicant_name = srf.get("full_name_aadhaar") or "Applicant"
         applicant_email = srf.get("email_address")
         SenderEmail = (
-            srf.get("srt_mail")
-            if srf.get("srt_mail")
+            srf.get("field_mail")
+            if srf.get("field_mail")
             else "tech4socialsector@azimpremjifoundation.org"
         )
 
@@ -276,7 +278,9 @@ def test_result_api():
                         reference_name=candidate_id,
                     )
             except Exception as mail_exc:
-                frappe.log_error(title="MERIT_TRAC_MAIL_ERROR", message=f"Mail error: {mail_exc}")
+                frappe.log_error(
+                    title="MERIT_TRAC_MAIL_ERROR", message=f"Mail error: {mail_exc}"
+                )
 
         frappe.db.commit()
 
@@ -391,14 +395,10 @@ def field_assessment_result_api():
             }
 
         # ------------------------------------------------------------
-        # 4️⃣ Detect registration form doctype (local vs cloud) and
-        # look up applicant name — mirrors test_result_api above.
+        # 4️⃣ Registration form doctype — see the NOTE in test_result_api
+        # above on why this is hardcoded rather than existence-detected.
         # ------------------------------------------------------------
-        _frf_doctype = (
-            "Field Registration Form1"
-            if frappe.db.exists("DocType", "Field Registration Form1")
-            else "Field Registration Form"
-        )
+        _frf_doctype = "Field Registration Form"
         _applicant_name = (
             frappe.db.get_value(_frf_doctype, candidate_id, "full_name_aadhaar") or ""
         )
@@ -455,7 +455,9 @@ def field_assessment_result_api():
         }
 
     except Exception as e:
-        frappe.log_error(title="FIELD_ASSESSMENT_RESULT_API_ERROR", message=frappe.get_traceback())
+        frappe.log_error(
+            title="FIELD_ASSESSMENT_RESULT_API_ERROR", message=frappe.get_traceback()
+        )
         frappe.local.response.http_status_code = 500
         return {"status": 500, "http_status": 500, "message": str(e)}
 
@@ -524,13 +526,9 @@ def send_meritrac_scheduled_emails():
 
 
 @frappe.whitelist()
-def test_save_result(candidate_id="APFF1F-0002"):
+def test_save_result(candidate_id="APFFRF-0002"):
     """TEST ONLY — simulates a MeritTrac result webhook for a given candidate."""
-    _frf_doctype = (
-        "Field Registration Form1"
-        if frappe.db.exists("DocType", "Field Registration Form1")
-        else "Field Registration Form"
-    )
+    _frf_doctype = "Field Registration Form"
     _applicant_name = (
         frappe.db.get_value(_frf_doctype, candidate_id, "full_name_aadhaar") or "Test"
     )
@@ -593,7 +591,9 @@ def test_send_all_emails(record_name):
             _send_email_for_type(email_type, rec_dict, delayed=False)
             results.append(f"{email_type}: sent to {rec_dict['applicant_email']}")
         except Exception as e:
-            frappe.log_error(title=f"TEST_EMAIL_{email_type.upper()}", message=frappe.get_traceback())
+            frappe.log_error(
+                title=f"TEST_EMAIL_{email_type.upper()}", message=frappe.get_traceback()
+            )
             results.append(f"{email_type}: FAILED — {e}")
 
     frappe.db.commit()
@@ -847,16 +847,14 @@ def save_field_merittrac_tickets(
         log.insert(ignore_permissions=True)
     except Exception as e:
         frappe.log_error(
-            title="FIELD_MERITTRAC_LOG_ERROR", message=f"Creation log insert failed: {e}"
+            title="FIELD_MERITTRAC_LOG_ERROR",
+            message=f"Creation log insert failed: {e}",
         )
 
     # ── 2. Save ticket records + send admit card email immediately ───────
-    # Detect correct doctype name (local = "Field Registration Form1", cloud = "Field Registration Form")
-    _frf_doctype = (
-        "Field Registration Form1"
-        if frappe.db.exists("DocType", "Field Registration Form1")
-        else "Field Registration Form"
-    )
+    # Registration form doctype — see the NOTE in test_result_api on why
+    # this is hardcoded rather than existence-detected.
+    _frf_doctype = "Field Registration Form"
 
     today = nowdate()
     saved = []
@@ -1022,3 +1020,6 @@ def get_merittrac_tickets(candidate_ids, start_utc, end_utc):
         )
 
     return resp.json()
+
+
+# testing

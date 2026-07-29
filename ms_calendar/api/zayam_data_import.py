@@ -29,7 +29,7 @@ mapping for every doctype. The steps:
    definitions, so adding support for a new doctype only requires
    adding a `zayam_id` field to it — no code change needed here.
 
-3. Import a row (import_from_excel)
+3. Import a row (enqueue_import / _run_import_job)
    Each Excel column header is normalized and looked up in the mapping
    from step 2 to find which fieldname it should be written into.
    Unrecognized headers are collected as `unmatched_columns` and
@@ -37,8 +37,12 @@ mapping for every doctype. The steps:
    data row, the Zayam Id column value is used to find an existing
    record (update) or create a new one; each row runs inside its own
    DB savepoint so one bad row can't roll back earlier successful rows
-   in the same uncommitted batch, and commits happen every 25 rows so
-   large imports survive a request timeout.
+   in the same uncommitted batch, and commits happen every 25 rows.
+   The actual import runs as a background job (Zwayam exports can run
+   to hundreds of thousands of rows — far more than a single web
+   request is allowed to run for), with progress/results written to
+   cache every _PROGRESS_EVERY rows for the page to poll via
+   get_import_status, including after a reload.
 
 4. Attach a resume PDF (attach_application_pdf)
    The uploaded filename's leading digits are read as the Zayam Id
@@ -48,11 +52,12 @@ mapping for every doctype. The steps:
    failure on one file doesn't affect the others in the same batch.
 """
 
+import csv
 import os
 import re
 
 import frappe
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
 _MATCH_FIELD = "zayam_id"
 
@@ -66,6 +71,57 @@ _SKIP_FIELDTYPES = {
     "Table",
     "Table MultiSelect",
 }
+
+# Large Zwayam exports (100k+ rows) take far longer to import than a single
+# web request can wait for, so the actual import runs as a background job
+# (_run_import_job) instead of inline in the whitelisted method the page
+# calls. Progress/results are written to cache under these keys so the page
+# can poll for status — including after a reload, since the job keeps
+# running whether or not anyone is watching.
+_STATUS_CACHE_PREFIX = "zayam_import_status"
+_STATUS_TTL = 60 * 60 * 24  # a finished job's result stays pollable for a day
+_MAX_DETAIL_ENTRIES = 500  # cap on how many created/updated/skipped/failed rows are echoed back per job
+_PROGRESS_EVERY = 100  # how often (in rows) the cached status is refreshed while running
+
+
+def _status_cache_key(job_id):
+    return f"{_STATUS_CACHE_PREFIX}:{job_id}"
+
+
+def _get_status(job_id):
+    return frappe.cache().get_value(_status_cache_key(job_id))
+
+
+def _save_status(job_id, status):
+    frappe.cache().set_value(_status_cache_key(job_id), status, expires_in_sec=_STATUS_TTL)
+
+
+def _new_status(job_id, doctype, total_rows, columns, user):
+    return {
+        "job_id": job_id,
+        "doctype": doctype,
+        "user": user,
+        "state": "running",
+        "processed": 0,
+        "total_rows": total_rows,
+        "counts": {"created": 0, "updated": 0, "skipped": 0, "failed": 0},
+        "details": {"created": [], "updated": [], "skipped": [], "failed": []},
+        "truncated": {"created": False, "updated": False, "skipped": False, "failed": False},
+        "unmatched_columns": [],
+        "new_master_entries": {},
+        "columns": columns,
+        "all_columns": [],
+        "assignable_fields": [],
+        "error": None,
+    }
+
+
+def _record_result(status, key, entry):
+    status["counts"][key] += 1
+    if len(status["details"][key]) < _MAX_DETAIL_ENTRIES:
+        status["details"][key].append(entry)
+    else:
+        status["truncated"][key] = True
 
 
 def _normalize_header(value):
@@ -126,6 +182,11 @@ def _build_config(doctype):
     # recognise it as the same column as the actual Zayam Id field.
     header_aliases["zwayam_id"] = _MATCH_FIELD
     header_aliases["zwayamid"] = _MATCH_FIELD
+
+    # Zwayam's own "All Unit form" export doesn't call the column "Zayam
+    # Id" at all — it labels it "Application/Register Number".
+    header_aliases["application_register_number"] = _MATCH_FIELD
+    header_aliases["register_number"] = _MATCH_FIELD
 
     return {
         "match_field": _MATCH_FIELD,
@@ -273,6 +334,30 @@ def _cell_value(cell, fieldname, int_fields):
     return value
 
 
+def _load_sheet(file_doc):
+    """Returns an openpyxl worksheet for the uploaded file, whether it's an
+    actual .xlsx/.xls or a .csv — a CSV is read into an in-memory workbook
+    first, so every downstream helper (_map_headers, _cell_value, etc.) can
+    keep working off row/cell objects without caring which format this was.
+    """
+    path = file_doc.get_full_path()
+    if path.lower().endswith(".csv"):
+        wb = Workbook()
+        ws = wb.active
+        try:
+            with open(path, newline="", encoding="utf-8-sig") as f:
+                rows = list(csv.reader(f))
+        except UnicodeDecodeError:
+            # Excel-on-Windows CSV exports are usually cp1252, not UTF-8
+            # (e.g. "smart quote" apostrophes decode as 0x92 in that codec).
+            with open(path, newline="", encoding="cp1252") as f:
+                rows = list(csv.reader(f))
+        for row in rows:
+            ws.append(row)
+        return ws
+    return load_workbook(path).active
+
+
 @frappe.whitelist()
 def export_template(doctype="Phil Registration Form"):
     """
@@ -282,8 +367,6 @@ def export_template(doctype="Phil Registration Form"):
     upload, so a template filled in from here always round-trips cleanly.
     """
     from io import BytesIO
-
-    from openpyxl import Workbook
 
     meta = frappe.get_meta(doctype)
     if not meta.get_field(_MATCH_FIELD):
@@ -322,9 +405,9 @@ def _clean_overrides(overrides):
 
 
 @frappe.whitelist()
-def preview_excel(file_url, doctype="Phil Registration Form", limit=10, overrides=None, manual_mapping=None):
+def preview_excel(file_url, doctype="Phil Registration Form", limit=200, overrides=None, manual_mapping=None):
     """
-    Parses the uploaded file the same way import_from_excel would, but
+    Parses the uploaded file the same way enqueue_import/_run_import_job would, but
     only reads (never writes) — used to render a preview table before
     the user confirms the actual import. `overrides` (e.g. {"themes": "X",
     "geo": "Y"}) is force-set on every previewed row, same as the real import.
@@ -339,16 +422,14 @@ def preview_excel(file_url, doctype="Phil Registration Form", limit=10, override
     int_fields = config["int_fields"]
 
     file_doc = frappe.get_doc("File", {"file_url": file_url})
-    workbook = load_workbook(file_doc.get_full_path())
-    sheet = workbook.active
+    sheet = _load_sheet(file_doc)
 
     col_field_map, raw_headers, unmatched_columns, manual_mapping = _map_headers(sheet, header_aliases, manual_mapping)
 
-    if match_field not in col_field_map.values():
-        frappe.throw(
-            f"Could not find a '{match_field}' column in the uploaded file. "
-            f"Headers found in row 1: {raw_headers}"
-        )
+    # Unlike the real import, don't hard-fail here even if match_field
+    # didn't auto-match by header text (e.g. a "Application/Register
+    # Number" column instead of "Zayam Id") — still render the preview so
+    # the user can use "Map Columns" to assign the right column to it.
 
     # Preserve the original left-to-right column order for the preview table.
     sorted_cols = sorted(col_field_map.items())
@@ -386,33 +467,30 @@ def preview_excel(file_url, doctype="Phil Registration Form", limit=10, override
             raw_headers, col_field_map, manual_mapping, _sample_column_values(sheet, len(raw_headers))
         ),
         "assignable_fields": config["assignable_fields"],
+        "match_field": match_field,
+        "match_field_mapped": match_field in col_field_map.values(),
     }
 
 
 @frappe.whitelist()
-def import_from_excel(file_url, doctype="Phil Registration Form", overrides=None, manual_mapping=None):
+def enqueue_import(file_url, doctype="Phil Registration Form", overrides=None, manual_mapping=None):
     """
-    Reads an uploaded Zayam Excel export and creates/updates records of
-    the given doctype, matched on that doctype's Zayam Id field. Any
-    fieldname:value pair in `overrides` (e.g. {"themes": "X", "geo": "Y"})
-    is force-set on every row — overriding whatever (if anything) was in
-    the file's own column for that field. `manual_mapping` (e.g.
-    {"3": "location"}) assigns a field to a column that didn't auto-match
-    by header text, keyed by column index — same as preview_excel.
+    Validates the file and column mapping synchronously (fast, read-only —
+    same checks as preview_excel), then hands the actual row-by-row import
+    off to a background job (_run_import_job). A Zwayam export can run to
+    hundreds of thousands of rows, which takes far longer than a single web
+    request is allowed to run; doing it inline would just get silently cut
+    off partway through with no error and no way to tell how far it got.
+    Returns a job_id the page polls (get_import_status) for progress.
     """
     overrides = _clean_overrides(overrides)
     config = _build_config(doctype)
     match_field = config["match_field"]
-    display_field = config["display_field"]
-    header_aliases = config["header_aliases"]
-    int_fields = config["int_fields"]
-    link_fields = config["link_fields"]
 
     file_doc = frappe.get_doc("File", {"file_url": file_url})
-    workbook = load_workbook(file_doc.get_full_path())
-    sheet = workbook.active
+    sheet = _load_sheet(file_doc)
 
-    col_field_map, raw_headers, unmatched_columns, manual_mapping = _map_headers(sheet, header_aliases, manual_mapping)
+    col_field_map, raw_headers, unmatched_columns, manual_mapping = _map_headers(sheet, config["header_aliases"], manual_mapping)
 
     if match_field not in col_field_map.values():
         frappe.throw(
@@ -426,79 +504,142 @@ def import_from_excel(file_url, doctype="Phil Registration Form", overrides=None
         {"header": raw_headers[idx], "fieldname": fieldname, "manual": str(idx) in manual_mapping}
         for idx, fieldname in sorted(col_field_map.items())
     ]
+    total_rows = max(sheet.max_row - 1, 0)
 
-    created, updated, skipped, failed = [], [], [], []
-    new_master_entries = {}
+    job_id = frappe.generate_hash(length=12)
+    user = frappe.session.user
+    _save_status(job_id, _new_status(job_id, doctype, total_rows, ordered_columns, user))
 
-    for i, row in enumerate(sheet.iter_rows(min_row=2), start=1):
-        row_values = {}
-        for idx, fieldname in col_field_map.items():
-            if idx < len(row):
-                value = _cell_value(row[idx], fieldname, int_fields)
-                if value is not None:
-                    row_values[fieldname] = value
+    frappe.enqueue(
+        "ms_calendar.api.zayam_data_import._run_import_job",
+        queue="long",
+        timeout=6 * 60 * 60,
+        # NOTE: frappe.enqueue reserves the kwarg name "job_id" for its own RQ
+        # job id — passing our tracking id under that name gets swallowed by
+        # frappe.enqueue itself instead of forwarded to _run_import_job, so it
+        # goes through as import_job_id instead.
+        import_job_id=job_id,
+        file_url=file_url,
+        doctype=doctype,
+        overrides=overrides,
+        manual_mapping=manual_mapping,
+        user=user,
+    )
 
-        match_value = row_values.get(match_field)
-        if not match_value:
-            skipped.append({"zayam_id": None, "name": None, "row": row[0].row, "reason": "no_zayam_id"})
-            continue
+    return {"job_id": job_id, "total_rows": total_rows}
 
-        row_values.update(overrides)
 
-        entry = {"zayam_id": match_value, "name": row_values.get(display_field), "data": row_values}
-        savepoint = f"zayam_import_row_{i}"
+def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping, user):
+    """
+    The actual row-by-row import, run in the background (see enqueue_import).
+    Progress and results are written to cache every _PROGRESS_EVERY rows (and
+    at the end) instead of being returned directly, since a 100k+ row result
+    is too large to hold in memory/redis or send to the browser in one piece
+    — only the first _MAX_DETAIL_ENTRIES rows per bucket are kept for display,
+    with `truncated` flags telling the page a bucket was cut off.
+    """
+    job_id = import_job_id
+    status = _get_status(job_id) or _new_status(job_id, doctype, 0, [], user)
 
-        try:
-            frappe.db.savepoint(savepoint)
+    try:
+        frappe.set_user(user)
+        config = _build_config(doctype)
+        match_field = config["match_field"]
+        display_field = config["display_field"]
+        int_fields = config["int_fields"]
+        link_fields = config["link_fields"]
 
-            # A Geo/Theme/Location/Role (or any other Link field) value that
-            # doesn't exist yet extends that master list instead of failing
-            # the row — e.g. a new Theme in the export just gets added.
-            for fieldname, target_doctype in link_fields.items():
-                value = row_values.get(fieldname)
-                if value and _ensure_link_value_exists(target_doctype, value):
-                    new_master_entries.setdefault(target_doctype, set()).add(value)
-
-            existing = frappe.db.get_value(doctype, {match_field: match_value})
-            if existing:
-                doc = frappe.get_doc(doctype, existing)
-                doc.update(row_values)
-                doc.save(ignore_permissions=True)
-                updated.append(entry)
-            else:
-                doc = frappe.get_doc({"doctype": doctype, **row_values})
-                doc.insert(ignore_permissions=True)
-                created.append(entry)
-        except Exception as e:
-            # Roll back only this row (not the whole batch) so earlier
-            # successful, not-yet-committed rows in this loop survive.
-            frappe.db.rollback(save_point=savepoint)
-            frappe.log_error(
-                title="Zayam Data Import Error", message=f"{match_value}: {e}"
-            )
-            entry["error"] = frappe.utils.strip_html(str(e))
-            failed.append(entry)
-
-        # Commit periodically so progress survives a request timeout on
-        # large imports instead of losing everything in one big transaction.
-        if i % 25 == 0:
-            frappe.db.commit()
-
-    frappe.db.commit()
-
-    return {
-        "created": created,
-        "updated": updated,
-        "skipped": skipped,
-        "failed": failed,
-        "unmatched_columns": unmatched_columns,
-        "columns": ordered_columns,
-        "all_columns": _build_all_columns(
+        file_doc = frappe.get_doc("File", {"file_url": file_url})
+        sheet = _load_sheet(file_doc)
+        col_field_map, raw_headers, unmatched_columns, manual_mapping = _map_headers(
+            sheet, config["header_aliases"], manual_mapping
+        )
+        status["unmatched_columns"] = unmatched_columns
+        status["all_columns"] = _build_all_columns(
             raw_headers, col_field_map, manual_mapping, _sample_column_values(sheet, len(raw_headers))
-        ),
-        "new_master_entries": {dt: sorted(values) for dt, values in new_master_entries.items()},
-        "assignable_fields": config["assignable_fields"],
-    }
+        )
+        status["assignable_fields"] = config["assignable_fields"]
+        _save_status(job_id, status)
+
+        new_master_entries = {}
+
+        for i, row in enumerate(sheet.iter_rows(min_row=2), start=1):
+            row_values = {}
+            for idx, fieldname in col_field_map.items():
+                if idx < len(row):
+                    value = _cell_value(row[idx], fieldname, int_fields)
+                    if value is not None:
+                        row_values[fieldname] = value
+
+            match_value = row_values.get(match_field)
+            status["processed"] = i
+
+            if not match_value:
+                _record_result(status, "skipped", {"zayam_id": None, "name": None, "row": row[0].row, "reason": "no_zayam_id"})
+            else:
+                row_values.update(overrides)
+                entry = {"zayam_id": match_value, "name": row_values.get(display_field), "data": row_values}
+                savepoint = f"zayam_import_row_{i}"
+
+                try:
+                    frappe.db.savepoint(savepoint)
+
+                    # A Geo/Theme/Location/Role (or any other Link field) value that
+                    # doesn't exist yet extends that master list instead of failing
+                    # the row — e.g. a new Theme in the export just gets added.
+                    for fieldname, target_doctype in link_fields.items():
+                        value = row_values.get(fieldname)
+                        if value and _ensure_link_value_exists(target_doctype, value):
+                            new_master_entries.setdefault(target_doctype, set()).add(value)
+
+                    existing = frappe.db.get_value(doctype, {match_field: match_value})
+                    if existing:
+                        doc = frappe.get_doc(doctype, existing)
+                        doc.update(row_values)
+                        doc.save(ignore_permissions=True)
+                        _record_result(status, "updated", entry)
+                    else:
+                        doc = frappe.get_doc({"doctype": doctype, **row_values})
+                        doc.insert(ignore_permissions=True)
+                        _record_result(status, "created", entry)
+                except Exception as e:
+                    # Roll back only this row (not the whole batch) so earlier
+                    # successful, not-yet-committed rows in this run survive.
+                    frappe.db.rollback(save_point=savepoint)
+                    frappe.log_error(title="Zayam Data Import Error", message=f"{match_value}: {e}")
+                    entry["error"] = frappe.utils.strip_html(str(e))
+                    _record_result(status, "failed", entry)
+
+            # Commit periodically so progress survives a worker restart instead
+            # of losing everything in one big transaction.
+            if i % 25 == 0:
+                frappe.db.commit()
+            if i % _PROGRESS_EVERY == 0:
+                status["new_master_entries"] = {dt: sorted(v) for dt, v in new_master_entries.items()}
+                _save_status(job_id, status)
+
+        frappe.db.commit()
+        status["state"] = "done"
+        status["new_master_entries"] = {dt: sorted(v) for dt, v in new_master_entries.items()}
+        _save_status(job_id, status)
+    except Exception as e:
+        frappe.db.rollback()
+        status["state"] = "failed"
+        status["error"] = frappe.utils.strip_html(str(e))
+        frappe.log_error(title="Zayam Data Import Job Failed", message=frappe.get_traceback())
+        _save_status(job_id, status)
+
+
+@frappe.whitelist()
+def get_import_status(job_id):
+    """Polled by the page to render/update the progress bar and, once state
+    is "done" or "failed", the final results — including after a reload,
+    since the job keeps running in the background regardless of who's
+    watching."""
+    status = _get_status(job_id)
+    if not status:
+        frappe.throw("This import job was not found — it may have expired or the job_id is wrong.")
+    return status
 
 
 def _zayam_id_from_filename(file_name):
