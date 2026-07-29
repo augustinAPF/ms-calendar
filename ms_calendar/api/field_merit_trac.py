@@ -1022,4 +1022,142 @@ def get_merittrac_tickets(candidate_ids, start_utc, end_utc):
     return resp.json()
 
 
+# ---------------------------------------------------------------------------
+# Auto-suggest the Field Meritrac Assessment matching a candidate's subject
+# ---------------------------------------------------------------------------
+
+# "written_subject" values on Field Registration Form are "<Level> <Subject>"
+# (e.g. "Secondary/High School Political Science"); assessment_set values on
+# Field Meritrac Assessment mix level/subject/language in free text, so we
+# match on word overlap rather than an exact string.
+_WRITTEN_SUBJECT_LEVEL_PREFIXES = [
+    "Sr.Secondary/PU Lecturer",
+    "Secondary/High School",
+    "Upper Primary",
+    "Primary",
+]
+
+_ASSESSMENT_TOKEN_STOPWORDS = {"foundation", "azim", "premji", "set"}
+
+# Field Role (candidate) -> Field Meritrac Assessment.role values it can match.
+# Ordered by preference (e.g. latest Associates batch first) for tie-breaking.
+_CANDIDATE_ROLE_TO_ASSESSMENT_ROLES = {
+    "School Teacher": ["School Teacher"],
+    "Resource Person": ["Resource Person"],
+    "Associate Resource Person": [
+        "Associates | 2024",
+        "Associates | 2022",
+        "Associates | 2020",
+    ],
+}
+
+
+def _tokenize(text):
+    import re
+
+    words = re.findall(r"[a-zA-Z]+", (text or "").lower())
+    return {w for w in words if w not in _ASSESSMENT_TOKEN_STOPWORDS and len(w) > 1}
+
+
+def _split_written_subject(written_subject):
+    written_subject = (written_subject or "").strip()
+    for prefix in _WRITTEN_SUBJECT_LEVEL_PREFIXES:
+        if written_subject.lower().startswith(prefix.lower()):
+            remainder = written_subject[len(prefix):].strip()
+            return prefix, (remainder or written_subject)
+    return "", written_subject
+
+
+@frappe.whitelist()
+def suggest_meritrac_assessment(candidate_ids):
+    """
+    Best-effort auto-match for the "Initiate Test" dialog's Assignment ID field.
+
+    Only suggests a match when every selected candidate shares the same role
+    and written_subject (a mixed batch is left for manual selection, since one
+    Assignment ID applies to the whole batch). The match itself is a word
+    overlap between the candidate's written_subject and each Field Meritrac
+    Assessment's assessment_set text, scoped to assessment records whose role
+    corresponds to the candidate's role where that mapping is known.
+
+    Always a suggestion, never authoritative — the caller keeps the field
+    editable so a recruiter can override it.
+    """
+    if isinstance(candidate_ids, str):
+        candidate_ids = json.loads(candidate_ids)
+
+    if not candidate_ids:
+        return {"matched": False, "reason": "no_candidates"}
+
+    rows = frappe.get_all(
+        "Field Registration Form",
+        filters={"name": ["in", candidate_ids]},
+        fields=["name", "role", "written_subject"],
+    )
+
+    subjects = {r.written_subject for r in rows if r.written_subject}
+    if len(subjects) != 1:
+        return {"matched": False, "reason": "mixed_or_missing_subject"}
+    written_subject = subjects.pop()
+
+    roles = {r.role for r in rows if r.role}
+    role = roles.pop() if len(roles) == 1 else None
+
+    level, subject_text = _split_written_subject(written_subject)
+    subject_tokens = _tokenize(subject_text)
+    level_tokens = _tokenize(level)
+    wanted_tokens = subject_tokens | level_tokens
+
+    assessment_filters = {}
+    preferred_roles = _CANDIDATE_ROLE_TO_ASSESSMENT_ROLES.get(role)
+    if preferred_roles:
+        assessment_filters["role"] = ["in", preferred_roles]
+
+    records = frappe.get_all(
+        "Field Meritrac Assessment",
+        filters=assessment_filters,
+        fields=["name", "assessment_set", "role"],
+    )
+    if not records:
+        return {"matched": False, "reason": "no_assessments_for_role"}
+
+    role_rank = {r: i for i, r in enumerate(preferred_roles)} if preferred_roles else {}
+
+    # Score = 2x per matched subject word + 1x per matched level word, minus
+    # 1x per *unrelated* word the assessment_set carries. The subject-word
+    # requirement and the penalty both matter: without them, a generic level
+    # word like "primary" ties every Primary-level record regardless of
+    # subject, and a loose subject match (e.g. "Hindi") ties every
+    # "Hindi <anything>" record instead of preferring the bare "Hindi" one.
+    scored = []
+    for rec in records:
+        rec_tokens = _tokenize(rec.assessment_set)
+        subject_overlap = len(rec_tokens & subject_tokens)
+        if not subject_overlap:
+            continue
+        level_overlap = len(rec_tokens & level_tokens)
+        extra = len(rec_tokens - wanted_tokens)
+        score = 2 * subject_overlap + level_overlap - extra
+        scored.append((score, -role_rank.get(rec.role, 0), rec))
+
+    if not scored:
+        return {"matched": False, "reason": "no_token_overlap"}
+
+    scored.sort(key=lambda triple: (triple[0], triple[1]), reverse=True)
+    top_score = scored[0][0]
+    top_matches = [rec for score, _, rec in scored if score == top_score]
+
+    best = top_matches[0]
+    return {
+        "matched": True,
+        "assessment": best.name,
+        "assessment_set": best.assessment_set,
+        "ambiguous": len(top_matches) > 1,
+        "alternatives": [
+            {"name": m.name, "assessment_set": m.assessment_set}
+            for m in top_matches[1:]
+        ],
+    }
+
+
 # testing

@@ -493,8 +493,47 @@ from frappe.utils import get_datetime
 
 
 import json
+import os
 import frappe
+import requests
+from urllib.parse import urlparse
 from frappe.utils import get_datetime
+from frappe.utils.file_manager import save_file
+
+
+def _attach_merittrac_report(test_doc, report_url):
+    """
+    Downloads the MeritTrac score report from `report_url` and attaches it as
+    a real file on the `field_merittrac_resuld` field. Best-effort — a failed
+    download must not block the rest of the result from being saved, since
+    the report URL is a secondary detail, not the result itself.
+    """
+    if not report_url or report_url == "NA":
+        return
+
+    try:
+        resp = requests.get(report_url, timeout=30)
+        resp.raise_for_status()
+
+        fname = os.path.basename(urlparse(report_url).path) or f"{test_doc.applicant_id}_merittrac_report"
+        if "." not in fname:
+            fname += ".pdf"
+
+        file_doc = save_file(
+            fname=fname,
+            content=resp.content,
+            dt=test_doc.doctype,
+            dn=test_doc.name,
+            is_private=1,
+        )
+        frappe.db.set_value(
+            test_doc.doctype, test_doc.name, "field_merittrac_resuld", file_doc.file_url
+        )
+    except Exception:
+        frappe.log_error(
+            title="MERIT_TRAC_REPORT_DOWNLOAD_ERROR",
+            message=frappe.get_traceback(),
+        )
 
 
 @frappe.whitelist(allow_guest=True)
@@ -593,6 +632,9 @@ def test_result_api():
             or item.get("overall_percentage_score")
         )
 
+        section_wise_score = item.get("sectionWiseScore") or []
+        descriptive_response = item.get("descriptiveResponse") or []
+
         frappe.log_error(
             message=f"Candidate ID: {candidate_id}", title="MERIT_TRAC_CANDIDATE_ID"
         )
@@ -633,12 +675,15 @@ def test_result_api():
 
         # ------------------------------------------------------------
         # 6b. GET applicant_name from the matching application record
-        # (Scholarship candidates only)
         # ------------------------------------------------------------
         applicant_name = None
         if application_doctype == "Scholarship Recruitment Form":
             applicant_name = frappe.db.get_value(
                 "Scholarship Recruitment Form", candidate_id, "full_name_as_per_aadhar"
+            )
+        elif application_doctype == "Field Registration Form":
+            applicant_name = frappe.db.get_value(
+                "Field Registration Form", candidate_id, "full_name_aadhaar"
             )
 
         # ------------------------------------------------------------
@@ -650,6 +695,7 @@ def test_result_api():
                 "applicant_id": candidate_id,
                 "applicant_name": applicant_name,
                 "score_percentile": percentage,
+                "overall_percentage_score": percentage,
                 "attempt_id": item.get("attemptId"),
                 "assessment_id": item.get("assessmentId"),
                 "attempt_status": item.get("attempt_status"),
@@ -660,6 +706,21 @@ def test_result_api():
                 "total_attempted": item.get("totalAttempted"),
                 "updated_at": fix_datetime(item.get("updatedAt")),
                 "created_at": fix_datetime(item.get("createdAt")),
+                "section_wise_score": [
+                    {
+                        "section_name": section.get("name"),
+                        "score": section.get("score"),
+                        "max_score": section.get("maxScore"),
+                    }
+                    for section in section_wise_score
+                ],
+                "descriptive_response": [
+                    {
+                        "question_text": resp.get("questionText"),
+                        "candidate_response": resp.get("candidateResponse"),
+                    }
+                    for resp in descriptive_response
+                ],
             }
         )
 
@@ -679,6 +740,9 @@ Candidate ID: {candidate_id}
             message=f"Inserted Document Name: {test_doc.name}",
             title="MERIT_TRAC_AFTER_INSERT",
         )
+
+        if result_doctype == "Field MeritTrac Test Result":
+            _attach_merittrac_report(test_doc, item.get("TnReport"))
 
         # ------------------------------------------------------------
         # SUCCESS RESPONSE
