@@ -1,7 +1,7 @@
 import frappe
 import os, ast, base64, time, re, requests
 from datetime import datetime, timedelta
-from frappe.utils import get_url
+from frappe.utils import get_url, formatdate, format_time
 from urllib.parse import quote
 
 # @frappe.whitelist()
@@ -325,6 +325,56 @@ from urllib.parse import quote
 #         "passcode": join_passcode,
 #         "is_online": is_online
 #     }
+def _graph_headers():
+    """Client-credentials OAuth against MS Graph; shared by create/update/cancel."""
+    creds = frappe.get_single("MS Graph Credentials")
+
+    token = requests.post(
+        f"https://login.microsoftonline.com/{creds.tenant_id}/oauth2/v2.0/token",
+        data={
+            "grant_type": "client_credentials",
+            "client_id": creds.client_id,
+            "client_secret": creds.get_password("client_secret"),
+            "scope": "https://graph.microsoft.com/.default",
+        },
+    )
+    token.raise_for_status()
+    return {
+        "Authorization": f"Bearer {token.json()['access_token']}",
+        "Content-Type": "application/json",
+    }
+
+
+def _get_room_display_name(room_email, headers):
+    url = (
+        "https://graph.microsoft.com/v1.0/places/microsoft.graph.room"
+        f"?$filter=emailAddress eq '{room_email}'"
+    )
+    res = requests.get(url, headers=headers)
+    if res.status_code != 200:
+        return room_email
+
+    values = res.json().get("value", [])
+    if not values:
+        return room_email
+
+    return values[0].get("displayName") or room_email
+
+
+def _resolve_meeting_room(room_emails, headers):
+    room_list = [r.strip() for r in (room_emails or "").split(",") if r.strip()]
+    return ", ".join(_get_room_display_name(r, headers) for r in room_list)
+
+
+def _logo_html():
+    logo_path = frappe.get_site_path("public", "files", "apf email.png")
+    if not os.path.isfile(logo_path):
+        return ""
+    with open(logo_path, "rb") as f:
+        logo_base64 = base64.b64encode(f.read()).decode("utf-8")
+    return f'<img src="data:image/png;base64,{logo_base64}" style="height:48px;">'
+
+
 @frappe.whitelist()
 def create_interview_event(
     start_datetime,
@@ -343,6 +393,7 @@ def create_interview_event(
     Location_adress=None,
     cc_emails=None,
     attachment_paths=None,
+    name=None,
 ):
 
     try:
@@ -365,46 +416,8 @@ def create_interview_event(
     end_time = end_dt.strftime("%I:%M %p")
     mode_label = "Teams Meeting" if is_online == 1 else "In-Person"
 
-    # -------- GRAPH AUTH --------
-    creds = frappe.get_single("MS Graph Credentials")
-
-    token = requests.post(
-        f"https://login.microsoftonline.com/{creds.tenant_id}/oauth2/v2.0/token",
-        data={
-            "grant_type": "client_credentials",
-            "client_id": creds.client_id,
-            "client_secret": creds.get_password("client_secret"),
-            "scope": "https://graph.microsoft.com/.default",
-        },
-    )
-    token.raise_for_status()
-    access_token = token.json()["access_token"]
-
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json",
-    }
-
-    # -------- helper: get room displayName --------
-    def get_room_display_name(room_email):
-        url = (
-            "https://graph.microsoft.com/v1.0/places/microsoft.graph.room"
-            f"?$filter=emailAddress eq '{room_email}'"
-        )
-        res = requests.get(url, headers=headers)
-        if res.status_code != 200:
-            return room_email
-
-        values = res.json().get("value", [])
-        if not values:
-            return room_email
-
-        return values[0].get("displayName") or room_email
-
-    # -------- room: resolve to displayName --------
-    room_list = [r.strip() for r in (room_emails or "").split(",") if r.strip()]
-    meeting_room_names = [get_room_display_name(r) for r in room_list]
-    meeting_room = ", ".join(meeting_room_names)
+    headers = _graph_headers()
+    meeting_room = _resolve_meeting_room(room_emails, headers)
 
     # -------- CREATE EVENT --------
     create_url = f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/events"
@@ -435,38 +448,43 @@ def create_interview_event(
     )
 
     # -------- FETCH MEETING DETAILS --------
+    # Only relevant for Teams meetings — an in-person event has no
+    # onlineMeeting/join details to poll for, so skip this entirely rather
+    # than burning a guaranteed ~10s (10 x 1s sleep) and 10 Graph GET
+    # requests waiting for data that will never appear.
     join_web_url = ""
     join_meeting_id = ""
     join_passcode = ""
 
-    for _ in range(10):
-        ev = requests.get(event_url, headers=headers).json()
+    if is_online == 1:
+        for _ in range(10):
+            ev = requests.get(event_url, headers=headers).json()
 
-        if ev.get("onlineMeeting"):
-            join_web_url = ev["onlineMeeting"].get("joinUrl", "") or join_web_url
+            if ev.get("onlineMeeting"):
+                join_web_url = ev["onlineMeeting"].get("joinUrl", "") or join_web_url
 
-        try:
-            html_body = ev.get("body", {}).get("content", "")
+            try:
+                html_body = ev.get("body", {}).get("content", "")
 
-            m1 = re.search(r"Meeting ID:\s*</span><span[^>]*>([\d\s]+)<", html_body)
-            if not m1:
-                m1 = re.search(r"Meeting ID:\s*([\d\s]+)", html_body)
-            if m1:
-                join_meeting_id = m1.group(1).strip()
+                m1 = re.search(r"Meeting ID:\s*</span><span[^>]*>([\d\s]+)<", html_body)
+                if not m1:
+                    m1 = re.search(r"Meeting ID:\s*([\d\s]+)", html_body)
+                if m1:
+                    join_meeting_id = m1.group(1).strip()
 
-            m2 = re.search(r"Passcode:\s*</span><span[^>]*>([\w\d]+)<", html_body)
-            if not m2:
-                m2 = re.search(r"Passcode:\s*([\w\d]+)", html_body)
-            if m2:
-                join_passcode = m2.group(1).strip()
+                m2 = re.search(r"Passcode:\s*</span><span[^>]*>([\w\d]+)<", html_body)
+                if not m2:
+                    m2 = re.search(r"Passcode:\s*([\w\d]+)", html_body)
+                if m2:
+                    join_passcode = m2.group(1).strip()
 
-        except Exception:
-            pass
+            except Exception:
+                pass
 
-        if join_web_url and join_meeting_id and join_passcode:
-            break
+            if join_web_url and join_meeting_id and join_passcode:
+                break
 
-        time.sleep(1)
+            time.sleep(1)
 
     if is_online == 1 and join_web_url and (not join_meeting_id or not join_passcode):
         filter_url = (
@@ -545,17 +563,7 @@ def create_interview_event(
             },
         )
 
-    # -------- LOGO --------
-    logo_base64 = ""
-    logo_path = frappe.get_site_path("public", "files", "apf email.png")
-    if os.path.isfile(logo_path):
-        with open(logo_path, "rb") as f:
-            logo_base64 = base64.b64encode(f.read()).decode("utf-8")
-    logo_html = (
-        f'<img src="data:image/png;base64,{logo_base64}" style="height:48px;">'
-        if logo_base64
-        else ""
-    )
+    logo_html = _logo_html()
 
     # ---- EMAIL BODY PARTS ----
     feedback_url = get_url(
@@ -620,9 +628,17 @@ def create_interview_event(
         i.strip() for i in (interviewer_emails or "").split(",") if i.strip()
     ]
     cc_list = [i.strip() for i in (cc_emails or "").split(",") if i.strip()]
-    attendees = [
-        {"emailAddress": {"address": i}, "type": "required"} for i in interviewer_list
-    ] + [{"emailAddress": {"address": i}, "type": "optional"} for i in cc_list]
+    room_list = [r.strip() for r in (room_emails or "").split(",") if r.strip()]
+    # Rooms must be added as "resource" attendees, not just written into the
+    # location text — otherwise Graph never sends the room a booking request
+    # and its own calendar never shows the slot as busy (the "Block Rooms"
+    # picker only stores the room's email/name locally; this is what
+    # actually reserves it).
+    attendees = (
+        [{"emailAddress": {"address": i}, "type": "required"} for i in interviewer_list]
+        + [{"emailAddress": {"address": i}, "type": "optional"} for i in cc_list]
+        + [{"emailAddress": {"address": r}, "type": "resource"} for r in room_list]
+    )
 
     requests.patch(
         event_url,
@@ -644,6 +660,14 @@ def create_interview_event(
 
     frappe.msgprint("✅ Event created successfully — Outlook notified automatically.")
 
+    if name:
+        frappe.db.set_value(
+            "Philanthropy Interview Schedule",
+            name,
+            {"event_id": event_id, "is_cancelled": 0},
+            update_modified=False,
+        )
+
     return {
         "event_id": event_id,
         "join_url": join_web_url,
@@ -651,6 +675,264 @@ def create_interview_event(
         "passcode": join_passcode,
         "is_online": is_online,
     }
+
+
+@frappe.whitelist()
+def update_interview_event(
+    name,
+    start_datetime,
+    end_datetime,
+    interviewer_emails,
+    interviewee_email,
+    room_emails,
+    is_online,
+    Organizer_email,
+    InterviewersName,
+    Applicants_name,
+    application_id,
+    Applicants_Role=None,
+    Map_location=None,
+    Comments_for_interviewer=None,
+    Location_adress=None,
+    cc_emails=None,
+):
+    """
+    Reschedules an already-created interview: PATCHes the existing Outlook
+    event's time/room/attendees instead of creating a duplicate, then emails
+    the candidate and interviewers about the change.
+    """
+    doc = frappe.get_doc("Philanthropy Interview Schedule", name)
+    if not doc.event_id:
+        frappe.throw(
+            "No Outlook event exists yet for this record — save it once with "
+            "Interviewer Email, Candidate Email, Date, Start Time and End Time "
+            "filled in to schedule it first."
+        )
+    if doc.is_cancelled:
+        frappe.throw(
+            "This interview was cancelled — it needs to be scheduled fresh, not rescheduled."
+        )
+
+    try:
+        is_online = int(is_online)
+    except:
+        is_online = 0
+
+    Organizer_email = Organizer_email.strip()
+    Applicants_Role = Applicants_Role or ""
+    Map_location = Map_location or ""
+    Location_adress = Location_adress or ""
+
+    start_dt = datetime.fromisoformat(start_datetime)
+    end_dt = datetime.fromisoformat(end_datetime)
+    interview_date = start_dt.strftime("%d %B %Y")
+    start_time = start_dt.strftime("%I:%M %p")
+    end_time = end_dt.strftime("%I:%M %p")
+    mode_label = "Teams Meeting" if is_online == 1 else "In-Person"
+
+    headers = _graph_headers()
+    meeting_room = _resolve_meeting_room(room_emails, headers)
+
+    event_url = f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/events/{doc.event_id}"
+
+    interviewer_list = [i.strip() for i in (interviewer_emails or "").split(",") if i.strip()]
+    cc_list = [i.strip() for i in (cc_emails or "").split(",") if i.strip()]
+    room_list = [r.strip() for r in (room_emails or "").split(",") if r.strip()]
+    attendees = (
+        [{"emailAddress": {"address": i}, "type": "required"} for i in interviewer_list]
+        + [{"emailAddress": {"address": i}, "type": "optional"} for i in cc_list]
+        + [{"emailAddress": {"address": r}, "type": "resource"} for r in room_list]
+    )
+
+    res = requests.patch(
+        event_url,
+        headers=headers,
+        json={
+            "start": {"dateTime": start_datetime, "timeZone": "Asia/Kolkata"},
+            "end": {"dateTime": end_datetime, "timeZone": "Asia/Kolkata"},
+            "location": {"displayName": meeting_room} if meeting_room else None,
+            "locations": (
+                [{"displayName": meeting_room, "locationType": "conferenceRoom"}]
+                if meeting_room
+                else []
+            ),
+            "attendees": attendees,
+            "showAs": "busy",
+        },
+    )
+    res.raise_for_status()
+
+    # Online meetings keep the same Teams link across a reschedule, so just
+    # read it back once — no need for create_interview_event's create-time
+    # polling loop (that loop exists because the link isn't ready immediately
+    # after the event is first created; here the meeting already exists).
+    join_web_url = ""
+    if is_online == 1:
+        ev = requests.get(event_url, headers=headers).json()
+        if ev.get("onlineMeeting"):
+            join_web_url = ev["onlineMeeting"].get("joinUrl", "")
+
+    meeting_html = (
+        f'<p><b>Join Teams Meeting:</b> <a href="{join_web_url}" target="_blank">Join Now</a></p>'
+        if is_online == 1 and join_web_url
+        else ""
+    )
+
+    logo_html = _logo_html()
+
+    map_html = (
+        f'<p style="margin:6px 0;"><strong>Venue:</strong> {Location_adress}</p>'
+        f'<p style="margin:6px 0;"><strong>Google Map Link:</strong>'
+        f'<a href="{Map_location}" target="_blank">Click here</a></p>'
+        if is_online == 0
+        else ""
+    )
+    meeting_room_html = (
+        f'<p><strong>Meeting room:</strong> {meeting_room}</p>' if meeting_room else ""
+    )
+
+    interviewer_body = f"""
+    <p>Hi {InterviewersName},</p>
+    <p>The interview below has been <strong>rescheduled</strong>:</p>
+    <div style="border:1px solid #e3e3e3;border-radius:10px;padding:14px;background:#f9fafb;">
+    <p><strong>Applicant name:</strong> {Applicants_name}</p>
+    <p><strong>Role:</strong> {Applicants_Role}</p>
+    <p><strong>New Date:</strong> {interview_date}</p>
+    <p><strong>New Time:</strong> {start_time} – {end_time}</p>
+    <p><strong>Mode:</strong> {mode_label}</p>
+    {meeting_room_html}
+    </div>
+    {meeting_html}
+    <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+    {logo_html}
+    """
+
+    candidate_body = f"""
+    <p>Hi {Applicants_name},</p>
+    <p>Your interview has been <strong>rescheduled</strong>:</p>
+    <div style="border:1px solid #e3e3e3;border-radius:10px;padding:14px;background:#f9fafb;">
+    <p><strong>Role:</strong> {Applicants_Role}</p>
+    <p><strong>New Date:</strong> {interview_date}</p>
+    <p><strong>New Time:</strong> {start_time} – {end_time}</p>
+    <p><strong>Mode:</strong> {mode_label}</p>
+    {map_html}
+    </div>
+    {meeting_html}
+    <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+    {logo_html}
+    """
+
+    frappe.sendmail(
+        recipients=[interviewee_email],
+        sender=Organizer_email,
+        subject=f"Interview Rescheduled – Azim Premji Foundation ({interview_date})",
+        message=candidate_body,
+        delayed=False,
+    )
+    if interviewer_list:
+        frappe.sendmail(
+            recipients=interviewer_list,
+            cc=cc_list or None,
+            sender=Organizer_email,
+            subject=f"Interview Rescheduled – {Applicants_name} ({interview_date})",
+            message=interviewer_body,
+            delayed=False,
+        )
+
+    frappe.msgprint("✅ Interview rescheduled — candidate and interviewer(s) notified.")
+
+    return {"event_id": doc.event_id, "rescheduled": True}
+
+
+@frappe.whitelist()
+def cancel_interview_event(name):
+    """
+    Cancels an already-scheduled interview: cancels the Outlook event via
+    Graph (which also notifies the interviewer attendees), emails the
+    candidate directly (they were never a Graph attendee, only invited by
+    email), and clears event_id so the same record can be freely
+    rescheduled later.
+    """
+    doc = frappe.get_doc("Philanthropy Interview Schedule", name)
+
+    if doc.is_cancelled:
+        frappe.throw("This interview is already cancelled.")
+
+    if doc.event_id and doc.organizer_email:
+        headers = _graph_headers()
+        cancel_url = (
+            f"https://graph.microsoft.com/v1.0/users/{doc.organizer_email}"
+            f"/events/{doc.event_id}/cancel"
+        )
+        res = requests.post(
+            cancel_url,
+            headers=headers,
+            json={"comment": "This interview has been cancelled."},
+        )
+        if res.status_code not in (202, 204, 404):
+            frappe.log_error(
+                title="PHILANTHROPY_INTERVIEW_CANCEL",
+                message=f"Graph cancel failed | status={res.status_code} | body={res.text[:800]}",
+            )
+
+    interview_date = formatdate(doc.interview_date, "dd MMMM yyyy") if doc.interview_date else ""
+    start_time = format_time(doc.start_time) if doc.start_time else ""
+    end_time = format_time(doc.end_time) if doc.end_time else ""
+    logo_html = _logo_html()
+
+    interviewer_emails = [
+        d.interviewer_email for d in (doc.interviewer_email or []) if d.interviewer_email
+    ]
+    cc_emails = [
+        d.interviewer_email for d in (doc.interviewers_cc_email or []) if d.interviewer_email
+    ]
+
+    if doc.attendees:
+        candidate_body = f"""
+        <p>Hi {doc.applicants_name or "there"},</p>
+        <p>This is to inform you that your interview scheduled on
+        <strong>{interview_date}</strong> ({start_time} – {end_time}) has been
+        <strong>cancelled</strong>.</p>
+        <p>We will reach out separately if the interview needs to be rescheduled.</p>
+        <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+        {logo_html}
+        """
+        frappe.sendmail(
+            recipients=[doc.attendees],
+            sender=doc.organizer_email,
+            subject=f"Interview Cancelled – Azim Premji Foundation ({interview_date})",
+            message=candidate_body,
+            delayed=False,
+        )
+
+    if interviewer_emails:
+        interviewer_body = f"""
+        <p>Hi {doc.interviewer_name or "team"},</p>
+        <p>The interview below has been <strong>cancelled</strong>:</p>
+        <div style="border:1px solid #e3e3e3;border-radius:10px;padding:14px;background:#f9fafb;">
+        <p><strong>Applicant name:</strong> {doc.applicants_name}</p>
+        <p><strong>Role:</strong> {doc.role or ""}</p>
+        <p><strong>Date:</strong> {interview_date}</p>
+        <p><strong>Time:</strong> {start_time} – {end_time}</p>
+        </div>
+        <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+        {logo_html}
+        """
+        frappe.sendmail(
+            recipients=interviewer_emails,
+            cc=cc_emails or None,
+            sender=doc.organizer_email,
+            subject=f"Interview Cancelled – {doc.applicants_name} ({interview_date})",
+            message=interviewer_body,
+            delayed=False,
+        )
+
+    doc.db_set("is_cancelled", 1, update_modified=False)
+    doc.db_set("event_id", "", update_modified=False)
+
+    frappe.msgprint("✅ Interview cancelled — candidate and interviewer(s) notified.")
+
+    return {"cancelled": True}
 
 
 def send_interviewer_feedback_reminders():
