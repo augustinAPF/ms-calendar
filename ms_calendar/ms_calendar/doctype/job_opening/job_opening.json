@@ -24,6 +24,7 @@
   "geo",
   "column_break_dxpv",
   "location",
+  "preferred_location",
   "experience",
   "employment_type",
   "job_code",
@@ -129,6 +130,13 @@
    "fieldtype": "Link",
    "label": "Location",
    "options": "Recruitment Location"
+  },
+  {
+   "default": "0",
+   "description": "Tick this when Location is a combined entry (e.g. \"Bengaluru/Bhopal\") covering more than one city. On save, the slash-separated parts are passed to the Apply link so candidates can pick which city they prefer.",
+   "fieldname": "preferred_location",
+   "fieldtype": "Check",
+   "label": "Location Has Multiple Preferred Options"
   },
   {
    "fieldname": "experience",

@@ -157,7 +157,7 @@
    "allow_read_on_all_link_options": 0,
    "fieldname": "preferred_location_form",
    "fieldtype": "Select",
-   "hidden": 0,
+   "hidden": 1,
    "label": "Please choose your Preferred Job Location",
    "max_length": 0,
    "max_value": 0,

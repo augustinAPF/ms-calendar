@@ -53,7 +53,7 @@ class JobOpening(WebsiteGenerator):
     # Maps unit_lower (must match a real "Recruitment Units" record name,
     # lowercased) → careers.frappe.cloud form slug
     _UNIT_FORM_MAP = {
-        "school education - field": "field-registration-form",
+        "field":                    "field-registration-form",
         "grants":                   "philanthropy-registration-form",
         "scholarship":              "scholarship-recruitment-form",
     }
