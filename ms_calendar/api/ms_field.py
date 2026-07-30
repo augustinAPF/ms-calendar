@@ -556,6 +556,11 @@ def create_interview_event(
     feedback_form_link=None,
     demo_feedback_interviewers_email=None,
     department=None,
+    hybrid_interviewer=0,
+    hybrid_interviewers_email=None,
+    interview_mode_hybrid=None,
+    google_map_hybrid=None,
+    location_address=None,
 ):
 
     import re
@@ -1040,6 +1045,23 @@ def create_interview_event(
     cc_list = list(
         dict.fromkeys([c.strip() for c in (cc_emails or "").split(",") if c.strip()])
     )
+    # Hybrid interviewers join the SAME event/time as everyone else, but get
+    # their own separate email further down (mode-specific per
+    # interview_mode_hybrid) since Graph can't show different attendees
+    # different event body content — only the sent-separately email can.
+    # Driven purely by whether hybrid emails were actually entered — not
+    # gated behind the separate "Hybrid Interviewer" checkbox, since a
+    # recruiter filling in the email/mode fields directly (without also
+    # remembering to tick that checkbox) should still trigger this.
+    hybrid_interviewer_list = list(
+        dict.fromkeys(
+            [
+                h.strip()
+                for h in (hybrid_interviewers_email or "").split(",")
+                if h.strip()
+            ]
+        )
+    )
     # Graph calendar attendees don't render as a visible "Cc:" line in the invite
     # Outlook shows to the recipient, so print it explicitly in the email body too.
     cc_line = f"<b>Cc:</b> {', '.join(cc_list)}<br>" if cc_list else ""
@@ -1064,6 +1086,12 @@ def create_interview_event(
         # to a CC on the interviewer's calendar invite.
         if c.strip().lower() != _org_email_lower:
             attendees.append({"emailAddress": {"address": c}, "type": "optional"})
+    # Hybrid interviewers are deliberately NOT added to this event's
+    # attendees — Graph can't show different content to different attendees
+    # on the same event, so putting them here would show them the main
+    # display_mode (wrong for them if their own mode differs). They instead
+    # get their OWN separate Outlook event further down, with the correct
+    # hybrid mode/Teams link/address.
     # NOTE: the candidate is deliberately NOT added as a calendar attendee.
     # Attendees get Microsoft's own auto-generated invite email, which uses
     # the interviewer-oriented body (feedback form link, meeting passcode,
@@ -2141,7 +2169,14 @@ comments/recommendations for the calibration process and final selection decisio
                 update_modified=False,
             )
         except Exception:
-            pass
+            # Previously silent — a failure here (e.g. a column-length
+            # mismatch) left ms_event_id empty while the user still saw a
+            # success message, making the interview look "unscheduled"
+            # with no way to Modify/Cancel it. Log it so that's visible.
+            frappe.log_error(
+                title="FIELD_INTERVIEW_MS_EVENT_ID_SAVE_ERROR",
+                message=frappe.get_traceback(),
+            )
 
     # ── SMS + WhatsApp notification ───────────────────────────────────────────
     try:
@@ -2179,6 +2214,207 @@ comments/recommendations for the calibration process and final selection decisio
             frappe.get_traceback(), "Interview Schedule SMS/WhatsApp Failed"
         )
 
+    # ── Separate Outlook event for the hybrid interviewer group ─────────────
+    # Hybrid interviewers are NOT attendees on the main event above — Graph
+    # can't show different content to different attendees on the same event,
+    # so they get their OWN event at the same date/time, with the correct
+    # hybrid mode (Teams link if Online, address if Face-to-Face) so their
+    # own calendar invite is accurate instead of showing the main mode.
+    if hybrid_interviewer_list:
+        _hybrid_mode = (interview_mode_hybrid or "").strip() or display_mode
+        _hybrid_is_online = _hybrid_mode.lower() == "online"
+        # If BOTH the main group and the hybrid group are joining Online,
+        # this is one single call, not two — reuse the main event's own
+        # Teams meeting instead of creating a second, unconnected one that
+        # nobody but the hybrid group would be in.
+        _share_main_meeting = _hybrid_is_online and mode_is_online and bool(join_web_url)
+
+        if _hybrid_is_online:
+            _hybrid_location_html = ""
+        else:
+            _hm = (
+                f"<p><b>Google Map Link:</b> "
+                f"<a href='{google_map_hybrid}' target='_blank'>View Location</a></p>"
+                if google_map_hybrid
+                else ""
+            )
+            _ha = (
+                f"<p><b>Venue Address:</b> {location_address}</p>"
+                if location_address
+                else ""
+            )
+            _hybrid_location_html = _hm + _ha
+
+        _hybrid_subject = (
+            f"Interview Scheduled ({_hybrid_mode}) – {Applicants_name} | "
+            f"{round_label} for {Applicants_Role}"
+        )
+        _hybrid_draft_body = f"""
+        <p>Hi,</p>
+        <p>An interview with <b>{Applicants_name}</b> for the role of
+        <b>{Applicants_Role}</b> has been confirmed.</p>
+        <p><b>Date:</b> {interview_date_str}<br>
+        <b>Interview Mode:</b> {_hybrid_mode}<br>
+        <b>Interview Round:</b> {round_label}<br>
+        <b>Interview Time:</b> {interview_time_str} – {end_time_str}</p>
+        {_hybrid_location_html}
+        {feedback_html_block}
+        <p>Regards,<br>People Function</p>
+        """
+        _hybrid_event_id = ""
+        try:
+            _hybrid_create_url = (
+                f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/events"
+            )
+            _hr = _requests_with_retry(
+                "POST",
+                _hybrid_create_url + "?sendUpdates=none",
+                headers=headers,
+                json={
+                    "subject": _hybrid_subject,
+                    "isOnlineMeeting": _hybrid_is_online and not _share_main_meeting,
+                    "onlineMeetingProvider": (
+                        "teamsForBusiness"
+                        if (_hybrid_is_online and not _share_main_meeting)
+                        else None
+                    ),
+                    "showAs": "busy",
+                    "start": {
+                        "dateTime": start_datetime,
+                        "timeZone": "Asia/Kolkata",
+                    },
+                    "end": {"dateTime": end_datetime, "timeZone": "Asia/Kolkata"},
+                    "body": {"contentType": "HTML", "content": _hybrid_draft_body},
+                },
+            )
+            _hr.raise_for_status()
+            _hybrid_event_id = _hr.json()["id"]
+            _hybrid_event_url = (
+                f"https://graph.microsoft.com/v1.0/users/{Organizer_email}"
+                f"/events/{_hybrid_event_id}"
+            )
+
+            _hybrid_join_html = ""
+            if _share_main_meeting:
+                _hybrid_join_html = (
+                    f"<p><b>Join Teams Meeting:</b> "
+                    f"<a href='{join_web_url}' target='_blank'>Join Now</a><br>"
+                    f"<b>Meeting ID:</b> {join_meeting_id}<br>"
+                    f"<b>Passcode:</b> {join_passcode}</p>"
+                )
+            elif _hybrid_is_online:
+                _h_join_web_url = ""
+                _h_last_json = {}
+                for _ in range(10):
+                    _hd = requests.get(_hybrid_event_url, headers=headers).json()
+                    _h_last_json = _hd
+                    if _hd.get("onlineMeeting"):
+                        _h_join_web_url = _hd["onlineMeeting"].get("joinUrl", "")
+                        break
+                    time.sleep(1)
+                if _h_join_web_url:
+                    _h_meeting_id = _h_passcode = ""
+                    _om = requests.get(
+                        f"https://graph.microsoft.com/v1.0/users/{Organizer_email}"
+                        f"/onlineMeetings?$filter=JoinWebUrl eq '{_h_join_web_url}'",
+                        headers=headers,
+                    )
+                    if _om.status_code == 200:
+                        _vals = _om.json().get("value", [])
+                        if _vals:
+                            _h_meeting_id = _vals[0].get("joinMeetingId", "") or ""
+                            _h_passcode = _vals[0].get("passcode", "") or ""
+                    # The onlineMeetings filter above frequently returns empty
+                    # (same Graph quirk the main event works around) — fall
+                    # back to parsing them out of Graph's own auto-generated
+                    # "Meeting ID: ... Passcode: ..." HTML in the event body.
+                    if not _h_meeting_id or not _h_passcode:
+                        try:
+                            _h_html = _h_last_json.get("body", {}).get("content", "")
+                            if not _h_meeting_id:
+                                _m1 = re.search(
+                                    r"Meeting ID:\s*</span><span[^>]*>([\d\s]+)<",
+                                    _h_html,
+                                )
+                                if not _m1:
+                                    _m1 = re.search(
+                                        r"Meeting ID:\s*([\d\s]+)", _h_html
+                                    )
+                                if _m1:
+                                    _h_meeting_id = _m1.group(1).strip()
+                            if not _h_passcode:
+                                _m2 = re.search(
+                                    r"Passcode:\s*</span><span[^>]*>([\w\d]+)<",
+                                    _h_html,
+                                )
+                                if not _m2:
+                                    _m2 = re.search(
+                                        r"Passcode:\s*([\w\d]+)", _h_html
+                                    )
+                                if _m2:
+                                    _h_passcode = _m2.group(1).strip()
+                        except Exception:
+                            pass
+                    _hybrid_join_html = (
+                        f"<p><b>Join Teams Meeting:</b> "
+                        f"<a href='{_h_join_web_url}' target='_blank'>Join Now</a><br>"
+                        f"<b>Meeting ID:</b> {_h_meeting_id}<br>"
+                        f"<b>Passcode:</b> {_h_passcode}</p>"
+                    )
+                else:
+                    _hybrid_join_html = (
+                        "<p>Teams join details will follow.</p>"
+                    )
+
+            _hybrid_final_body = f"""
+            <p>Hi,</p>
+            <p>An interview with <b>{Applicants_name}</b> for the role of
+            <b>{Applicants_Role}</b> has been confirmed.</p>
+            <p><b>Date:</b> {interview_date_str}<br>
+            <b>Interview Mode:</b> {_hybrid_mode}<br>
+            <b>Interview Round:</b> {round_label}<br>
+            <b>Interview Time:</b> {interview_time_str} – {end_time_str}</p>
+            {_hybrid_join_html}
+            {_hybrid_location_html}
+            {feedback_html_block}
+            <p>Regards,<br>People Function</p>
+            """
+            _hybrid_attendees = [
+                {"emailAddress": {"address": h}, "type": "required"}
+                for h in hybrid_interviewer_list
+                if h.strip().lower() != _org_email_lower
+            ]
+            requests.patch(
+                _hybrid_event_url + "?sendUpdates=sendToAllAndSaveCopy",
+                headers=headers,
+                json={
+                    "body": {"contentType": "HTML", "content": _hybrid_final_body},
+                    "attendees": _hybrid_attendees,
+                    "showAs": "busy",
+                },
+                timeout=60,
+            )
+        except Exception:
+            frappe.log_error(
+                title="FIELD_INTERVIEW_HYBRID_EVENT_ERROR",
+                message=frappe.get_traceback(),
+            )
+
+        if doc_name and _hybrid_event_id:
+            try:
+                frappe.db.set_value(
+                    "Field Interview Schedule",
+                    doc_name,
+                    "hybrid_ms_event_id",
+                    _hybrid_event_id,
+                    update_modified=False,
+                )
+            except Exception:
+                frappe.log_error(
+                    title="FIELD_INTERVIEW_HYBRID_EVENT_ID_SAVE_ERROR",
+                    message=frappe.get_traceback(),
+                )
+
     frappe.msgprint("✅ Event created successfully. Outlook invite sent.")
 
     return {
@@ -2188,6 +2424,290 @@ comments/recommendations for the calibration process and final selection decisio
         "passcode": join_passcode,
         "is_online": is_online,
     }
+
+
+@frappe.whitelist()
+def update_interview_event(
+    doc_name,
+    start_datetime,
+    end_datetime,
+    interviewer_emails,
+    interviewee_email,
+    room_emails,
+    is_online,
+    Organizer_email,
+    Applicants_name,
+    Applicants_Role=None,
+    cc_emails=None,
+):
+    """
+    Reschedules an already-scheduled Field Interview: PATCHes the existing
+    Outlook event's time/attendees in place (same ms_event_id), instead of
+    the delete-then-recreate approach create_interview_event uses when
+    passed ms_event_id. A PATCH makes Graph send attendees a single
+    "meeting updated" notification — delete+recreate instead sends a
+    cancellation email followed by a brand new invite, which is confusing
+    and was the actual complaint this function fixes.
+    """
+    import requests
+    from datetime import datetime
+
+    doc = frappe.get_doc("Field Interview Schedule", doc_name)
+    if not doc.ms_event_id:
+        frappe.throw(
+            "No Outlook event exists yet for this record — save it once with "
+            "Interviewer Email, Candidate Email, Date, Start Time and End Time "
+            "filled in to schedule it first."
+        )
+    if doc.is_cancelled:
+        frappe.throw(
+            "This interview was cancelled — it needs to be scheduled fresh, not rescheduled."
+        )
+
+    try:
+        is_online = int(is_online)
+    except Exception:
+        is_online = 0
+
+    Organizer_email = (Organizer_email or "").strip()
+    Applicants_name = (Applicants_name or "").strip()
+    Applicants_Role = (Applicants_Role or "").strip()
+
+    start_dt = datetime.fromisoformat(start_datetime)
+    end_dt = datetime.fromisoformat(end_datetime)
+    interview_date_str = start_dt.strftime("%d %B %Y")
+    interview_time_str = (
+        start_dt.strftime("%I:%M %p") + " – " + end_dt.strftime("%I:%M %p")
+    )
+
+    creds = frappe.get_single("MS Graph Credentials")
+    tok = requests.post(
+        f"https://login.microsoftonline.com/{creds.tenant_id.strip()}/oauth2/v2.0/token",
+        data={
+            "grant_type": "client_credentials",
+            "client_id": creds.client_id.strip(),
+            "client_secret": creds.get_password("client_secret"),
+            "scope": "https://graph.microsoft.com/.default",
+        },
+        timeout=30,
+    )
+    tok.raise_for_status()
+    access_token = tok.json().get("access_token")
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+
+    interviewer_list = [
+        i.strip() for i in (interviewer_emails or "").split(",") if i.strip()
+    ]
+    cc_list = [c.strip() for c in (cc_emails or "").split(",") if c.strip()]
+    room_list = [r.strip() for r in (room_emails or "").split(",") if r.strip()]
+    hybrid_interviewer_list = [
+        row.interviewer_email
+        for row in (doc.hybrid_interviewers_email or [])
+        if row.interviewer_email
+    ]
+    # Hybrid interviewers are on their OWN separate event (doc.hybrid_ms_event_id),
+    # not this one — see the PATCH further below.
+    attendees = (
+        [{"emailAddress": {"address": i}, "type": "required"} for i in interviewer_list]
+        + [{"emailAddress": {"address": c}, "type": "optional"} for c in cc_list]
+        + [{"emailAddress": {"address": r}, "type": "resource"} for r in room_list]
+    )
+
+    event_url = (
+        f"https://graph.microsoft.com/v1.0/users/{Organizer_email}"
+        f"/events/{doc.ms_event_id}"
+    )
+    res = requests.patch(
+        event_url,
+        headers=headers,
+        json={
+            "start": {"dateTime": start_datetime, "timeZone": "Asia/Kolkata"},
+            "end": {"dateTime": end_datetime, "timeZone": "Asia/Kolkata"},
+            "attendees": attendees,
+            "isOnlineMeeting": True if is_online == 1 else False,
+            "showAs": "busy",
+        },
+        timeout=30,
+    )
+    res.raise_for_status()
+
+    # Candidate is invited by email only (never a Graph attendee), so they
+    # don't get Outlook's automatic "meeting updated" notice — email them
+    # directly. Interviewers/CC/rooms ARE Graph attendees on this event, so
+    # the PATCH above already notifies them natively.
+    if interviewee_email:
+        candidate_body = f"""
+        <p>Hi {Applicants_name or "there"},</p>
+        <p>Your interview for the role of <strong>{Applicants_Role}</strong>
+        has been <strong>rescheduled</strong>:</p>
+        <div style="border:1px solid #e3e3e3;border-radius:10px;padding:14px;background:#f9fafb;">
+        <p><strong>New Date:</strong> {interview_date_str}</p>
+        <p><strong>New Time:</strong> {interview_time_str}</p>
+        </div>
+        <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+        """
+        sender_arg = {}
+        if doc.candidate_email_sendar and frappe.db.exists(
+            "Email Account",
+            {"email_id": doc.candidate_email_sendar, "enable_outgoing": 1},
+        ):
+            sender_arg = {"sender": doc.candidate_email_sendar}
+        try:
+            frappe.sendmail(
+                recipients=[interviewee_email],
+                subject=f"Interview Rescheduled – {Applicants_name} ({interview_date_str})",
+                message=candidate_body,
+                delayed=False,
+                **sender_arg,
+            )
+        except Exception:
+            frappe.log_error(
+                title="FIELD_INTERVIEW_RESCHEDULE_MAIL_ERROR",
+                message=frappe.get_traceback(),
+            )
+
+    # Hybrid interviewers have their own separate Outlook event — PATCH its
+    # time in place too (same reasoning as the main event above: a PATCH
+    # sends one "meeting updated" notice instead of a fresh invite).
+    if hybrid_interviewer_list and doc.hybrid_ms_event_id:
+        _hybrid_attendees = [
+            {"emailAddress": {"address": h}, "type": "required"}
+            for h in hybrid_interviewer_list
+        ]
+        try:
+            _hybrid_event_url = (
+                f"https://graph.microsoft.com/v1.0/users/{Organizer_email}"
+                f"/events/{doc.hybrid_ms_event_id}"
+            )
+            _hres = requests.patch(
+                _hybrid_event_url,
+                headers=headers,
+                json={
+                    "start": {"dateTime": start_datetime, "timeZone": "Asia/Kolkata"},
+                    "end": {"dateTime": end_datetime, "timeZone": "Asia/Kolkata"},
+                    "attendees": _hybrid_attendees,
+                    "showAs": "busy",
+                },
+                timeout=30,
+            )
+            _hres.raise_for_status()
+        except Exception:
+            frappe.log_error(
+                title="FIELD_INTERVIEW_HYBRID_RESCHEDULE_ERROR",
+                message=frappe.get_traceback(),
+            )
+
+    frappe.msgprint(
+        "✅ Interview rescheduled — candidate emailed and interviewer(s) "
+        "notified via the updated calendar invite."
+    )
+
+    return {"event_id": doc.ms_event_id, "rescheduled": True}
+
+
+@frappe.whitelist()
+def cancel_interview_event(name):
+    """
+    Cancels an already-scheduled Field Interview Schedule: deletes the
+    Outlook event via Graph with sendUpdates=all (same mechanism already
+    used for the reschedule path above, which also notifies attendees),
+    emails the candidate directly (they are invited by email only, not as
+    a Graph attendee), and clears ms_event_id so the same record can be
+    freely rescheduled later.
+    """
+    import requests
+
+    doc = frappe.get_doc("Field Interview Schedule", name)
+
+    if doc.is_cancelled:
+        frappe.throw("This interview is already cancelled.")
+
+    if doc.ms_event_id and doc.organizer_email:
+        try:
+            creds = frappe.get_single("MS Graph Credentials")
+            tok = requests.post(
+                f"https://login.microsoftonline.com/{creds.tenant_id.strip()}/oauth2/v2.0/token",
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": creds.client_id.strip(),
+                    "client_secret": creds.get_password("client_secret"),
+                    "scope": "https://graph.microsoft.com/.default",
+                },
+                timeout=30,
+            )
+            tok.raise_for_status()
+            access_token = tok.json().get("access_token")
+            requests.delete(
+                f"https://graph.microsoft.com/v1.0/users/{doc.organizer_email}"
+                f"/events/{doc.ms_event_id}?sendUpdates=all",
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=30,
+            )
+            if doc.hybrid_ms_event_id:
+                requests.delete(
+                    f"https://graph.microsoft.com/v1.0/users/{doc.organizer_email}"
+                    f"/events/{doc.hybrid_ms_event_id}?sendUpdates=all",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                    timeout=30,
+                )
+        except Exception:
+            frappe.log_error(
+                title="FIELD_INTERVIEW_CANCEL_ERROR",
+                message=frappe.get_traceback(),
+            )
+
+    interview_date = (
+        frappe.utils.formatdate(doc.interview_date, "dd MMMM yyyy")
+        if doc.interview_date
+        else ""
+    )
+    start_time = frappe.utils.format_time(doc.start_time) if doc.start_time else ""
+    end_time = frappe.utils.format_time(doc.end_time) if doc.end_time else ""
+
+    sender_arg = {}
+    if doc.organizer_email and frappe.db.exists(
+        "Email Account", {"email_id": doc.organizer_email, "enable_outgoing": 1}
+    ):
+        sender_arg = {"sender": doc.organizer_email}
+
+    if doc.attendees:
+        candidate_body = f"""
+        <p>Hi {doc.applicants_name or "there"},</p>
+        <p>This is to inform you that your interview scheduled on
+        <strong>{interview_date}</strong> ({start_time} – {end_time}) has been
+        <strong>cancelled</strong>.</p>
+        <p>We will reach out separately if the interview needs to be rescheduled.</p>
+        <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+        """
+        try:
+            frappe.sendmail(
+                recipients=[doc.attendees],
+                subject=f"Interview Cancelled – Azim Premji Foundation ({interview_date})",
+                message=candidate_body,
+                delayed=False,
+                **sender_arg,
+            )
+        except Exception:
+            frappe.log_error(
+                title="FIELD_INTERVIEW_CANCEL_MAIL_ERROR",
+                message=frappe.get_traceback(),
+            )
+
+    # Interviewers/CC/rooms are Graph attendees on the event, so the DELETE
+    # with sendUpdates=all above already sent them a native cancellation
+    # notice in the same meeting thread — a separate frappe.sendmail here
+    # would be a redundant second email for the same cancellation.
+
+    doc.db_set("is_cancelled", 1, update_modified=False)
+    doc.db_set("ms_event_id", "", update_modified=False)
+    doc.db_set("hybrid_ms_event_id", "", update_modified=False)
+
+    frappe.msgprint("✅ Interview cancelled — candidate and interviewer(s) notified.")
+
+    return {"cancelled": True}
 
 
 # ── Assessment Upload Template Download ──────────────────────────────────────

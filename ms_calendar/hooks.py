@@ -164,6 +164,7 @@ fixtures = [
 doctype_js = {
     "Job Opening": "public/js/job_opening.js",
     "Health Document Collection": "public/js/health_document_collection.js",
+    "Philanthropy Interview Schedule": "public/js/philanthropy_interview_schedule.js",
 }
 doctype_list_js = {
     "Field Registration Form": "public/js/frf_list.js",

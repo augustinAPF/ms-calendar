@@ -321,6 +321,31 @@ function render_import_card(page) {
 			.zayam-preview-actions .btn { flex: 1; padding: 8px 16px; font-size: 12.5px; border-radius: 8px; border: none; font-weight: 600; }
 			.zayam-preview-actions .btn-preview-cancel { background: var(--subtle-fg, rgba(128, 128, 128, 0.12)); color: var(--text-color); }
 			.zayam-preview-actions .btn-preview-confirm { background: var(--zayam-accent-import); color: #fff; }
+			.zayam-import-progress { margin-top: 22px; text-align: left; animation: zayamFadeUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
+			.zayam-progress-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+			.zayam-progress-bar-outer {
+				height: 10px;
+				border-radius: 6px;
+				background: var(--subtle-fg, rgba(128, 128, 128, 0.15));
+				overflow: hidden;
+			}
+			.zayam-progress-bar-inner {
+				height: 100%;
+				background: var(--zayam-accent-import);
+				border-radius: 6px;
+				transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+				width: 0%;
+			}
+			.zayam-progress-stats {
+				display: flex;
+				gap: 18px;
+				margin-top: 12px;
+				font-size: 12.5px;
+				color: var(--text-muted);
+				flex-wrap: wrap;
+			}
+			.zayam-progress-stats b { color: var(--text-color); }
+			.zayam-progress-note { margin-top: 10px; font-size: 12px; color: var(--text-muted); }
 			.zayam-import-results { margin-top: 22px; text-align: left; animation: zayamFadeUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
 			.zayam-pdf-preview { margin-top: 22px; text-align: left; animation: zayamFadeUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
 			.zayam-import-results .stat-row {
@@ -595,12 +620,13 @@ function render_import_card(page) {
 							</div>
 						</div>
 						<p class="description">
-							${__('Upload a Zwayam Excel export (.xlsx/.xls). Rows are matched to existing records by Zwayam Id — matching rows are updated, new Zwayam Ids create new records. Any value set above is force-applied to every imported row, overriding whatever is in the file for that column.')}
+							${__('Upload a Zwayam Excel export (.xlsx/.xls/.csv). Rows are matched to existing records by Zwayam Id — matching rows are updated, new Zwayam Ids create new records. Any value set above is force-applied to every imported row, overriding whatever is in the file for that column.')}
 						</p>
 						<div class="zayam-import-btn-row">
 							<button class="btn btn-import">${__('Choose File & Import')}</button>
 						</div>
 						<div class="zayam-preview" style="display: none;"></div>
+						<div class="zayam-import-progress" style="display: none;"></div>
 						<div class="zayam-import-results" style="display: none;"></div>
 					</div>
 					<div class="zayam-panel-footer">
@@ -695,6 +721,12 @@ function render_import_card(page) {
 		}
 	});
 
+	// A previous import may still be running in the background (large Zwayam
+	// exports can take a long time) — resume showing its progress/results
+	// instead of presenting a blank "Choose File & Import" screen as if
+	// nothing happened.
+	resume_active_job(page, import_doctype);
+
 	function get_overrides() {
 		const doctype = import_doctype.get_value();
 		const overrides = {};
@@ -724,7 +756,7 @@ function render_import_card(page) {
 		const overrides = get_overrides();
 		new frappe.ui.FileUploader({
 			folder: 'Home',
-			restrictions: { allowed_file_types: ['.xlsx', '.xls'] },
+			restrictions: { allowed_file_types: ['.xlsx', '.xls', '.csv'], max_file_size: 50 * 1024 * 1024 },
 			on_success(file_doc) {
 				$(page.body).find('.zayam-import-results').hide();
 				frappe.call({
@@ -819,7 +851,149 @@ function open_map_columns_dialog(all_columns, assignable_fields, on_mapped) {
 	dialog.show();
 }
 
-function show_preview(page, file_url, doctype, overrides, manual_mapping, { columns, rows, total_rows, all_columns, assignable_fields }) {
+const ZAYAM_JOB_STORAGE_KEY = 'zayam_import_active_job';
+
+// Zwayam exports can run to hundreds of thousands of rows, so the actual
+// import runs as a background job (see enqueue_import/get_import_status in
+// the Python module) instead of blocking a single web request. The job_id is
+// kept in localStorage so a page reload can resume showing progress instead
+// of losing track of a run that's still going in the background.
+function save_active_job(job_id, file_url, doctype, overrides, manual_mapping) {
+	try {
+		localStorage.setItem(ZAYAM_JOB_STORAGE_KEY, JSON.stringify({ job_id, file_url, doctype, overrides, manual_mapping }));
+	} catch (e) {
+		// localStorage unavailable (private mode, quota, etc.) — the job still
+		// runs fine, it just won't be resumable after a reload.
+	}
+}
+
+function clear_active_job() {
+	try {
+		localStorage.removeItem(ZAYAM_JOB_STORAGE_KEY);
+	} catch (e) {
+		// ignore
+	}
+}
+
+function load_active_job() {
+	try {
+		const raw = localStorage.getItem(ZAYAM_JOB_STORAGE_KEY);
+		return raw ? JSON.parse(raw) : null;
+	} catch (e) {
+		return null;
+	}
+}
+
+function render_import_progress(page, status) {
+	const $progress = $(page.body).find('.zayam-import-progress');
+	const total = status.total_rows || 0;
+	const processed = status.processed || 0;
+	const pct = total ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+	const counts = status.counts || { created: 0, updated: 0, skipped: 0, failed: 0 };
+
+	$progress
+		.html(`
+			<div class="zayam-progress-title">${__('Importing')} — ${processed} ${__('of')} ${total} ${__('rows')} (${pct}%)</div>
+			<div class="zayam-progress-bar-outer"><div class="zayam-progress-bar-inner" style="width: ${pct}%;"></div></div>
+			<div class="zayam-progress-stats">
+				<span>${__('Created')}: <b>${counts.created}</b></span>
+				<span>${__('Updated')}: <b>${counts.updated}</b></span>
+				<span>${__('Skipped')}: <b>${counts.skipped}</b></span>
+				<span>${__('Failed')}: <b>${counts.failed}</b></span>
+			</div>
+			<div class="zayam-progress-note">${__('This keeps running in the background — feel free to navigate away, or even close this tab; reopen this page to check progress.')}</div>
+		`)
+		.show();
+}
+
+function poll_import_status(page, job_id, on_terminal) {
+	const timer = setInterval(() => {
+		frappe.call({
+			method: 'ms_calendar.api.zayam_data_import.get_import_status',
+			args: { job_id },
+			callback(r) {
+				if (!r.message) return;
+				const status = r.message;
+				if (status.state === 'running') {
+					render_import_progress(page, status);
+					return;
+				}
+				clearInterval(timer);
+				on_terminal(status);
+			},
+			error() {
+				clearInterval(timer);
+			}
+		});
+	}, 2000);
+	return timer;
+}
+
+function handle_terminal_status(page, file_url, doctype, overrides, manual_mapping, status) {
+	$(page.body).find('.zayam-import-progress').empty().hide();
+	if (status.state === 'failed') {
+		clear_active_job();
+		frappe.msgprint({
+			title: __('Import Failed'),
+			message: frappe.utils.escape_html(status.error || __('Unknown error')),
+			indicator: 'red'
+		});
+		return;
+	}
+	show_import_results(page, file_url, doctype, overrides, manual_mapping, status);
+}
+
+function start_import_job(page, file_url, doctype, overrides, manual_mapping) {
+	frappe.call({
+		method: 'ms_calendar.api.zayam_data_import.enqueue_import',
+		args: { file_url, doctype, overrides, manual_mapping },
+		freeze: true,
+		freeze_message: __('Starting import...'),
+		callback(r) {
+			if (!r.message) return;
+			const { job_id, total_rows } = r.message;
+			save_active_job(job_id, file_url, doctype, overrides, manual_mapping);
+			$(page.body).find('.zayam-preview').empty().hide();
+			$(page.body).find('.zayam-import-results').empty().hide();
+			render_import_progress(page, { processed: 0, total_rows, counts: {}, state: 'running' });
+			poll_import_status(page, job_id, (status) => handle_terminal_status(page, file_url, doctype, overrides, manual_mapping, status));
+		}
+	});
+}
+
+function resume_active_job(page, import_doctype) {
+	const active_job = load_active_job();
+	if (!active_job || !active_job.job_id) return;
+
+	frappe.call({
+		method: 'ms_calendar.api.zayam_data_import.get_import_status',
+		args: { job_id: active_job.job_id },
+		callback(r) {
+			if (!r.message) {
+				clear_active_job();
+				return;
+			}
+			const status = r.message;
+			import_doctype.set_value(active_job.doctype);
+			$(page.body).find('.panel-pdf').show();
+			activate_step(page, 2);
+
+			if (status.state === 'running') {
+				render_import_progress(page, status);
+				poll_import_status(page, active_job.job_id, (final_status) =>
+					handle_terminal_status(page, active_job.file_url, active_job.doctype, active_job.overrides, active_job.manual_mapping, final_status)
+				);
+			} else {
+				handle_terminal_status(page, active_job.file_url, active_job.doctype, active_job.overrides, active_job.manual_mapping, status);
+			}
+		},
+		error() {
+			clear_active_job();
+		}
+	});
+}
+
+function show_preview(page, file_url, doctype, overrides, manual_mapping, { columns, rows, total_rows, all_columns, assignable_fields, match_field, match_field_mapped }) {
 	const $preview = $(page.body).find('.zayam-preview');
 	const shown = rows.length;
 	const override_entries = Object.entries(overrides || {});
@@ -848,6 +1022,9 @@ function show_preview(page, file_url, doctype, overrides, manual_mapping, { colu
 	$preview
 		.html(`
 			<div class="zayam-preview-title">${__('Preview')} — ${__('showing')} ${shown} ${__('of')} ${total_rows} ${__('rows')}</div>
+			${!match_field_mapped
+				? `<div class="zayam-preview-unmatched">${__('No column is mapped to')} <b>${frappe.utils.escape_html(match_field)}</b> ${__('yet — use "Map Columns" below to assign it before importing.')}</div>`
+				: ''}
 			${override_entries.length
 				? `<div class="zayam-preview-unmatched">${__('Every row below will be set to')}: ${override_entries
 					.map(([fieldname, value]) => `<b>${frappe.utils.escape_html(fieldname)} = ${frappe.utils.escape_html(value)}</b>`)
@@ -862,7 +1039,7 @@ function show_preview(page, file_url, doctype, overrides, manual_mapping, { colu
 			<div class="zayam-preview-actions">
 				<button class="btn btn-map-columns">${__('Map Columns')}</button>
 				<button class="btn btn-preview-cancel">${__('Cancel')}</button>
-				<button class="btn btn-preview-confirm">${__('Confirm Import')} (${total_rows})</button>
+				<button class="btn btn-preview-confirm" ${match_field_mapped ? '' : 'disabled title="' + __('Map the Zayam Id column first') + '"'}>${__('Confirm Import')} (${total_rows})</button>
 			</div>
 		`)
 		.show();
@@ -888,17 +1065,8 @@ function show_preview(page, file_url, doctype, overrides, manual_mapping, { colu
 	});
 
 	$preview.find('.btn-preview-confirm').on('click', () => {
-		frappe.call({
-			method: 'ms_calendar.api.zayam_data_import.import_from_excel',
-			args: { file_url, doctype, overrides, manual_mapping },
-			freeze: true,
-			freeze_message: __('Importing Zwayam data...'),
-			callback(r) {
-				if (!r.message) return;
-				$preview.empty().hide();
-				show_import_results(page, file_url, doctype, overrides, manual_mapping, r.message);
-			}
-		});
+		if (!match_field_mapped) return;
+		start_import_job(page, file_url, doctype, overrides, manual_mapping);
 	});
 }
 
@@ -940,17 +1108,24 @@ function data_table_group_html(cls, icon, label, entries, columns) {
 	`;
 }
 
-function show_import_results(page, file_url, doctype, overrides, manual_mapping, { created, updated, skipped, failed, unmatched_columns, columns, all_columns, new_master_entries, assignable_fields }) {
+function show_import_results(page, file_url, doctype, overrides, manual_mapping, { counts: raw_counts, details, truncated, unmatched_columns, columns, all_columns, new_master_entries, assignable_fields, processed, total_rows }) {
+	clear_active_job();
+
 	unmatched_columns = unmatched_columns || [];
 	columns = columns || [];
+	all_columns = all_columns || [];
+	assignable_fields = assignable_fields || [];
 	new_master_entries = new_master_entries || {};
+	details = details || { created: [], updated: [], skipped: [], failed: [] };
+	truncated = truncated || {};
+	raw_counts = raw_counts || { created: 0, updated: 0, skipped: 0, failed: 0 };
 	const new_master_count = Object.values(new_master_entries).reduce((sum, values) => sum + values.length, 0);
 
 	const counts = [
-		{ cls: 'is-created', label: __('Created'), value: created.length },
-		{ cls: 'is-updated', label: __('Updated'), value: updated.length },
-		{ cls: '', label: __('Skipped (no Zwayam Id)'), value: skipped.length },
-		{ cls: 'is-failed', label: __('Failed'), value: failed.length }
+		{ cls: 'is-created', label: __('Created'), value: raw_counts.created },
+		{ cls: 'is-updated', label: __('Updated'), value: raw_counts.updated },
+		{ cls: '', label: __('Skipped (no Zwayam Id)'), value: raw_counts.skipped },
+		{ cls: 'is-failed', label: __('Failed'), value: raw_counts.failed }
 	];
 	if (unmatched_columns.length) {
 		counts.push({ cls: 'is-unmatched', label: __('Unmatched Columns'), value: unmatched_columns.length });
@@ -963,12 +1138,18 @@ function show_import_results(page, file_url, doctype, overrides, manual_mapping,
 		.map(([dt, values]) => simple_list_group_html('is-unmatched', '➕', `${dt} — ${__('new values')}`, values))
 		.join('');
 
+	function truncation_note(key, label) {
+		if (!truncated[key]) return '';
+		return `<div class="zayam-preview-unmatched">${__('Showing the first {0} {1} rows of {2} total — every row was still processed.', [details[key].length, label, raw_counts[key]])}</div>`;
+	}
+
 	$(page.body).find('.panel-pdf').show();
 	activate_step(page, 2);
 
 	const $results = $(page.body).find('.zayam-import-results');
 	$results
 		.html(
+			`<div class="zayam-preview-title">${__('Import complete')} — ${processed || 0} ${__('of')} ${total_rows || 0} ${__('rows processed')}</div>` +
 			counts
 				.map(
 					(row) => `
@@ -979,9 +1160,12 @@ function show_import_results(page, file_url, doctype, overrides, manual_mapping,
 					`
 				)
 				.join('') +
-			data_table_group_html('is-created', '✓', __('Created'), created, columns) +
-			data_table_group_html('is-updated', '↻', __('Updated'), updated, columns) +
-			data_table_group_html('is-failed', '⚠', __('Failed'), failed, columns) +
+			truncation_note('created', __('created')) +
+			data_table_group_html('is-created', '✓', __('Created'), details.created, columns) +
+			truncation_note('updated', __('updated')) +
+			data_table_group_html('is-updated', '↻', __('Updated'), details.updated, columns) +
+			truncation_note('failed', __('failed')) +
+			data_table_group_html('is-failed', '⚠', __('Failed'), details.failed, columns) +
 			new_master_html +
 			`<div class="zayam-results-actions"><button class="btn btn-map-columns-results">${__('Map Columns')}</button></div>`
 		)
@@ -990,16 +1174,7 @@ function show_import_results(page, file_url, doctype, overrides, manual_mapping,
 	$results.find('.btn-map-columns-results').on('click', () => {
 		open_map_columns_dialog(all_columns, assignable_fields, (new_mapping) => {
 			const merged = Object.assign({}, manual_mapping, new_mapping);
-			frappe.call({
-				method: 'ms_calendar.api.zayam_data_import.import_from_excel',
-				args: { file_url, doctype, overrides, manual_mapping: merged },
-				freeze: true,
-				freeze_message: __('Re-importing with the updated mapping...'),
-				callback(r) {
-					if (!r.message) return;
-					show_import_results(page, file_url, doctype, overrides, merged, r.message);
-				}
-			});
+			start_import_job(page, file_url, doctype, overrides, merged);
 		});
 	});
 }

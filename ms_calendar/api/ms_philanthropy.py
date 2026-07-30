@@ -375,6 +375,16 @@ def _logo_html():
     return f'<img src="data:image/png;base64,{logo_base64}" style="height:48px;">'
 
 
+def _theme_geo_subline(theme, geo):
+    """' - (Role | Theme: X / Geo: Y)'-style segment appended to subject lines."""
+    parts = []
+    if theme:
+        parts.append(f"Theme: {theme}")
+    if geo:
+        parts.append(f"Geo: {geo}")
+    return f" | {' / '.join(parts)}" if parts else ""
+
+
 @frappe.whitelist()
 def create_interview_event(
     start_datetime,
@@ -419,11 +429,20 @@ def create_interview_event(
     headers = _graph_headers()
     meeting_room = _resolve_meeting_room(room_emails, headers)
 
+    _theme = _geo = None
+    if application_id:
+        _tg = frappe.db.get_value(
+            "Phil Registration Form", application_id, ["themes", "geo"], as_dict=True
+        )
+        if _tg:
+            _theme, _geo = _tg.get("themes"), _tg.get("geo")
+    _subline = _theme_geo_subline(_theme, _geo)
+
     # -------- CREATE EVENT --------
     create_url = f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/events"
 
     draft_payload = {
-        "subject": f"Discussion with {Applicants_name} - ({Applicants_Role})",
+        "subject": f"Discussion with {Applicants_name} - ({Applicants_Role}){_subline}",
         "isOnlineMeeting": True if is_online == 1 else False,
         "onlineMeetingProvider": "teamsForBusiness" if is_online == 1 else None,
         "showAs": "busy",
@@ -653,7 +672,7 @@ def create_interview_event(
     frappe.sendmail(
         recipients=[interviewee_email],
         sender=Organizer_email,
-        subject=f"Discussion – Azim Premji Foundation ({interview_date})",
+        subject=f"Discussion – Azim Premji Foundation ({interview_date}){_subline}",
         message=candidate_body,
         delayed=False,
     )
@@ -822,10 +841,12 @@ def update_interview_event(
     {logo_html}
     """
 
+    _subline = _theme_geo_subline(doc.theme, doc.geo)
+
     frappe.sendmail(
         recipients=[interviewee_email],
         sender=Organizer_email,
-        subject=f"Interview Rescheduled – Azim Premji Foundation ({interview_date})",
+        subject=f"Interview Rescheduled – Azim Premji Foundation ({interview_date}){_subline}",
         message=candidate_body,
         delayed=False,
     )
@@ -834,7 +855,7 @@ def update_interview_event(
             recipients=interviewer_list,
             cc=cc_list or None,
             sender=Organizer_email,
-            subject=f"Interview Rescheduled – {Applicants_name} ({interview_date})",
+            subject=f"Interview Rescheduled – {Applicants_name} ({interview_date}){_subline}",
             message=interviewer_body,
             delayed=False,
         )
@@ -880,13 +901,6 @@ def cancel_interview_event(name):
     end_time = format_time(doc.end_time) if doc.end_time else ""
     logo_html = _logo_html()
 
-    interviewer_emails = [
-        d.interviewer_email for d in (doc.interviewer_email or []) if d.interviewer_email
-    ]
-    cc_emails = [
-        d.interviewer_email for d in (doc.interviewers_cc_email or []) if d.interviewer_email
-    ]
-
     if doc.attendees:
         candidate_body = f"""
         <p>Hi {doc.applicants_name or "there"},</p>
@@ -900,32 +914,15 @@ def cancel_interview_event(name):
         frappe.sendmail(
             recipients=[doc.attendees],
             sender=doc.organizer_email,
-            subject=f"Interview Cancelled – Azim Premji Foundation ({interview_date})",
+            subject=f"Interview Cancelled – Azim Premji Foundation ({interview_date}){_theme_geo_subline(doc.theme, doc.geo)}",
             message=candidate_body,
             delayed=False,
         )
 
-    if interviewer_emails:
-        interviewer_body = f"""
-        <p>Hi {doc.interviewer_name or "team"},</p>
-        <p>The interview below has been <strong>cancelled</strong>:</p>
-        <div style="border:1px solid #e3e3e3;border-radius:10px;padding:14px;background:#f9fafb;">
-        <p><strong>Applicant name:</strong> {doc.applicants_name}</p>
-        <p><strong>Role:</strong> {doc.role or ""}</p>
-        <p><strong>Date:</strong> {interview_date}</p>
-        <p><strong>Time:</strong> {start_time} – {end_time}</p>
-        </div>
-        <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
-        {logo_html}
-        """
-        frappe.sendmail(
-            recipients=interviewer_emails,
-            cc=cc_emails or None,
-            sender=doc.organizer_email,
-            subject=f"Interview Cancelled – {doc.applicants_name} ({interview_date})",
-            message=interviewer_body,
-            delayed=False,
-        )
+    # Interviewers/CC are Graph attendees on this event, and Graph's
+    # /events/{id}/cancel action already sends them a native cancellation
+    # notice in the same meeting thread — a separate frappe.sendmail here
+    # would be a redundant second email for the same cancellation.
 
     doc.db_set("is_cancelled", 1, update_modified=False)
     doc.db_set("event_id", "", update_modified=False)

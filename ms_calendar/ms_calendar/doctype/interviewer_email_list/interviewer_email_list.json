@@ -1,5 +1,6 @@
 {
  "actions": [],
+ "allow_import": 1,
  "allow_rename": 1,
  "autoname": "prompt",
  "creation": "2025-09-19 12:45:33.865257",
@@ -25,7 +26,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-11-19 20:33:25.235245",
+ "modified": "2026-07-30 11:22:48.552930",
  "modified_by": "Administrator",
  "module": "Ms Calendar",
  "name": "Interviewer Email List",
