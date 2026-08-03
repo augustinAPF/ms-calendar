@@ -1,4 +1,5 @@
 import frappe
+from frappe.utils import escape_html
 from frappe.utils.file_manager import save_file
 from frappe.utils.pdf import get_pdf
 
@@ -8,6 +9,12 @@ def generate_feedback_pdf(applicant_id):
 
     if not applicant_id:
         return {"status": "error", "message": "Applicant ID required"}
+
+    if not frappe.has_permission("Phil Registration Form", "write"):
+        frappe.throw(
+            "You don't have permission to generate feedback PDFs.",
+            frappe.PermissionError,
+        )
 
     try:
         # ---------------------------
@@ -98,7 +105,7 @@ def generate_feedback_pdf(applicant_id):
             content=pdf,
             dt="Phil Registration Form",
             dn=reg_name,
-            is_private=0
+            is_private=1
         )
 
         # 👉 THIS IS YOUR FILE PATH

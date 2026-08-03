@@ -80,8 +80,12 @@ _SKIP_FIELDTYPES = {
 # running whether or not anyone is watching.
 _STATUS_CACHE_PREFIX = "zayam_import_status"
 _STATUS_TTL = 60 * 60 * 24  # a finished job's result stays pollable for a day
-_MAX_DETAIL_ENTRIES = 500  # cap on how many created/updated/skipped/failed rows are echoed back per job
-_PROGRESS_EVERY = 100  # how often (in rows) the cached status is refreshed while running
+_MAX_DETAIL_ENTRIES = (
+    500  # cap on how many created/updated/skipped/failed rows are echoed back per job
+)
+_PROGRESS_EVERY = (
+    100  # how often (in rows) the cached status is refreshed while running
+)
 
 
 def _status_cache_key(job_id):
@@ -93,7 +97,9 @@ def _get_status(job_id):
 
 
 def _save_status(job_id, status):
-    frappe.cache().set_value(_status_cache_key(job_id), status, expires_in_sec=_STATUS_TTL)
+    frappe.cache().set_value(
+        _status_cache_key(job_id), status, expires_in_sec=_STATUS_TTL
+    )
 
 
 def _new_status(job_id, doctype, total_rows, columns, user):
@@ -106,7 +112,12 @@ def _new_status(job_id, doctype, total_rows, columns, user):
         "total_rows": total_rows,
         "counts": {"created": 0, "updated": 0, "skipped": 0, "failed": 0},
         "details": {"created": [], "updated": [], "skipped": [], "failed": []},
-        "truncated": {"created": False, "updated": False, "skipped": False, "failed": False},
+        "truncated": {
+            "created": False,
+            "updated": False,
+            "skipped": False,
+            "failed": False,
+        },
         "unmatched_columns": [],
         "new_master_entries": {},
         "columns": columns,
@@ -170,13 +181,19 @@ def _build_config(doctype):
         if df.fieldtype == "Link" and df.options and df.options != "DocType":
             link_fields[df.fieldname] = df.options
 
-        if display_field is None and df.fieldtype == "Data" and "name" in df.fieldname.lower():
+        if (
+            display_field is None
+            and df.fieldtype == "Data"
+            and "name" in df.fieldname.lower()
+        ):
             display_field = df.fieldname
 
         if resume_field is None and df.fieldtype == "Attach":
             resume_field = df.fieldname
 
-        assignable_fields.append({"fieldname": df.fieldname, "label": df.label or df.fieldname})
+        assignable_fields.append(
+            {"fieldname": df.fieldname, "label": df.label or df.fieldname}
+        )
 
     # "Zwayam Id" is a real misspelling that shows up in some exports —
     # recognise it as the same column as the actual Zayam Id field.
@@ -253,7 +270,9 @@ def _map_headers(sheet, header_aliases, manual_mapping=None):
         raw_headers.append(cell.value)
         # An explicit manual mapping (the user re-assigning a column, whether
         # it auto-matched or not) always wins over the automatic header guess.
-        fieldname = manual_mapping.get(str(idx)) or header_aliases.get(_normalize_header(cell.value))
+        fieldname = manual_mapping.get(str(idx)) or header_aliases.get(
+            _normalize_header(cell.value)
+        )
         if fieldname:
             col_field_map[idx] = fieldname
         elif cell.value not in (None, ""):
@@ -405,7 +424,13 @@ def _clean_overrides(overrides):
 
 
 @frappe.whitelist()
-def preview_excel(file_url, doctype="Phil Registration Form", limit=200, overrides=None, manual_mapping=None):
+def preview_excel(
+    file_url,
+    doctype="Phil Registration Form",
+    limit=200,
+    overrides=None,
+    manual_mapping=None,
+):
     """
     Parses the uploaded file the same way enqueue_import/_run_import_job would, but
     only reads (never writes) — used to render a preview table before
@@ -414,6 +439,7 @@ def preview_excel(file_url, doctype="Phil Registration Form", limit=200, overrid
     `manual_mapping` (e.g. {"3": "location"}) assigns a field to a column
     that didn't auto-match by header text, keyed by column index.
     """
+    frappe.only_for("System Manager")
     limit = int(limit)
     overrides = _clean_overrides(overrides)
     config = _build_config(doctype)
@@ -424,17 +450,22 @@ def preview_excel(file_url, doctype="Phil Registration Form", limit=200, overrid
     file_doc = frappe.get_doc("File", {"file_url": file_url})
     sheet = _load_sheet(file_doc)
 
-    col_field_map, raw_headers, unmatched_columns, manual_mapping = _map_headers(sheet, header_aliases, manual_mapping)
+    col_field_map, raw_headers, unmatched_columns, manual_mapping = _map_headers(
+        sheet, header_aliases, manual_mapping
+    )
 
     # Unlike the real import, don't hard-fail here even if match_field
     # didn't auto-match by header text (e.g. a "Application/Register
     # Number" column instead of "Zayam Id") — still render the preview so
     # the user can use "Map Columns" to assign the right column to it.
-
     # Preserve the original left-to-right column order for the preview table.
     sorted_cols = sorted(col_field_map.items())
     ordered_columns = [
-        {"header": raw_headers[idx], "fieldname": fieldname, "manual": str(idx) in manual_mapping}
+        {
+            "header": raw_headers[idx],
+            "fieldname": fieldname,
+            "manual": str(idx) in manual_mapping,
+        }
         for idx, fieldname in sorted_cols
     ]
 
@@ -446,7 +477,9 @@ def preview_excel(file_url, doctype="Phil Registration Form", limit=200, overrid
 
         row_values = {}
         for idx, fieldname in sorted_cols:
-            value = _cell_value(row[idx], fieldname, int_fields) if idx < len(row) else None
+            value = (
+                _cell_value(row[idx], fieldname, int_fields) if idx < len(row) else None
+            )
             # If two columns map to the same field (e.g. a manually mapped
             # column collides with an auto-matched one), don't let a blank
             # later column silently wipe out a value an earlier one set.
@@ -464,7 +497,10 @@ def preview_excel(file_url, doctype="Phil Registration Form", limit=200, overrid
         "total_rows": total_rows,
         "unmatched_columns": unmatched_columns,
         "all_columns": _build_all_columns(
-            raw_headers, col_field_map, manual_mapping, _sample_column_values(sheet, len(raw_headers))
+            raw_headers,
+            col_field_map,
+            manual_mapping,
+            _sample_column_values(sheet, len(raw_headers)),
         ),
         "assignable_fields": config["assignable_fields"],
         "match_field": match_field,
@@ -473,7 +509,9 @@ def preview_excel(file_url, doctype="Phil Registration Form", limit=200, overrid
 
 
 @frappe.whitelist()
-def enqueue_import(file_url, doctype="Phil Registration Form", overrides=None, manual_mapping=None):
+def enqueue_import(
+    file_url, doctype="Phil Registration Form", overrides=None, manual_mapping=None
+):
     """
     Validates the file and column mapping synchronously (fast, read-only —
     same checks as preview_excel), then hands the actual row-by-row import
@@ -483,6 +521,7 @@ def enqueue_import(file_url, doctype="Phil Registration Form", overrides=None, m
     off partway through with no error and no way to tell how far it got.
     Returns a job_id the page polls (get_import_status) for progress.
     """
+    frappe.only_for("System Manager")
     overrides = _clean_overrides(overrides)
     config = _build_config(doctype)
     match_field = config["match_field"]
@@ -490,7 +529,9 @@ def enqueue_import(file_url, doctype="Phil Registration Form", overrides=None, m
     file_doc = frappe.get_doc("File", {"file_url": file_url})
     sheet = _load_sheet(file_doc)
 
-    col_field_map, raw_headers, unmatched_columns, manual_mapping = _map_headers(sheet, config["header_aliases"], manual_mapping)
+    col_field_map, raw_headers, unmatched_columns, manual_mapping = _map_headers(
+        sheet, config["header_aliases"], manual_mapping
+    )
 
     if match_field not in col_field_map.values():
         frappe.throw(
@@ -501,14 +542,20 @@ def enqueue_import(file_url, doctype="Phil Registration Form", overrides=None, m
     # Preserve the original left-to-right column order, same as preview_excel,
     # so the results table lines up with what the user saw before confirming.
     ordered_columns = [
-        {"header": raw_headers[idx], "fieldname": fieldname, "manual": str(idx) in manual_mapping}
+        {
+            "header": raw_headers[idx],
+            "fieldname": fieldname,
+            "manual": str(idx) in manual_mapping,
+        }
         for idx, fieldname in sorted(col_field_map.items())
     ]
     total_rows = max(sheet.max_row - 1, 0)
 
     job_id = frappe.generate_hash(length=12)
     user = frappe.session.user
-    _save_status(job_id, _new_status(job_id, doctype, total_rows, ordered_columns, user))
+    _save_status(
+        job_id, _new_status(job_id, doctype, total_rows, ordered_columns, user)
+    )
 
     frappe.enqueue(
         "ms_calendar.api.zayam_data_import._run_import_job",
@@ -556,7 +603,10 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
         )
         status["unmatched_columns"] = unmatched_columns
         status["all_columns"] = _build_all_columns(
-            raw_headers, col_field_map, manual_mapping, _sample_column_values(sheet, len(raw_headers))
+            raw_headers,
+            col_field_map,
+            manual_mapping,
+            _sample_column_values(sheet, len(raw_headers)),
         )
         status["assignable_fields"] = config["assignable_fields"]
         _save_status(job_id, status)
@@ -575,10 +625,23 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
             status["processed"] = i
 
             if not match_value:
-                _record_result(status, "skipped", {"zayam_id": None, "name": None, "row": row[0].row, "reason": "no_zayam_id"})
+                _record_result(
+                    status,
+                    "skipped",
+                    {
+                        "zayam_id": None,
+                        "name": None,
+                        "row": row[0].row,
+                        "reason": "no_zayam_id",
+                    },
+                )
             else:
                 row_values.update(overrides)
-                entry = {"zayam_id": match_value, "name": row_values.get(display_field), "data": row_values}
+                entry = {
+                    "zayam_id": match_value,
+                    "name": row_values.get(display_field),
+                    "data": row_values,
+                }
                 savepoint = f"zayam_import_row_{i}"
 
                 try:
@@ -590,7 +653,9 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
                     for fieldname, target_doctype in link_fields.items():
                         value = row_values.get(fieldname)
                         if value and _ensure_link_value_exists(target_doctype, value):
-                            new_master_entries.setdefault(target_doctype, set()).add(value)
+                            new_master_entries.setdefault(target_doctype, set()).add(
+                                value
+                            )
 
                     existing = frappe.db.get_value(doctype, {match_field: match_value})
                     if existing:
@@ -606,7 +671,9 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
                     # Roll back only this row (not the whole batch) so earlier
                     # successful, not-yet-committed rows in this run survive.
                     frappe.db.rollback(save_point=savepoint)
-                    frappe.log_error(title="Zayam Data Import Error", message=f"{match_value}: {e}")
+                    frappe.log_error(
+                        title="Zayam Data Import Error", message=f"{match_value}: {e}"
+                    )
                     entry["error"] = frappe.utils.strip_html(str(e))
                     _record_result(status, "failed", entry)
 
@@ -615,18 +682,24 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
             if i % 25 == 0:
                 frappe.db.commit()
             if i % _PROGRESS_EVERY == 0:
-                status["new_master_entries"] = {dt: sorted(v) for dt, v in new_master_entries.items()}
+                status["new_master_entries"] = {
+                    dt: sorted(v) for dt, v in new_master_entries.items()
+                }
                 _save_status(job_id, status)
 
         frappe.db.commit()
         status["state"] = "done"
-        status["new_master_entries"] = {dt: sorted(v) for dt, v in new_master_entries.items()}
+        status["new_master_entries"] = {
+            dt: sorted(v) for dt, v in new_master_entries.items()
+        }
         _save_status(job_id, status)
     except Exception as e:
         frappe.db.rollback()
         status["state"] = "failed"
         status["error"] = frappe.utils.strip_html(str(e))
-        frappe.log_error(title="Zayam Data Import Job Failed", message=frappe.get_traceback())
+        frappe.log_error(
+            title="Zayam Data Import Job Failed", message=frappe.get_traceback()
+        )
         _save_status(job_id, status)
 
 
@@ -638,7 +711,9 @@ def get_import_status(job_id):
     watching."""
     status = _get_status(job_id)
     if not status:
-        frappe.throw("This import job was not found — it may have expired or the job_id is wrong.")
+        frappe.throw(
+            "This import job was not found — it may have expired or the job_id is wrong."
+        )
     return status
 
 
@@ -655,15 +730,22 @@ def preview_pdf_match(file_url, file_name=None, doctype="Phil Registration Form"
     Resumes" preview step). Reads the same match_field/display_field a
     real attach would use, but never writes anything.
     """
+    frappe.only_for("System Manager")
     config = _build_config(doctype)
     match_field = config["match_field"]
     display_field = config["display_field"]
 
-    original_name = file_name or frappe.db.get_value("File", {"file_url": file_url}, "file_name") or ""
+    original_name = (
+        file_name
+        or frappe.db.get_value("File", {"file_url": file_url}, "file_name")
+        or ""
+    )
     match_value = _zayam_id_from_filename(original_name)
 
     docname = frappe.db.get_value(doctype, {match_field: match_value})
-    display_name = frappe.db.get_value(doctype, docname, display_field) if docname else None
+    display_name = (
+        frappe.db.get_value(doctype, docname, display_field) if docname else None
+    )
 
     return {
         "zayam_id": match_value,
@@ -680,13 +762,18 @@ def lookup_zayam_record(doctype, zayam_id):
     user manually corrects a PDF's filename-derived Zayam Id that didn't
     auto-match (the "re-match" action in the Bulk Attach Resumes preview).
     """
+    frappe.only_for("System Manager")
     config = _build_config(doctype)
     match_field = config["match_field"]
     display_field = config["display_field"]
 
     zayam_id = (zayam_id or "").strip()
-    docname = frappe.db.get_value(doctype, {match_field: zayam_id}) if zayam_id else None
-    display_name = frappe.db.get_value(doctype, docname, display_field) if docname else None
+    docname = (
+        frappe.db.get_value(doctype, {match_field: zayam_id}) if zayam_id else None
+    )
+    display_name = (
+        frappe.db.get_value(doctype, docname, display_field) if docname else None
+    )
 
     return {
         "zayam_id": zayam_id,
@@ -704,6 +791,7 @@ def attach_application_pdf(file_url, file_name=None, doctype="Phil Registration 
     (e.g. "6213236-ClariceTPaul-Copy.pdf" -> "6213236") and the file is
     attached to that record's first Attach-type field.
     """
+    frappe.only_for("System Manager")
     config = _build_config(doctype)
     match_field = config["match_field"]
     display_field = config["display_field"]
@@ -753,7 +841,9 @@ def attach_application_pdf(file_url, file_name=None, doctype="Phil Registration 
 
 
 @frappe.whitelist()
-def get_zayam_enabled_doctypes(doctype, txt, searchfield, start, page_len, filters, **kwargs):
+def get_zayam_enabled_doctypes(
+    doctype, txt, searchfield, start, page_len, filters, **kwargs
+):
     """Query method for the doctype Link field: only list doctypes that already have a Zayam Id field."""
     names = frappe.get_all(
         "DocField", filters={"fieldname": _MATCH_FIELD}, pluck="parent"

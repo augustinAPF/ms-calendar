@@ -44,7 +44,7 @@ _EDUCATION_FEEDBACK_URLS = {
     (
         "school teacher",
         "leader round-1",
-    ): "https://careers.frappe.cloud/leader-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    ): "https://careers.frappe.cloud/leader-final-feedback/new?app_id={app_id}&applicant_name={applicant_name}",
     (
         "school teacher",
         "leader round-2",
@@ -735,29 +735,28 @@ def create_interview_event(
 
     from urllib.parse import quote as _fq
 
-    # Determine bucket — Health/Livelihood BEFORE Education so that roles like
-    # "Resource Person-Health" or "Resource Person-Livelihoods" are not
-    # incorrectly caught by the Education "resource person" keyword fallback.
-    _is_arp = (
-        "associate resource person" in _dept_raw
-        or "associate resource person" in _role_raw2
-        or _role_raw2.startswith(
-            "assoc"
-        )  # catches "associate", "assocate" (typo), etc.
+    # Bucket is determined purely by the Department field — role text is no
+    # longer consulted here (it used to be a fallback, but that misclassified
+    # roles whose title happened to contain another bucket's keyword).
+    _is_arp = "associate resource person" in _dept_raw
+    _is_health = (not _is_arp) and ("health" in _dept_raw)
+    _is_livelihood = (not _is_arp) and any(
+        k in _dept_raw for k in ("livelihood", "livelihoods")
     )
-    _is_health = (not _is_arp) and ("health" in _dept_raw or "health" in _role_raw2)
-    _is_livelihood = (not _is_arp) and (
-        any(k in _dept_raw for k in ("livelihood", "livelihoods"))
-        or any(
-            k in _role_raw2
-            for k in ("livelihood", "livelihoods", "cluster", "market research")
-        )
+    _is_education = (
+        (not _is_arp and not _is_health and not _is_livelihood)
+        and "education" in _dept_raw
     )
-    # Education: role-based fallback only applies when not already Health/Livelihood
-    _is_education = (not _is_arp and not _is_health and not _is_livelihood) and (
-        "education" in _dept_raw
-        or any(k in _role_raw2 for k in ("school teacher", "resource person"))
-    )
+    # Within Education, _EDUCATION_FEEDBACK_URLS is further keyed by which
+    # role the department string names (e.g. "School Teacher Education" vs
+    # "Resource Person Education") — read straight off department, not the
+    # separate Applicants_Role field.
+    if "school teacher" in _dept_raw:
+        _edu_role_key = "school teacher"
+    elif "resource person" in _dept_raw:
+        _edu_role_key = "resource person"
+    else:
+        _edu_role_key = ""
 
     feedback_url = ""
 
@@ -805,7 +804,7 @@ def create_interview_event(
             )
 
     elif _is_education:
-        _tmpl = _EDUCATION_FEEDBACK_URLS.get((_role_raw2, _round_norm), "")
+        _tmpl = _EDUCATION_FEEDBACK_URLS.get((_edu_role_key, _round_norm), "")
         if _tmpl:
             feedback_url = _tmpl.format(
                 app_id=_fq(str(application_id or ""), safe=""),
@@ -3859,101 +3858,6 @@ def download_school_teacher_excel(from_date=None, to_date=None, schools=None):
     frappe.local.response.type = "binary"
 
 
-# ── BGV Document Collection ────────────────────────────────────────────────────
-
-
-@frappe.whitelist()
-def get_bgv_document_collection(application_id):
-    """
-    Return document collection status for the BGV Request linked to a Field Registration Form.
-    Returns required documents, uploaded documents, and missing documents.
-    """
-    bgv_list = frappe.get_all(
-        "BGV Request",
-        filters={"job_applicant": application_id},
-        fields=["name", "status", "candidate_name", "consent_received"],
-        order_by="creation desc",
-        limit=1,
-    )
-    if not bgv_list:
-        return {
-            "error": "No BGV Request found for this application.",
-            "bgv_request": None,
-        }
-
-    bgv_doc = frappe.get_doc("BGV Request", bgv_list[0]["name"])
-    required = bgv_doc.get_required_documents()
-    missing = bgv_doc.get_missing_documents()
-
-    uploaded = [
-        {
-            "document_type": row.document_type,
-            "document_file": row.document_file,
-            "uploaded_on": str(row.uploaded_on or ""),
-            "uploaded_by": row.uploaded_by or "",
-            "remarks": row.remarks or "",
-        }
-        for row in (bgv_doc.documents or [])
-    ]
-
-    return {
-        "bgv_request": bgv_doc.name,
-        "status": bgv_doc.status,
-        "candidate_name": bgv_doc.candidate_name,
-        "consent_received": bgv_doc.consent_received,
-        "required_documents": required,
-        "uploaded_documents": uploaded,
-        "missing_documents": missing,
-    }
-
-
-@frappe.whitelist()
-def save_bgv_document(bgv_request_name, document_type, document_file, remarks=None):
-    """
-    Add or update a document row in the BGV Request documents child table.
-    If a row for document_type already exists it is updated; otherwise a new row is appended.
-    """
-    from frappe.utils import today
-
-    doc = frappe.get_doc("BGV Request", bgv_request_name)
-
-    for row in doc.documents:
-        if row.document_type == document_type:
-            row.document_file = document_file
-            if remarks:
-                row.remarks = remarks
-            row.uploaded_on = today()
-            row.uploaded_by = frappe.session.user
-            doc.save(ignore_permissions=True)
-            frappe.db.commit()
-            return {"message": f"{document_type} updated successfully."}
-
-    doc.append(
-        "documents",
-        {
-            "document_type": document_type,
-            "document_file": document_file,
-            "remarks": remarks or "",
-            "uploaded_on": today(),
-            "uploaded_by": frappe.session.user,
-        },
-    )
-    doc.save(ignore_permissions=True)
-    frappe.db.commit()
-    return {"message": f"{document_type} uploaded successfully."}
-
-
-@frappe.whitelist()
-def get_bgv_missing_documents(bgv_request_name):
-    """Return required, uploaded, and missing document lists for a BGV Request."""
-    doc = frappe.get_doc("BGV Request", bgv_request_name)
-    return {
-        "missing": doc.get_missing_documents(),
-        "required": doc.get_required_documents(),
-        "uploaded": doc.get_uploaded_document_types(),
-    }
-
-
 @frappe.whitelist(allow_guest=True)
 def notify_others_on_feedback_submission(
     application_id,
@@ -3968,10 +3872,13 @@ def notify_others_on_feedback_submission(
     Emails the remaining interviewers on the matching Field Interview Schedule
     a copy of the submitted feedback, excluding whoever just submitted it.
     """
+    import hmac
     import json
 
+    # Secret is now mandatory — this endpoint is allow_guest=True, so without
+    # a required secret it was fully open to anyone on the internet.
     expected_secret = frappe.conf.get("feedback_webhook_secret")
-    if expected_secret and secret != expected_secret:
+    if not expected_secret or not secret or not hmac.compare_digest(secret, expected_secret):
         frappe.throw("Invalid webhook secret", frappe.PermissionError)
 
     application_id = (application_id or "").strip()
@@ -4015,15 +3922,22 @@ def notify_others_on_feedback_submission(
     if not other_emails:
         return {"status": "skipped", "message": "No other interviewers to notify"}
 
+    from frappe.utils import escape_html
+
+    # feedback_data values arrive from a guest-callable webhook — escape
+    # before interpolating into HTML so a crafted payload can't inject
+    # markup/links into the email sent to real interviewer addresses.
     rows_html = "".join(
-        f"<tr><td style='padding:4px 12px;font-weight:600;vertical-align:top;'>{k}</td>"
-        f"<td style='padding:4px 12px;'>{v}</td></tr>"
+        f"<tr><td style='padding:4px 12px;font-weight:600;vertical-align:top;'>{escape_html(str(k))}</td>"
+        f"<td style='padding:4px 12px;'>{escape_html(str(v))}</td></tr>"
         for k, v in feedback_data.items()
     )
+    _safe_submitted_by = escape_html(submitted_by_email)
+    _safe_applicant = escape_html(str(schedule.applicants_name or application_id))
     message = f"""
         <p>Hi,</p>
-        <p><b>{submitted_by_email}</b> has submitted their interview feedback for
-        <b>{schedule.applicants_name or application_id}</b> (Application ID: {application_id}).</p>
+        <p><b>{_safe_submitted_by}</b> has submitted their interview feedback for
+        <b>{_safe_applicant}</b> (Application ID: {escape_html(application_id)}).</p>
         <table style="border-collapse:collapse;">{rows_html}</table>
         <p>Regards,<br>People Function</p>
     """
@@ -4034,7 +3948,9 @@ def notify_others_on_feedback_submission(
         message=message,
     )
 
-    return {"status": "success", "notified": other_emails}
+    # Guest-accessible endpoint — confirm success only, never echo back
+    # interviewer email addresses or other record data to the caller.
+    return {"status": "success"}
 
 
 def send_leader_final_round_feedback_pdf(doc, method=None):

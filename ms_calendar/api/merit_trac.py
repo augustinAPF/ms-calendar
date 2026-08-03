@@ -4,7 +4,7 @@ from frappe.utils import get_datetime
 from datetime import datetime, timedelta
 
 
-# @frappe.whitelist(allow_guest=True)
+# @frappe.whitelist(allow_guest=False)
 # def test_result_api():
 #     try:
 #         # ------------------------------------------------------------
@@ -276,7 +276,7 @@ import frappe
 from frappe.utils import get_datetime
 
 
-# @frappe.whitelist(allow_guest=True)
+# @frappe.whitelist(allow_guest=False)
 # def test_result_api():
 #     try:
 #         # ------------------------------------------------------------
@@ -536,7 +536,7 @@ def _attach_merittrac_report(test_doc, report_url):
         )
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist(allow_guest=False)
 def test_result_api():
     try:
         # ------------------------------------------------------------
@@ -780,7 +780,7 @@ Candidate ID: {candidate_id}
         return {"status": 500, "http_status": 500, "message": str(e)}
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist(allow_guest=False)
 def update_application_status_and_send_mail_scholarship(candidate_id, percentage):
     try:
         frappe.log_error(
@@ -966,7 +966,7 @@ Sender Email: {sender_email}
         return {"status": 500, "http_status": 500, "message": str(e)}
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist(allow_guest=False)
 def update_application_status_and_send_mail_field(candidate_id, percentage):
     try:
         frappe.log_error(

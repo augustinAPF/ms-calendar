@@ -19,9 +19,6 @@ doc_events = {
             "ms_calendar.api.ms_field.check_registration_duplicate_on_save",
         ],
     },
-    "BGV Document": {
-        "after_insert": "ms_calendar.ms_calendar.doctype.bgv_request.bgv_request.on_document_upload"
-    },
     "File": {
         "after_insert": "ms_calendar.api.ms_field.auto_match_resume_on_file_upload"
     },
@@ -279,7 +276,6 @@ before_migrate = ["ms_calendar.patches.fix_pkg_resources.execute"]
 
 scheduler_events = {
 	"daily": [
-		"ms_calendar.api.authbridge_v2.poll_pending_cases",
 		"ms_calendar.api.ms_philanthropy.send_interviewer_feedback_reminders",
 		"ms_calendar.api.ms_field.send_field_interview_feedback_reminders",
 	],

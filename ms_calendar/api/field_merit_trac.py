@@ -1,4 +1,5 @@
 import frappe
+import hmac
 import json
 from frappe.utils import get_datetime, nowdate, add_days
 from datetime import datetime, timedelta
@@ -28,8 +29,15 @@ def test_result_api():
             return frappe.request.environ.get(env_key)
 
         api_key = get_request_header("Patner-key")
-        EXPECTED_KEY = "ToNnhB5chOh23fWz"
-        if not api_key or api_key != EXPECTED_KEY:
+        # Secret now lives only in site_config.json (field_merit_trac_partner_key),
+        # never in source — a hardcoded fallback here would defeat the point
+        # of moving it out, and would keep working even after rotating the key.
+        EXPECTED_KEY = frappe.conf.get("field_merit_trac_partner_key")
+        if (
+            not EXPECTED_KEY
+            or not api_key
+            or not hmac.compare_digest(api_key, EXPECTED_KEY)
+        ):
             frappe.local.response.http_status_code = 401
             return {
                 "status": "error",
@@ -325,10 +333,13 @@ def field_assessment_result_api():
             return frappe.request.environ.get(env_key)
 
         api_key = get_request_header("Patner-key")
-        EXPECTED_KEY = frappe.conf.get(
-            "field_assessment_partner_key", "ToNnhB5chOh23fWz"
-        )
-        if not api_key or api_key != EXPECTED_KEY:
+        # No hardcoded fallback — must come from site_config.json.
+        EXPECTED_KEY = frappe.conf.get("field_assessment_partner_key")
+        if (
+            not EXPECTED_KEY
+            or not api_key
+            or not hmac.compare_digest(api_key, EXPECTED_KEY)
+        ):
             frappe.local.response.http_status_code = 401
             return {
                 "status": "error",
@@ -528,6 +539,7 @@ def send_meritrac_scheduled_emails():
 @frappe.whitelist()
 def test_save_result(candidate_id="APFFRF-0002"):
     """TEST ONLY — simulates a MeritTrac result webhook for a given candidate."""
+    frappe.only_for("System Manager")
     _frf_doctype = "Field Registration Form"
     _applicant_name = (
         frappe.db.get_value(_frf_doctype, candidate_id, "full_name_aadhaar") or "Test"
@@ -561,6 +573,7 @@ def test_send_all_emails(record_name):
     'Field Meritrac Test URL' record name, regardless of start_time.
     Remove / disable this after testing.
     """
+    frappe.only_for("System Manager")
     rec = frappe.get_doc("Field Meritrac Test URL", record_name)
 
     # Format start_time as plain string "YYYY-MM-DD HH:MM:SS"
@@ -828,6 +841,12 @@ def save_field_merittrac_tickets(
     applicant_ids  : JSON string of candidate id list (for creation log)
     test_date      : "YYYY-MM-DD"            (for creation log)
     """
+    if not frappe.has_permission("Field Registration Form", "write"):
+        frappe.throw(
+            "You don't have permission to send MeritTrac test tickets.",
+            frappe.PermissionError,
+        )
+
     import json as _json
 
     if isinstance(tickets, str):

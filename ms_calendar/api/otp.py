@@ -4,6 +4,8 @@ import requests
 from frappe.utils import now_datetime
 
 _OTP_TTL = 600  # 10 minutes
+_OTP_RESEND_COOLDOWN = 60  # seconds between OTP sends to the same email
+_OTP_MAX_ATTEMPTS = 3  # failed verify attempts before the OTP is invalidated
 
 
 def _normalize_mobile(phone):
@@ -88,9 +90,18 @@ def send_email_otp(email):
     if not email or "@" not in email:
         return {"success": False, "message": "Enter a valid email address."}
 
+    cooldown_key = f"field_reg_email_otp_cooldown_{email}"
+    if frappe.cache().get_value(cooldown_key):
+        return {
+            "success": False,
+            "message": "Please wait a moment before requesting another OTP.",
+        }
+
     otp = str(random.randint(100000, 999999))
     cache_key = f"field_reg_email_otp_{email}"
     frappe.cache().set_value(cache_key, otp, expires_in_sec=_OTP_TTL)
+    frappe.cache().delete_value(f"field_reg_email_otp_attempts_{email}")
+    frappe.cache().set_value(cooldown_key, "1", expires_in_sec=_OTP_RESEND_COOLDOWN)
 
     try:
         frappe.sendmail(
@@ -126,14 +137,25 @@ def verify_email_otp(email, otp):
         return {"success": False, "message": "Please enter the OTP."}
 
     cache_key = f"field_reg_email_otp_{email}"
+    attempts_key = f"field_reg_email_otp_attempts_{email}"
     stored = frappe.cache().get_value(cache_key)
 
     if not stored:
         return {"success": False, "message": "OTP expired or not sent. Please request a new OTP."}
     if stored != otp:
+        attempts = (frappe.cache().get_value(attempts_key) or 0) + 1
+        if attempts >= _OTP_MAX_ATTEMPTS:
+            frappe.cache().delete_value(cache_key)
+            frappe.cache().delete_value(attempts_key)
+            return {
+                "success": False,
+                "message": "Too many incorrect attempts. Please request a new OTP.",
+            }
+        frappe.cache().set_value(attempts_key, attempts, expires_in_sec=_OTP_TTL)
         return {"success": False, "message": "Incorrect OTP. Please try again."}
 
     frappe.cache().delete_value(cache_key)
+    frappe.cache().delete_value(attempts_key)
     frappe.cache().set_value(f"field_reg_email_otp_verified_{email}", "1", expires_in_sec=1800)
     return {"success": True, "message": "Email address verified successfully."}
 
