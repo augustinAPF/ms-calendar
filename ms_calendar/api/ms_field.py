@@ -99,6 +99,23 @@ _HEALTH_FEEDBACK_URLS = {
 
 
 @frappe.whitelist()
+def get_field_registration_contact(application_id):
+    """
+    Looks up contact fields on Field Registration Form for the interview scheduling
+    form. Read on Field Registration Form is restricted to System Manager, which
+    breaks this lookup for every other role (e.g. Field Recruiter) since
+    frappe.client.get_value enforces doctype permissions; frappe.db.get_value here
+    does not.
+    """
+    return frappe.db.get_value(
+        "Field Registration Form",
+        application_id,
+        ["email_address", "phone_number", "full_name_aadhaar"],
+        as_dict=True,
+    )
+
+
+@frappe.whitelist()
 def get_schedule_free_slots(interviewer_emails, interview_date):
     """
     Fetches busy intervals for multiple interviewers using MS Graph getSchedule endpoint.
