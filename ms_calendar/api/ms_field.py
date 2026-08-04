@@ -313,7 +313,7 @@ def create_calendar_event(
                    <b>End:</b> {end_datetime}<br>
                    <b>Join Link:</b> <a href="{join_url}">Join Teams Meeting</a></p>
                 <p>Please be on time and review the candidate details before the meeting.</p>
-                <p>Best regards,<br>HR Team</p>
+                <p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
             """,
         )
 
@@ -330,7 +330,7 @@ def create_calendar_event(
                    <b>End:</b> {end_datetime}<br>
                    <b>Join Link:</b> <a href="{join_url}">Join Teams Meeting</a></p>
                 <p>Please ensure you are in a quiet place with stable internet connectivity.</p>
-                <p>Best regards,<br>HR Team</p>
+                <p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
             """,
         )
 
@@ -622,6 +622,17 @@ def create_interview_event(
                     commands_to_interviewer = (
                         _db_vals.get("message_for_the_interviewer") or ""
                     )
+        except Exception:
+            pass
+
+    # Travel Reimbursement checkbox — only include the reimbursement policy
+    # block in the Face-to-Face candidate email when this is checked.
+    travel_reimbursement = 0
+    if doc_name:
+        try:
+            travel_reimbursement = frappe.db.get_value(
+                "Field Interview Schedule", doc_name, "travel_reimbursement"
+            )
         except Exception:
             pass
 
@@ -1150,11 +1161,7 @@ def create_interview_event(
     # ----------------------------------------
     if application_id:
         try:
-            _frf_doctype = (
-                "Field Registration Form"
-                if frappe.db.exists("DocType", "Field Registration Form")
-                else "Field Registration Form"
-            )
+            _frf_doctype = "Field Registration Form"
             if not frappe.db.exists(_frf_doctype, application_id):
                 frappe.log_error(
                     f"Skipping auto-attach: {_frf_doctype} '{application_id}' not found",
@@ -1319,7 +1326,7 @@ Please find the details of the interview below.</p>
 
 {demo_feedback_html}
 
-<p>Regards,<br>People Function</p>
+<p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
 """
 
     # ── CANDIDATE TEMPLATE (all rounds, mode-based) ─────────────────────
@@ -1385,7 +1392,7 @@ Please find the details of the interview below.</p>
 
 {feedback_html_block}
 
-<p>Regards,<br>People Function</p>
+<p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
 """
 
     # ── INTERVIEWER TEMPLATE (Calibration Process – Associate Resource Person) ──
@@ -1666,8 +1673,7 @@ comments/recommendations for the calibration process and final selection decisio
             "Be available for phone call</p>"
         )
     else:  # Face-to-Face
-        candidate_advice_html = (
-            "<p>Kindly reach the venue <b>15 minutes prior</b> to the assigned time.</p>"
+        travel_reimbursement_html = (
             "<p><b>Travel Reimbursement Policy for Outstation Candidates:</b><br>"
             "(Candidates need to book tickets on their own and then submit the tickets/bills "
             "at the venue for reimbursement to their Bank Account)</p>"
@@ -1688,6 +1694,12 @@ comments/recommendations for the calibration process and final selection decisio
             "</ul>"
             "<p><em>(Please note that all travel reimbursement will be made as per "
             "organization's policy. Bills are compulsory for claim settlements)</em></p>"
+            if travel_reimbursement
+            else ""
+        )
+        candidate_advice_html = (
+            "<p>Kindly reach the venue <b>15 minutes prior</b> to the assigned time.</p>"
+            + travel_reimbursement_html +
             "<p>If you are attending online, be in a suitable environment (quiet, well-lit, "
             "with minimal disturbance) for the interview and kindly test your internet "
             "connection, webcam, and microphone in advance.</p>"
@@ -1965,7 +1977,7 @@ comments/recommendations for the calibration process and final selection decisio
             "</p>"
             + interviewer_location_html
             + _demo_link_html
-            + "<p>Regards,<br>People Function</p>"
+            + "<p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>"
         )
         _demo_send_url = (
             f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/sendMail"
@@ -2258,7 +2270,7 @@ comments/recommendations for the calibration process and final selection decisio
         <b>Interview Time:</b> {interview_time_str} – {end_time_str}</p>
         {_hybrid_location_html}
         {feedback_html_block}
-        <p>Regards,<br>People Function</p>
+        <p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
         """
         _hybrid_event_id = ""
         try:
@@ -2376,7 +2388,7 @@ comments/recommendations for the calibration process and final selection decisio
             {_hybrid_join_html}
             {_hybrid_location_html}
             {feedback_html_block}
-            <p>Regards,<br>People Function</p>
+            <p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
             """
             _hybrid_attendees = [
                 {"emailAddress": {"address": h}, "type": "required"}
@@ -2546,7 +2558,7 @@ def update_interview_event(
         <p><strong>New Date:</strong> {interview_date_str}</p>
         <p><strong>New Time:</strong> {interview_time_str}</p>
         </div>
-        <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+        <p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
         """
         sender_arg = {}
         if doc.candidate_email_sendar and frappe.db.exists(
@@ -2679,7 +2691,7 @@ def cancel_interview_event(name):
         <strong>{interview_date}</strong> ({start_time} – {end_time}) has been
         <strong>cancelled</strong>.</p>
         <p>We will reach out separately if the interview needs to be rescheduled.</p>
-        <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+        <p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
         """
         try:
             frappe.sendmail(
@@ -3939,7 +3951,7 @@ def notify_others_on_feedback_submission(
         <p><b>{_safe_submitted_by}</b> has submitted their interview feedback for
         <b>{_safe_applicant}</b> (Application ID: {escape_html(application_id)}).</p>
         <table style="border-collapse:collapse;">{rows_html}</table>
-        <p>Regards,<br>People Function</p>
+        <p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
     """
 
     frappe.sendmail(
@@ -4108,7 +4120,7 @@ def send_leader_final_round_feedback_pdf(doc, method=None):
             <p>Feedback for <b>{display_name}</b>'s Leader Round-2 interview has been
             updated ({len(submissions)} submission(s) so far). Combined details below.</p>
             {sections_html}
-            <p>Regards,<br>People Function</p>
+            <p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
         """,
         reference_doctype=doc.doctype,
         reference_name=doc.name,
@@ -4550,7 +4562,7 @@ def send_field_interview_feedback_reminders():
         for the role of <b>{s.role or ''}</b> has concluded, and your feedback
         is still pending.</p>
         {feedback_link_html}
-        <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+        <p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
         """
 
         sender_arg = {}
@@ -4665,7 +4677,7 @@ def send_field_interview_first_feedback_reminder():
         for the role of <b>{s.role or ''}</b> has concluded, and your feedback
         is still pending.</p>
         {feedback_link_html}
-        <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+        <p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
         """
 
         sender_arg = {}
