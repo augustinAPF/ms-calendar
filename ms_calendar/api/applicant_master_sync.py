@@ -331,7 +331,9 @@ _LINK_TARGETS = {
     "role": "Role",
     "department": "Department",
     "location": "Location",
-    "unit": "Unit",
+    # "unit" is intentionally absent: Applicant Master's "unit" field is a
+    # plain Data field, not a Link (no "Unit" doctype exists), so it never
+    # needs existence validation.
 }
 
 

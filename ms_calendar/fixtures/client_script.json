@@ -1,0 +1,46 @@
+[
+ {
+  "docstatus": 0,
+  "doctype": "Client Script",
+  "dt": "Field Registration Form",
+  "enabled": 1,
+  "modified": "2026-07-14 11:15:36.500362",
+  "module": null,
+  "name": "Field Registration Form Duplicate Check",
+  "script": "(function () {\n\tconst FIELDS = { name: \"full_name_aadhaar\", dob: \"dob\", phone: \"phone_number\", email: \"email_address\" };\n\n\tfunction check_duplicate(frm) {\n\t\tconst full_name = frm.doc[FIELDS.name];\n\t\tconst dob = frm.doc[FIELDS.dob];\n\t\tconst phone = frm.doc[FIELDS.phone];\n\t\tconst email = frm.doc[FIELDS.email];\n\n\t\tif (!(full_name && dob && phone && email)) return;\n\n\t\tfrappe.call({\n\t\t\tmethod: \"ms_calendar.api.ms_field.check_duplicate_registration\",\n\t\t\targs: {\n\t\t\t\tfull_name: full_name,\n\t\t\t\tdate_of_birth: dob,\n\t\t\t\tphone_number: phone,\n\t\t\t\temail_address: email,\n\t\t\t\texclude_doctype: frm.is_new() ? null : frm.doctype,\n\t\t\t\texclude_name: frm.is_new() ? null : frm.doc.name,\n\t\t\t},\n\t\t\tcallback: function (r) {\n\t\t\t\tif (r.message && r.message.duplicate) {\n\t\t\t\t\tfrappe.msgprint({\n\t\t\t\t\t\ttitle: __(\"Possible Duplicate Application\"),\n\t\t\t\t\t\tindicator: \"orange\",\n\t\t\t\t\t\tmessage: __(\n\t\t\t\t\t\t\t\"An application with the same Name, Date of Birth, Phone Number and Email already exists ({0} {1}). They may already have an application submitted for this recruitment process.\",\n\t\t\t\t\t\t\t[r.message.doctype, r.message.name]\n\t\t\t\t\t\t),\n\t\t\t\t\t});\n\t\t\t\t}\n\t\t\t},\n\t\t});\n\t}\n\n\tfrappe.ui.form.on(\"Field Registration Form\", {\n\t\t\"full_name_aadhaar\": check_duplicate,\n\t\t\"dob\": check_duplicate,\n\t\t\"phone_number\": check_duplicate,\n\t\t\"email_address\": check_duplicate,\n\t\trefresh: check_duplicate,\n\t});\n})();\n",
+  "view": "Form"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Client Script",
+  "dt": "Field Registration Form1",
+  "enabled": 1,
+  "modified": "2026-07-14 11:15:36.496259",
+  "module": null,
+  "name": "Field Registration Form1 Duplicate Check",
+  "script": "(function () {\n\tconst FIELDS = { name: \"full_name_aadhaar\", dob: \"dob\", phone: \"phone_number\", email: \"email_address\" };\n\n\tfunction check_duplicate(frm) {\n\t\tconst full_name = frm.doc[FIELDS.name];\n\t\tconst dob = frm.doc[FIELDS.dob];\n\t\tconst phone = frm.doc[FIELDS.phone];\n\t\tconst email = frm.doc[FIELDS.email];\n\n\t\tif (!(full_name && dob && phone && email)) return;\n\n\t\tfrappe.call({\n\t\t\tmethod: \"ms_calendar.api.ms_field.check_duplicate_registration\",\n\t\t\targs: {\n\t\t\t\tfull_name: full_name,\n\t\t\t\tdate_of_birth: dob,\n\t\t\t\tphone_number: phone,\n\t\t\t\temail_address: email,\n\t\t\t\texclude_doctype: frm.is_new() ? null : frm.doctype,\n\t\t\t\texclude_name: frm.is_new() ? null : frm.doc.name,\n\t\t\t},\n\t\t\tcallback: function (r) {\n\t\t\t\tif (r.message && r.message.duplicate) {\n\t\t\t\t\tfrappe.msgprint({\n\t\t\t\t\t\ttitle: __(\"Possible Duplicate Application\"),\n\t\t\t\t\t\tindicator: \"orange\",\n\t\t\t\t\t\tmessage: __(\n\t\t\t\t\t\t\t\"An application with the same Name, Date of Birth, Phone Number and Email already exists ({0} {1}). They may already have an application submitted for this recruitment process.\",\n\t\t\t\t\t\t\t[r.message.doctype, r.message.name]\n\t\t\t\t\t\t),\n\t\t\t\t\t});\n\t\t\t\t}\n\t\t\t},\n\t\t});\n\t}\n\n\tfrappe.ui.form.on(\"Field Registration Form1\", {\n\t\t\"full_name_aadhaar\": check_duplicate,\n\t\t\"dob\": check_duplicate,\n\t\t\"phone_number\": check_duplicate,\n\t\t\"email_address\": check_duplicate,\n\t\trefresh: check_duplicate,\n\t});\n})();\n",
+  "view": "Form"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Client Script",
+  "dt": "Health Registration Form",
+  "enabled": 1,
+  "modified": "2026-07-14 11:15:36.491719",
+  "module": null,
+  "name": "Health Registration Form Duplicate Check",
+  "script": "(function () {\n\tconst FIELDS = { name: \"full_name\", dob: \"date_of_birth\", phone: \"phone_number\", email: \"email_address\" };\n\n\tfunction check_duplicate(frm) {\n\t\tconst full_name = frm.doc[FIELDS.name];\n\t\tconst dob = frm.doc[FIELDS.dob];\n\t\tconst phone = frm.doc[FIELDS.phone];\n\t\tconst email = frm.doc[FIELDS.email];\n\n\t\tif (!(full_name && dob && phone && email)) return;\n\n\t\tfrappe.call({\n\t\t\tmethod: \"ms_calendar.api.ms_field.check_duplicate_registration\",\n\t\t\targs: {\n\t\t\t\tfull_name: full_name,\n\t\t\t\tdate_of_birth: dob,\n\t\t\t\tphone_number: phone,\n\t\t\t\temail_address: email,\n\t\t\t\texclude_doctype: frm.is_new() ? null : frm.doctype,\n\t\t\t\texclude_name: frm.is_new() ? null : frm.doc.name,\n\t\t\t},\n\t\t\tcallback: function (r) {\n\t\t\t\tif (r.message && r.message.duplicate) {\n\t\t\t\t\tfrappe.msgprint({\n\t\t\t\t\t\ttitle: __(\"Possible Duplicate Application\"),\n\t\t\t\t\t\tindicator: \"orange\",\n\t\t\t\t\t\tmessage: __(\n\t\t\t\t\t\t\t\"An application with the same Name, Date of Birth, Phone Number and Email already exists ({0} {1}). They may already have an application submitted for this recruitment process.\",\n\t\t\t\t\t\t\t[r.message.doctype, r.message.name]\n\t\t\t\t\t\t),\n\t\t\t\t\t});\n\t\t\t\t}\n\t\t\t},\n\t\t});\n\t}\n\n\tfrappe.ui.form.on(\"Health Registration Form\", {\n\t\t\"full_name\": check_duplicate,\n\t\t\"date_of_birth\": check_duplicate,\n\t\t\"phone_number\": check_duplicate,\n\t\t\"email_address\": check_duplicate,\n\t\trefresh: check_duplicate,\n\t});\n})();\n",
+  "view": "Form"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Client Script",
+  "dt": "Phil Registration Form",
+  "enabled": 1,
+  "modified": "2026-07-14 11:15:36.323608",
+  "module": null,
+  "name": "Phil Registration Form Duplicate Check",
+  "script": "(function () {\n\tconst FIELDS = { name: \"name1\", dob: \"date_of_birth\", phone: \"phone\", email: \"email\" };\n\n\tfunction check_duplicate(frm) {\n\t\tconst full_name = frm.doc[FIELDS.name];\n\t\tconst dob = frm.doc[FIELDS.dob];\n\t\tconst phone = frm.doc[FIELDS.phone];\n\t\tconst email = frm.doc[FIELDS.email];\n\n\t\tif (!(full_name && dob && phone && email)) return;\n\n\t\tfrappe.call({\n\t\t\tmethod: \"ms_calendar.api.ms_field.check_duplicate_registration\",\n\t\t\targs: {\n\t\t\t\tfull_name: full_name,\n\t\t\t\tdate_of_birth: dob,\n\t\t\t\tphone_number: phone,\n\t\t\t\temail_address: email,\n\t\t\t\texclude_doctype: frm.is_new() ? null : frm.doctype,\n\t\t\t\texclude_name: frm.is_new() ? null : frm.doc.name,\n\t\t\t},\n\t\t\tcallback: function (r) {\n\t\t\t\tif (r.message && r.message.duplicate) {\n\t\t\t\t\tfrappe.msgprint({\n\t\t\t\t\t\ttitle: __(\"Possible Duplicate Application\"),\n\t\t\t\t\t\tindicator: \"orange\",\n\t\t\t\t\t\tmessage: __(\n\t\t\t\t\t\t\t\"An application with the same Name, Date of Birth, Phone Number and Email already exists ({0} {1}). They may already have an application submitted for this recruitment process.\",\n\t\t\t\t\t\t\t[r.message.doctype, r.message.name]\n\t\t\t\t\t\t),\n\t\t\t\t\t});\n\t\t\t\t}\n\t\t\t},\n\t\t});\n\t}\n\n\tfrappe.ui.form.on(\"Phil Registration Form\", {\n\t\t\"name1\": check_duplicate,\n\t\t\"date_of_birth\": check_duplicate,\n\t\t\"phone\": check_duplicate,\n\t\t\"email\": check_duplicate,\n\t\trefresh: check_duplicate,\n\t});\n})();\n",
+  "view": "Form"
+ }
+]

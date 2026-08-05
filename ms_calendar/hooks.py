@@ -121,6 +121,12 @@ fixtures = [
     # ms.local's DB (no JSON/module file), so any other site running this
     # app needs them shipped as a fixture too, or merit_trac.py's
     # test_result_api() fails with a DocType import error on insert.
+    #
+    # Department and Location are the same situation: also created as
+    # Custom DocTypes directly on ms.local's DB, and used as Link targets
+    # on Applicant Master's "department"/"location" fields. Without this
+    # fixture, any other site (e.g. production) shows "Missing DocType —
+    # Field department is referring to non-existing doctype Department."
     {
         "dt": "DocType",
         "filters": [
@@ -130,10 +136,16 @@ fixtures = [
                 [
                     "MeritTrac Test Result",
                     "Field MeritTrac Test Result",
+                    "Department",
+                    "Location",
                 ],
             ]
         ],
     },
+    # Actual Department/Location records (Applicant Master's Link fields
+    # need the rows to exist too, not just the DocType definition).
+    {"dt": "Department"},
+    {"dt": "Location"},
 ]
 
 # required_apps = []

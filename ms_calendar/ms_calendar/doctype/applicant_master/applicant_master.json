@@ -112,9 +112,8 @@
    "doctype": "DocField",
    "fieldname": "unit",
    "label": "Unit",
-   "fieldtype": "Link",
+   "fieldtype": "Data",
    "idx": 12,
-   "options": "Unit",
    "description": "Common field. Source fields -> Field: units; Philanthropy: unit; Scholarship: unit"
   },
   {
