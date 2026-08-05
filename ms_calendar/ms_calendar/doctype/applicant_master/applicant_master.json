@@ -1,0 +1,2783 @@
+{
+ "doctype": "DocType",
+ "name": "Applicant Master",
+ "module": "Ms Calendar",
+ "custom": 1,
+ "istable": 0,
+ "issingle": 0,
+ "is_virtual": 0,
+ "editable_grid": 1,
+ "track_changes": 1,
+ "autoname": "APPL-.####",
+ "naming_rule": "Expression (old style)",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "allow_rename": 0,
+ "allow_import": 1,
+ "track_seen": 1,
+ "engine": "InnoDB",
+ "search_fields": "full_name, email_address, phone_number",
+ "fields": [
+  {
+   "doctype": "DocField",
+   "fieldname": "common_details_sb",
+   "label": "Common Fields (present across Health / Field / Philanthropy / Scholarship forms)",
+   "fieldtype": "Section Break",
+   "idx": 1
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "application_status",
+   "label": "Application Status",
+   "fieldtype": "Select",
+   "idx": 2,
+   "description": "Common field. Source fields -> Health: application_status; Field: application_status; Philanthropy: application_status; Scholarship: application_status"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "offer_status",
+   "label": "Offer Status",
+   "fieldtype": "Select",
+   "idx": 3,
+   "description": "Common field. Source fields -> Health: offer; Field: offer"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "full_name",
+   "label": "Full Name (as per Aadhaar)",
+   "fieldtype": "Data",
+   "idx": 4,
+   "description": "Common field. Source fields -> Health: full_name; Field: full_name_aadhaar; Philanthropy: name1; Scholarship: full_name_as_per_aadhar"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "gender",
+   "label": "Gender",
+   "fieldtype": "Select",
+   "idx": 5,
+   "options": "Male\nFemale\nOther",
+   "description": "Common field. Source fields -> Field: gender; Scholarship: gender"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "date_of_birth",
+   "label": "Date of Birth",
+   "fieldtype": "Date",
+   "idx": 6,
+   "description": "Common field. Source fields -> Health: date_of_birth; Field: dob; Philanthropy: date_of_birth; Scholarship: date_of_birth"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "age",
+   "label": "Age",
+   "fieldtype": "Int",
+   "idx": 7,
+   "description": "Common field. Source fields -> Health: age; Field: age; Philanthropy: age"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "email_address",
+   "label": "Email Address",
+   "fieldtype": "Data",
+   "idx": 8,
+   "description": "Common field. Source fields -> Health: email_address; Field: email_address; Philanthropy: email; Scholarship: email"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "phone_number",
+   "label": "Phone Number",
+   "fieldtype": "Data",
+   "idx": 9,
+   "description": "Common field. Source fields -> Health: phone_number; Field: phone_number; Philanthropy: phone; Scholarship: phone_number"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "role",
+   "label": "Role",
+   "fieldtype": "Link",
+   "idx": 10,
+   "options": "Role",
+   "description": "Common field. Source fields -> Field: role; Philanthropy: role; Scholarship: role"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "department",
+   "label": "Department",
+   "fieldtype": "Link",
+   "idx": 11,
+   "options": "Department",
+   "description": "Common field. Source fields -> Field: department; Philanthropy: department; Scholarship: department"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "unit",
+   "label": "Unit",
+   "fieldtype": "Link",
+   "idx": 12,
+   "options": "Unit",
+   "description": "Common field. Source fields -> Field: units; Philanthropy: unit; Scholarship: unit"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "location",
+   "label": "Location",
+   "fieldtype": "Link",
+   "idx": 13,
+   "options": "Location",
+   "description": "Common field. Source fields -> Field: location; Philanthropy: location; Scholarship: location"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "job_code",
+   "label": "Job Code",
+   "fieldtype": "Data",
+   "idx": 14,
+   "description": "Common field. Source fields -> Field: job_code; Philanthropy: job_code"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "zwayam_id",
+   "label": "Zwayam ID",
+   "fieldtype": "Data",
+   "idx": 15,
+   "description": "Common field. Source fields -> Field: zayam_id; Philanthropy: zayam_id"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "state",
+   "label": "State",
+   "fieldtype": "Data",
+   "idx": 16,
+   "description": "Common field. Source fields -> Health: state; Scholarship: state"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "district_city",
+   "label": "District / City",
+   "fieldtype": "Data",
+   "idx": 17,
+   "description": "Common field. Source fields -> Health: taluk__district__city; Scholarship: district"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "resume",
+   "label": "Resume / CV",
+   "fieldtype": "Attach",
+   "idx": 18,
+   "description": "Common field. Source fields -> Health: resume; Field: resume_upload; Philanthropy: cv_attach; Scholarship: resume__cv"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "highest_education",
+   "label": "Highest Educational Qualification",
+   "fieldtype": "Select",
+   "idx": 19,
+   "description": "Common field. Source fields -> Field: highest_education; Philanthropy: highest_level_of_education; Scholarship: highest_level_of_education"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "total_experience",
+   "label": "Total Years of Experience",
+   "fieldtype": "Data",
+   "idx": 20,
+   "description": "Common field. Source fields -> Philanthropy: total_experience; Scholarship: total_years_of_experience"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "opportunity_source",
+   "label": "How did you know about this opportunity?",
+   "fieldtype": "Select",
+   "idx": 21,
+   "description": "Common field. Source fields -> Health: opportunity; Field: opportunity; Philanthropy: source; Scholarship: opportunity"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "languages_known",
+   "label": "Languages Known",
+   "fieldtype": "Small Text",
+   "idx": 22,
+   "description": "Common field. Source fields -> Health: languages_known; Field: languages_known; Scholarship: languages_known"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "feedback_form",
+   "label": "Feedback Form",
+   "fieldtype": "Attach",
+   "idx": 23,
+   "description": "Common field. Source fields -> Health: feedback_form; Philanthropy: feedback_form; Scholarship: feedback_one_pdf"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "health_details_tab",
+   "label": "Health Registration Form - Details",
+   "fieldtype": "Tab Break",
+   "idx": 24
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "date_offer",
+   "label": "Offer Date",
+   "fieldtype": "Date",
+   "idx": 25
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "column_break_olqa",
+   "label": "column_break_olqa",
+   "fieldtype": "Column Break",
+   "idx": 26
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "reasons_for_reject",
+   "label": "Reason for regret",
+   "fieldtype": "Select",
+   "idx": 27,
+   "options": "\nCommunication / Languages\nCompensation\nDocuments\nDuplicate\nInterest in role / Foundation\nLocation\nMoonlighting\nNo resume\nNo show / No response\nNot available from June\nNot MBBS\nNotice period\nOther\nPart time only\nPostgraduate\nRegistration\nRemote / WFH only\nToo senior\nTravel\nValues alignment"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "reasons_for_hold",
+   "label": "Reason for hold",
+   "fieldtype": "Select",
+   "idx": 28,
+   "options": "\nCommunication / Languages\nCompensation\nDocuments\nDuplicate\nInterest in role / Foundation\nLocation\nMoonlighting\nNo resume\nNo show / No response\nNot available from June\nNot MBBS\nNotice period\nOther\nPart time only\nPostgraduate\nRegistration\nRemote / WFH only\nToo senior\nTravel\nValues alignment"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "reasons_for_shorlist",
+   "label": "Reason for shorlist",
+   "fieldtype": "Select",
+   "idx": 29,
+   "options": "\nCommunication / Languages\nCompensation\nDocuments\nDuplicate\nInterest in role / Foundation\nLocation\nMoonlighting\nNo resume\nNo show / No response\nNot available from June\nNot MBBS\nNotice period\nOther\nPart time only\nPostgraduate\nRegistration\nRemote / WFH only\nToo senior\nTravel\nValues alignment"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "section_break_gwdk",
+   "label": "section_break_gwdk",
+   "fieldtype": "Section Break",
+   "idx": 30
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "doj_date",
+   "label": "Date of Joining",
+   "fieldtype": "Small Text",
+   "idx": 31
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "joining_address",
+   "label": "Joining Address",
+   "fieldtype": "Small Text",
+   "idx": 32
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "section_break_rqsd",
+   "label": "section_break_rqsd",
+   "fieldtype": "Section Break",
+   "idx": 33
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "foundation_selection",
+   "label": "Have you been part of the Foundation\u2019s selection process in the past? ",
+   "fieldtype": "Select",
+   "idx": 34,
+   "options": "\nYes\nNo"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "mbbs_institution",
+   "label": "This Fellowship is for MBBS doctors only. Please choose the state/UT where you studied MBBS",
+   "fieldtype": "Select",
+   "idx": 35,
+   "options": "\nAndaman Nicobar Islands\nAndhra Pradesh\nArunachal Pradesh\nAssam\nBihar\nChandigarh\nChhattisgarh\nDadra and Nagar Haveli\nDelhi\nGoa\nGujarat\nHaryana\nHimachal Pradesh\nJammu and Kashmir\nJharkhand\nKarnataka\nKerala\nMadhya Pradesh\nMaharashtra\nManipur\nMeghalaya\nMizoram\nNagaland\nOdisha\nPuducherry\nPunjab\nRajasthan\nSikkim\nTamil Nadu\nTelangana\nTripura\nUttar Pradesh\nUttarakhand\nWest Bengal\nOther"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "mbbs_college",
+   "label": "Please choose the College/Institution where you studied MBBS",
+   "fieldtype": "Select",
+   "idx": 36,
+   "options": "\nOther\nAndaman & Nicobar Islands Institute of Medical Sciences, Port Blair\nACSR Government Medical College\nAll India Institute of Medical Sciences, Mangalagiri, Vijayawada\nAlluri Sitaram Raju Academy of Medical Sciences, Eluru\nAndhra Medical College, Visakhapatnam\nApollo Institute of Medical Sciences and Research, Chittoor\nDr. P.S.I. Medical College, Chinoutpalli\nFathima Instt. of Medical Sciences, Kadapa\nGayathri Vidya Parishad Institute of Health Care & Medical Technology, Visakhapatnam\nGITAM Institute of Medical Sciences and Research, Visakhapatnam\nGovernment Medical College, Ananthapuram\nGovernment Medical College, Machilipatnam\nGovernment Medical College, Paderu\nGovernment Medical College, Rajamahendravaram\nGovernment Medical College, Eluru\nGovernment Medical College, Nandyal\nGovernment medical college, vizianagaram\nGovernment Siddhartha Medical College, Vijaywada\nGreat Eastern Medical School and Hospital, Srikakulam\nGSL Medical College, Rajahmundry\nGuntur Medical College, Guntur\nKaturi Medical College, Guntur\nKonaseema Institute of Medical Sciences & Research Foundation, Amalapuram\nKurnool Medical College, Kurnool\nMaharajah Institute of Medical Sciences, Vizianagaram\nNarayana Medical College, Nellore\nNimra Institute of Medical Sciences, Krishna Dist.\nNRI Institute of Medical Sciences, Visakhapatnam\nNRI Medical College, Guntur\nP E S Institute Of Medical Sciences and Research, Kuppam\nRajiv Gandhi Institute of Medical Sciences, Kadapa\nRajiv Gandhi Institute of Medical Sciences, Ongole\nRajiv Gandhi Institute of Medical Sciences, Srikakulam\nRangaraya Medical College, Kakinada\nS V Medical College, Tirupati\nSanthiram Medical College, Nandyal\nSri Balaji Medical College, Hospital and Research Instiutute, Chittoor\nSVIMS - Sri Padmavathi Medical College for Women, Alipiri Road, Tirupati\nViswabharathi Medical College\nTomo Riba Institute of Health & Medical Sciences, Naharlagun\nAll India Institute of Medical Sciences (AIIMS), Guwahati\nAssam Medial College, Dibrugarh\nDhubri Medical College, Dhubri\nDiphu Medical College & Hospital, Diphu, Assam\nFakhruddin Ali Ahmed Medical College, Barpeta, Assam\nGauhati Medical College, Guwahati\nJorhat Medical College & Hospital , Jorhat\nKokrajhar Medical College\nLakhimpur Medical College\nNagaon Medical College\nNalbari Medical College, Nalbari\nSilchar Medical College, Silchar\nTezpur Medical College & Hospital, Tezpur\nTinsukia Medical College - Assam Pin - 786146\nAll India Institute of Medical Sciences, Patna\nAnugrah Narayan Magadh Medical College, Gaya\nDarbhanga Medical College, Lehriasarai\nEmployees State Insurance Corporation Medical College, Patna\nGovernment Medical College, Bettiah\nGovernment Medical College, Purnea\nHimalaya Medical College and Hospital , Patna, Bihar\nIndira Gandhi Institute of Medical Sciences, Sheikhpura, Patna\nJannayak Karpoori Thakur Medical College & Hospital, Madhepura, Bihar\nJawaharlal Nehru Medical College, Bhagalpur\nKatihar Medical College, Katihar\nLord Buddha Koshi Medical College and Hospital, Saharsa\nMadhubani Medical College, Madhubani\nMata Gujri Memorial Medical College, Kishanganj\nNalanda Medical College, Patna\nNarayan Medical College & Hospital, Sasaram\nNetaji Subhas Medical College & Hospital, Amhara, Bihta, Patna\nPatna Medical College, Patna\nRadha Devi Jageshwari Memorial Medical College and Hospital*\nShree Narayan Medical Institute and Hospital\nShri Krishna Medical College, Muzzafarpur\nVardhman Institute of Medical Sciences, Pawapuri, Nalanda\nGovernment Medical College, Chandigarh\nAbhishek Mishra Memorial Medical College & RC Bhiali Distt. Durg CG\nAll India Institute of Medical Sciences, Raipur\nChandulal Chandrakar Memorial Medical College, Durg\nChhattisgarh Institute of Medical Sciences, Bilaspur\nGovernment Medical College, Ambikapur (Surguja), Chhattisgarh\nGovernment Medical College, Kanker\nGovernment Medical College, Korba\nGovernment Medical College, Mahasamund\nGovernment Medical College (Bharat Ratna Shri Atal Bihari Vajpyee Memorial Med. Col.), Rajnandgaon\nLate Shri Baliram Kashyap Memorial NDMC Govt. Medical College, Jagdalpur\nLate Shri Lakhi Ram Agrawal Memorial Govt. Medical College, Raigarh\nPt. J N M Medical College, Raipur\nRaipur Institute of Medical Sciences (RIMS), Raipur\nShri Balaji Institute of Medical Science\nShri Rawatpura Sarkar Institute of Medical Sciences and Research Atal Nagar, Dist- Raipur (C.G.)\nShri Shankaracharya Institute of Medical Sciences, Bhilai\nNAMO Medical Education and Research Institute\nAll India Institute of Medical Sciences, New Delhi\nArmy College of Medical Sciences, New Delhi\nAtal Bihari Vajpayee Institute of Medical Sciences and Dr. RML Hospital, New Delhi\nDr. Baba Saheb Ambedkar Medical College, Rohini, Delhi\nHamdard Institute of Medical Sciences & Research, New Delhi\nLady Hardinge Medical College, New Delhi\nMaulana Azad Medical College, New Delhi\nNorth Delhi Muncipal Corporation Medical College, Delhi\nUniversity College of Medical Sciences & GTB Hospital, New Delhi\nVardhman Mahavir Medical College & Safdarjung Hospital, Delhi\nGoa Medical College, Panaji\nAhmedabad Municipal Coporation Medical Education Trust Medical College, Ahmedabad\nAll India Institute of Medical Science, Rajkot\nAnanya College of Medicine & Research, Kalol\nB J Medical College, Ahmedabad\nBanas Medical College and Research Institute, Palanpur, Gujarat\nBhagyoday Medical College\nCU Shah Medical College, Surendra Nagar\nDr. Kiran C.Patel Medical College and Research Institute\nDr. M.K. Shah Medical College & Research Centre, Ahmedabad\nDr. N.D. Desai Faculty of Medical Science and Research, Nadiad\nGCS Medical College, Ahmedabad\nGMERS Medical College, Dharpur Patan\nGMERS Medical College, Hadiyol, Himmatnagar\nGMERS Medical College, Rajpipla\nGMERS Medical College, Sola, Ahmedabad\nGMERS Medical College, Vadnagar, Mehsana\nGMERS Medical College, Gandhinagar\nGMERS Medical College, Gotri, Vadodara\nGMERS Medical College, Junagadh\nGMERS Medical College, Valsad\nGovernment Medical College, Bhavnagar\nGovernment Medical College, Morbi\nGovernment Medical College, Navsari\nGovernment Medical College, Panchmahal Godhra\nGovernment Medical College, Porbandar\nGovernment Medical College, Surat\nGujarat Adani Institute of Medical Sciences, Bhuj\nKiran Medical College\nMedical College, Baroda\nMP Shah Medical College, Jamnagar\nNootan Medical College and Research Centre, Mehsana\nPandit Deendayal Upadhyay Medical College, Rajkot\nParul Institute of Medical Sciences & Research, Vadodara\nPramukhswami Medical College, Karmsad\nSAL Institute of Medical Sciences, Ahmedabad\nSBKS Medical Instt. & Research Centre, Vadodra\nShantabaa Medical College, Amreli\nSmt. N.H.L.Municipal Medical College, Ahmedabad\nSurat Municipal Institute of Medical Education & Research, Surat\nSWAMIINARAYAN INSTITUTE OF MEDICAL SCIENCES & RESEARCH\nZydus Medical College & Hospital, Dahod\nAdesh Medical College and Hospital, Shahabad, Kurukshetra, Haryana\nAl Falah School of Medical Sciences & Research Centre, Faridabad\nAmrita School of Medicine\nBPS Government Medical College for Women, Sonepat\nEmployees State Insurance Corporation Medical College, Faridabad\nFaculty of Medicine and Health Sciences, Gurgaon\nKalpana Chawala Govt. Medical College, Karnal, Haryana\nMaharaja Agrasen Medical College, Agroha\nMaharishi Markandeshwar College of Medical Sciences & Research, Sadopur\nMaharishi Markandeshwar Institute Of Medical Sciences & Research, Mullana, Ambala\nN.C. Medical College & Hospital, Panipat\nPt. B D Sharma Postgraduate Institute of Medical Sciences, Rohtak (Haryana)\nShaheed Hasan Khan Mewati Government Medical College, Nalhar\nShri Atal Bihari Vajpayee Government Medical College, Faridabad\nWorld College of Medical Sciences & Researc, Jhajjar, Haryana\nAll India Institute of Medical Sciences, Bilaspur\nDr. Radhakrishnan Government Medical College, Hamirpur, H.P\nDr. Rajendar Prasad Government Medical College, Tanda, H.P\nGovernment Medical College, Nahan, Sirmour H.P.\nIndira Gandhi Medical College, Shimla\nMaharishi Markandeshwar Medical College & Hospital, Solan\nPt. Jawahar Lal Nehru Government Medical College, Chamba\nShri Lal Bahadur Shastri Government Medical College, Mandi, HP\nAcharya Shri Chander College of Medical Sciences, Jammu\nAll India Institute of Medical Science, Vijaypur\nGovernment Medical College Handwara\nGovernment Medical College Udhampur\nGovernment Medical College, Anantnag\nGovernment Medical College, Baramulla\nGovernment Medical College, Jammu\nGovernment Medical College, Kathua\nGovernment Medical College, Rajouri, J&K\nGovernment Medical College, Srinagar\nGovt. Medical College, Doda, Kashmir\nSher-I-Kashmir Instt. Of Medical Sciences, Srinagar\nAll India Institute of Medical Sciences, Deoghar\nDumka Medical College, Dighi Dumka\nHazaribagh Medical College, Hazaribagh\nLaxmi Chandravansi Medical College & Hospital\nM G M Medical College, Jamshedpur\nManipal Tata Medical College, Baridih Jameshedpur\nPalamu Medical College, Palamu\nRajendra Institute of Medical Sciences, Ranchi\nShaheed Nirmal Mahto Medical College & Hospital, Dhanbad\nA J Institute of Medical Sciences & Research Centre, Mangalore\nAdichunchanagiri Institute of Medical Sciences, Bellur\nAkash Institute of Medical Sciences & Research Centre, Devanhalli, Bangalore, Karnataka\nAl-Ameen Medical College, Bijapur\nBangalore Medical College and Research Institute, Bangalore\nBasaveswara Medical College and Hospital, Chitradurga\nBelagavi Institute of Medical Sciences, Belagavi\nBGS Global Institute of Medical Sciences, Bangalore\nBGS Medical College and Hospital Bengaluru, Karnataka\nBidar Institute of Medical Sciences, Bidar\nChamrajanagar Institute of Medical Sciences, Karnataka\nChikkaballapura Institute of Medical Sciences\nChikkamagaluru Institute of Medical Sciences, Chikkamagaluru\nChitradurga Medical College and Research Institute\nDr BR Ambedkar Medical College, Bangalore\nDr. Chandramma Dayananda Sagar Instt. of Medical Education & Research, Harohalli, Hubli\nEast Point College of Medical Sciences & Research Centre, Bangalore\nEmployees State Insurance Corporation Medical College, Gulbarga\nEmployees State Insurance Corporation Medical College, Bangalore\nFather Mullers Medical College, Mangalore\nG R Medical College Hospital & Research Centre\nGadag Institute of Medical Sciences, Mallasamudra, Mulgund Road, Gadag\nGulbarga Institute of Medical Sciences, Gulbarga\nHassan Institute of Medical Sciences, Hassan\nHaveri Institute of Medical Sciences, Haveri\nJagadguru Gangadhar Mahaswamigalu Moorusavirmath Medical College JGMMMC\nJawaharlal Nehru Medical College, Belgaum\nJJM Medical College, Davangere\nJSS Medical College, Mysore\nK S Hegde Medical Academy, Mangalore\nK V G Medical College, Sullia\nKanachur Institute of Medical Sciences, Mangalore\nKarnataka Institute of Medical Sciences, Hubballi\nKarwar Institute of Medical Sciences, Karwar\nKasturba Medical College, Mangalore\nKasturba Medical College, Manipal\nKempegowda Institute of Medical Sciences, Bangalore\nKhaja Bandanawaz University - Faculty of Medical Sciences, Gulbarga\nKodagu Institute of Medical Sciences, Kodagu\nKoppal Institute of Medical Sciences, Koppal\nM S Ramaiah Medical College, Bangalore\nMahadevappa Rampure Medical College, Kalaburagi, Gulbarga\nMandya Institute of Medical Sciences, Mandya\nMVJ Medical College and Research Hospital, Bangalore\nMysore Medical College and Research Instt., Mysore\nNavodaya Medical College, Raichur\nPES University Institute of Medical Sciences and Reseach Bangalore\nRaichur Institute of Medical Sciences, Raichur\nRaja Rajeswari Medical College & Hospital, Bangalore\nS S Institute of Medical Sciences& Research Centre, Davangere\nS. Nijalingappa Medical College & HSK Hospital & Research Centre, Bagalkot\nSambharam Institute of Medical Sciences & Research, Kolar\nSapthagiri Institute of Medical Sciences & Research Centre, Bangalore\nSDM College of Medical Sciences & Hospital, Sattur, Dharwad\nShimoga Institute of Medical Sciences, Shimoga\nShri Atal Bihari Vajpayee Medical College & Research Institute\nShri B M Patil Medical College, Hospital & Research Centre, Vijayapura (Bijapur)\nShridevi Institute of Medical Sciences & Research Hospital, Tumkur\nSiddaganga Medical College and Research Institute, Tumakuru\nSR Patil Medical College and Hospital Distt Bagalkot\nSri Chamundeshwari Medical College Hospital & Research Institute\nSri Devaraj URS Medical College, Kolar\nSri Madhusudan Sai Institute of Medical Sciences & Research, Chikballapur\nSri siddhartha Institute of Medical Sciences & Research Centre, Bangalore\nSri Siddhartha Medical Coll\nSrinivas Institute of Medical Research Centre, Srinivasnagar, Mangalore\nSt. Johns Medical College, Bangalore\nSubbaiah Institute of Medical Sciences, Shimoga, Karnataka\nThe Oxford Medical College, Hospital & Research Centre, Bangalore\nVijaynagar Institute of Medical Sciences, Bellary\nVydehi Institute Of Medical Sciences & Research Centre, Bangalore\nYadgiri Institute of Medical Sciences, Yadgiri\nYenepoya Medical College, Mangalore\nAl-Azhar Medical College and Super Speciality Hospital, Thodupuzha\nAmala Institute of Medical Sciences, Thrissur\nAmrita School of Medicine, Elamkara, Kochi\nAzeezia Instt of Medical Science,Meeyannoor, Kollam\nBelievers Church Medical College Hospital, Thiruvalla, Kerala\nDM Wayanad Institute of Medical Sciences, Wayanad, Kerala\nDr. Somervel Memorial CSI Hospital & Medical College, Karakonam, Thiruvananthapuram\nGovernment Medical College (Institute of Integrated Medical Sciences), Yakkara, Palakkad\nGovernment Medical College, Ernakulam\nGovernment Medical College, Konni\nGovernment Medical College, Kottayam\nGovernment Medical College, Kozhikode, Calicut\nGovernment Medical College, Parippally, Kollam\nGovernment Medical College, Thrissur\nGovernment Medical College, Idukki\nGovernment Medical College, Manjeri, Malapuram Dist.\nGovt. Medical College,Pariyaram, Kannur\nJubilee Mission Medical College & Research Institute, Thrissur\nKannur Medical College, Kannur\nKaruna Medical College, Palakkad\nKMCT Medical College, Kozhikode, Calicut\nM E S Medical College , Perintalmanna Malappuram Distt.Kerala\nMalabar Medical College, Kozhikode, Calicut\nMalankara Orthodox Syrian Church Medical College, Kolenchery\nMedical College, Thiruvananthapuram\nMount Zion Medical College, Chayalode, Ezhamkulam Adoor, Pathanamthitta\nP K Das Institute of Medical Sciences, Palakkad, Kerala\nPushpagiri Institute Of Medical Sciences and Research Centre, Tiruvalla\nSree Gokulam Medical College Trust & Research Foundation, Trivandrum\nSree Narayana Instt. of Medical Sciences, Chalakka, Ernakulam\nSree Uthradom Thiurnal Academy of Medical Sciences, Trivandrum\nT D Medical College, Alleppey (Allappuzha)\nTravancore Medical College, Kollam\nVN Public Health and Educational Trust, Palakkad- Kerala\nAll India Institute of Medical Sciences, Bhopal\nAmaltas Institute of Medical Sciences, Dewas\nBundelkhand Medical College, Sagar\nChirayu Medical College and Hospital, Bairagarh, Bhopal\nGajra Raja Medical College, Gwalior\nGandhi Medical College, Bhopal\nGovernment Medical College, Chhindwara, MP\nGovernment Medical College, Datia, MP\nGovernment Medical College, Khandwa, MP\nGovernment Medical College, Ratlam\nGovernment Medical College, Satna\nGovernment Medical College, Seoni\nGovernment Medical College, Shahdol, MP\nGovernment Medical College, Shivpuri, MP\nGovernment Medical College, Vidisha, MP\nIndex Medical College Hospital & Research Centre, Indore\nL.N. Medical College and Research Centre, Bhopal\nLNCT Medical College & Sewakunj Hospital, Indore\nM G M Medical College, Indore\nMahaveer Institute of Medical Sciences & Research, Bhopal\nNetaji Subhash Chandra Bose Medical College, Jabalpur\nPeoples College of Medical Sciences & Research Centre, Bhanpur, Bhopal\nRam Krishna College Hospital & Research Centre, Bhopal\nRKDF Medical College Hospital & Research Centre, Jatkhedi, Bhopal\nRuxmaniben Deepchand Gardi Medical College, Ujjain\nSchool of Medical Sciences, Sri Satya Sai University of Technology and Medical Sciences, Sehore (MP)\nShyam Shah Medical College, Rewa\nSri Aurobindo Medical College and Post Graduate Institute , Indore\nSukh Sagar Medical College & Hospital, Jabalpur\nSundarlal Patwa Govt. Medical College\nVirendra Kumar Sakhlecha Government Medical College\nACPM Medical College, Dhule\nAll India Institute of Medical Sciences, Nagpur\nArmed Forces Medical College, Pune\nAshwini Rural Medical College, Hospital & Research Centre, Solapur\nB. J. Govt. Medical College, Pune\nB.K.L. Walawalkar Rural Medical College, Ratnagiri\nBharati Vidyapeeth Deemed University Medical College & Hospital, Sangli\nBharati Vidyapeeth University Medical College, Pune\nBharatratna Atal Bihari Vajpayee Medical College, Pune\nDatta Meghe Medical College, Nagpur\nDr Vaishampayan Memorial Medical College, Solapur\nDr. D Y Patil Medical College, Hospital and Research Centre, Pimpri, Pune\nDr. D Y Patil Medical College, Kolhapur\nDr. N Y Tasgaonkar Institute of Medical Science\nDr. Panjabrao Alias Bhausaheb Deshmukh Memorial Medical College, Amravati\nDr. Rajendra Gode Medical College, Amravati\nDr. Shankarrao Chavan Govt. Medical College, Nanded\nDr. Ulhas Patil Medical College & Hospital, Jalgaon\nDr. Vasantrao Pawar Med. Col. Hosp. & Research Centre, Nasik (Prev. NDMVP Samaj Medical College)\nDr. Vithalrao Vikhe Patil Foundations Medical College & Hospital, Ahmednagar\nGovernment Medical College & Hospital, Baramati\nGovernment Medical college and District Hospital, Ratnagiri\nGovernment Medical College, Akola\nGovernment Medical College, Alibag\nGovernment Medical College, Ambernath\nGovernment Medical College, Amravati\nGovernment Medical College, Aurangabad\nGovernment Medical College, Bhandara\nGovernment Medical College, Buldhana\nGovernment Medical College, Chandrapur\nGovernment Medical College, Gadchiroli\nGovernment Medical College, Gondia\nGovernment Medical College, Hingoli\nGovernment Medical College, Jalgaon\nGovernment Medical College, Jalna\nGovernment Medical College, Latur\nGovernment Medical College, Miraj\nGovernment Medical College, Nagpur\nGovernment Medical College, Nandurbar\nGovernment Medical College, Osmanabad\nGovernment Medical College, Parbhani\nGovernment Medical College, Satara\nGovernment Medical College, Sindhudurg\nGovernment Medical College, Washim\nGovernment Medical College,Nashik\nGovernment Medical College L.T. Marg, Near L.T. Marg Police Station, Mumbai - 400001\nGrant Medical College, Mumbai\nH.B.T. Medical College & Dr. R.N. Cooper Municipal General Hospital, Juhu, Mumbai\nIndian Institute of Medical Science & Research, Jalna\nIndira Gandhi Medical College & Hospital, Nagpur\nJawaharlal Nehru Medical College, Sawangi (Meghe), Wardha\nKJ Somaiyya Medical College & Research Centre, Mumbai\nKrishna Institute of Medical Sciences, Karad\nLokmanya Tilak Municipal Medical College, Sion, Mumbai\nMaharashtra Institute of Medical Education & Research, Talegaon, Pune\nMaharashtra Institute of Medical Sciences & Research, Latur\nMahatma Gandhi Institute of Medical Sciences, Sevagram, Wardha\nMahatma Gandhi Mission Medical College, Vashi\nMahatma Gandhi Missions Medical College, Aurangabad\nMahatma Gandhi Missions Medical College, Navi Mumbai\nMahatma Gandhi Missions Medical College, Navi Mumbai\nN. K. P. Salve Instt. of Medical Sciences and Research Centre and Lata Mangeshkar Hospital, Nagpur\nPadmashree Dr. D.Y.Patil Medical College, Navi Mumbai\nParbhani Medical College\nPrakash Institute of Medical Sciences & Research, Sangli\nRajashree Chatrapati Shahu Maharaj Government Medical College, Kolhapur\nRajiv Gandhi Medical College and Chhatrapati Shivaji Maharaj Hospital, Thane\nRural Medical College, Loni\nSeth GS Medical College, Mumbai\nShri Ramchandra Institute of Medical Sciences\nShri Vasant Rao Naik Govt. Medical College, Yavatmal\nSindhudurg Shikshan Prasarak Mandal (SSPM) Medical College & Lifetime Hospital, Padave, Sindhudurg\nSMBT Institute of Medical Sciences & Research Centre, Nandihills, Nashik\nSmt. Kashibai Navale Medical College and General Hospital, Pune\nSri Bhausaheb Hire Government Medical College, Dhule\nSRTR Medical College, Ambajogai\nSymbiosis Medical College for Women, Pune\nTerna Medical College, Navi Mumbai\nTopiwala National Medical College, Mumbai\nVedantaa Institute of Medical Sciences, Palghar, Maharashtra\nGovernment Medical College, Churachandpur\nJawaharlal Nehru Institute of Medical Sciences, Porompet, Imphal\nRegional Institute of Medical Sciences, Imphal\nShija Academy of Health Sciences\nNorth Eastern Indira Gandhi Regional Instt. of Health and Medical Sciences, Shillong\nPA Sangama International Medical College and Hospital\nZoram Medical College, Mizoram\nNagaland Institute of Medical Sciences & Research\nAll India Institute of Medical Sciences, Bhubaneswar\nDRIEMS Institute of Health Sciences and Hospital, Kairapari\nGovernment Medical College & Hospital (Renamed as Fakir Mohan Medical College & Hospital), Balasore\nGovernment Medical College and Hospital, Jajpur Odhisha\nGovernment Medical College & Hospital (Renamed as Bhima Bhoi Medical College & Hospital), Balangir\nGovernment Medical College, Bhawanipatna\nGovernment Medical College, Keonjhar\nGovernment Medical College, Sundargarh\nHi-Tech Medical College & Hospital, Bhubaneswar\nHi-Tech Medical College & Hospital, Rourkela\nInstitute of Medical Sciences & SUM Hospital, Campus, Bhubaneswar, Odhisha\nInstt. Of Medical Sciences & SUM Hospital, Bhubaneswar\nKalinga Institute of Medical Sciences, Bhubaneswar\nMKCG Medical College, Berhampur\nPt. Raghunath Murmu Medical College and Hospital, Baripada, Odisha\nSaheed Laxman Nayak Medical College & Hospital, Koraput\nSCB Medical College, Cuttack\nSri Jagannath Medical College & Hospital, Puri\nVeer Surendra Sai Institute of Medical Sciences and Research, Burla\nAarupadai Veedu Medical College, Pondicherry\nIndira Gandhi Medical College & Research Institute, Puducherry\nJawaharlal Institute of Postgraduate Medical Education & Research, Puducherry\nMahatma Gandhi Medical College & Research Institute, Pondicherry\nPuducherry Institute of Medical Sciences & Research, Pondicherry\nSri Lakshmi Narayana Institute of Medical Sciences, Pondicherry\nSri Manakula Vinayagar Medical College & Hospital, Pondicherry\nSri Venkateswaraa Medical College, Hospital & Research Centre, Pondicherry\nVinayaka Missions Medical College, Karaikal, Pondicherry\nAdesh Institute of Medical Sciences & Research, Bhatinda\nAll India Institute of Medical Sciences, Bhatinda\nChintpurni Medical College, Pathankot, Gurdaspur\nChristian Medical College, Ludhiana\nDayanand Medical College & Hospital, Ludhiana\nDr B R Ambedkar State Institute of Medical Sciences, SAS Nagar , Mohali\nGian Sagar Medical College & Hospital, Patiala\nGovernment Medical College, Amritsar\nGovernment Medical College, Patiala\nGuru Govind Singh Medical College, Faridkot\nPunjab Institute of Medical Sciences, Jalandhar\nRIMT Medical College and Hospital\nSri Guru Ram Das Institute of Medical Sciences and Research, Sri Amritsar\nAll India Institute of Medical Sciences, Jodhpur\nAmerican International Institute of Medical Sciences, Bedwas*\nAnanta Institute of Medical Sciences & Research Centre, Rajsamand*\nDr S S Tantia Medical College Hospital & Research Centre\nDr SN Medical College, Jodhpur\nEmployees State Insurance Corporation Medical College,Alwar\nGeetanjali Institute of Medical Sciences, Udaipur*\nGovernment Medical College, Banswara\nGovernment Medical College, Baran\nGovernment Medical College, Bharatpur, Rajasthan\nGovernment Medical College, Nagaur\nGovernment Medical College, Sawai Madhopur\nGovernment Medical College, Alwar\nGovernment Medical College, Barmer\nGovernment Medical College, Bhilwara, Rajasthan\nGovernment Medical College, Bundi\nGovernment Medical College, Chittorgarh\nGovernment Medical College, Churu\nGovernment Medical College, Dausa\nGovernment Medical College, Dholpur\nGovernment Medical College, Dungarpur\nGovernment Medical College, Hanumangarh\nGovernment Medical College, Jhunjhunu\nGovernment Medical College, Karauli\nGovernment Medical College, Kota\nGovernment Medical College, Pali, Rajasthan\nGovernment Medical College, Sirohi\nGovernment Medical College, Sri Ganganagar\nJaipur National University Institute of Medical Sciences and Resarch Centre, Jagatpura, Jaipur\nJawaharlal Nehru Medical College, Ajmer\nJhalawar Medical College, Jhalawar\nJIET Medical College and Hospital\nMahatma Gandhi Medical College and Hospital, Sitapur, Jaipur\nNational Institute of Medical Science & Research, Jaipur\nPacific Institute of Medical Sciences, Umarda, Udaipur*\nPacific Medical College & Hospital, Bhilo Ka Bedla, Udaipur*\nR N T Medical College, Udaipur\nRUHS College of Medical Sciences, Jaipur\nSardar Patel Medical College, Bikaner\nShri Kalyan Govt. Medical College, Sikar, Rajasthan\nSMS Medical College, Jaipur\nSudha Medical College, Kota, Rajasthan\nVyas Medical College & Hospital Jodhpur, Rajasthan\nSikkim Manipal Institute of Medical Sciences, Gangtok\nACS Medical College and Hospital, Chennai\nAll India Institute of Medical Science, Madurai\nAnnaii Medical College sand Rajalakshmi Health City, Kancheepuram District\nAnnapoorna Medical College & Hospital, Salem\nArunai Medical College And Hospital\nBhaarat Medical College & Hospital\nChengalpattu Medical College, Chengalpattu\nChettinad Hospital & Research Institute, Kanchipuram\nChristian Medical College, Vellore\nCoimbatore Medical College, Coimbatore\nDhanalakshmi Srinivasan Medical College and Hospital, Perambalur\nDhanalakshmi Srinivasan Institute of Medical Sciences and Hospital - Thuraiyur Road, Perambalur\nESIC Medical College & PGIMSR, K.K Nagar, Chennai\nFaculty of Medicine , Sri Lalithambigai Medical College and Hospital\nGovernment Dharmapuri Medical College, Dharmapuri\nGovernment Erode Medical College & Hospital, Perundurai (Formerly IRT Perundurai Medical College)\nGovernment Medical College & ESIC Hospital, Coimbatore, TamilNadu\nGovernment Medical College, Ariyalur\nGovernment Medical College, Dindigul\nGovernment Medical College, Kallakurichi\nGovernment Medical College, Karur\nGovernment Medical College, Krishnagiri\nGovernment Medical College, Nagapattinam\nGovernment Medical College, Namakkal\nGovernment Medical College, Omandurar\nGovernment Medical College, Pudukottai, Tamil Nadu\nGovernment Medical College, Ramanathapuram\nGovernment Medical College, The Nilgiris\nGovernment Medical College, Thiruvallur\nGovernment Medical College, Tiruppur\nGovernment Medical College, Virudhunagar\nGovernment Sivagangai Medical College, Sivaganga\nGovernment Thiruvannamalai Medical College, Thiruvannamalai\nGovernment Vellore Medical College, Vellore\nGovernment Villupuram Medical College, Villupuram\nGovt. Mohan Kumaramangalam Medical College, Salem\nIndira Medical College & Hospitals, Thiruvallur\nJ R Medical College and Hospital Villupuram District, Tamilnadu\nK A P Viswanathan Government Medical College, Trichy\nKanyaKumari Government Medical College, Asaripallam\nKanyakumari Medical Mission Research Centre, Kanyakumari District\nKarpaga Vinayaga Institute of Medical Sciences, Maduranthagam\nKarpagam Faculty of Medical Sciences & Research, Coimbatore\nKilpauk Medical College, Chennai\nKMCH Institute of Health Sciences and Research, Coimbatore\nMadha Medical College and Hospital, Thandalam, Chennai\nMadras Medical College, Chennai\nMadurai Medical College, Madurai\nMeenakshi Medical College and Research Institute, Enathur\nMelmaruvathur Adiparasakthi Instt. Medical Sciences and Research\nNandha Medical College & Hospital Erode\nPanimalar Medical College Hospital & Research Institute, Chennai,Tamil Nadu\nPSG Institute of Medical Sciences, Coimbatore\nPSP Medical College Hospital and Research Institute, Chennai\nRajah Muthiah Medical College, Annamalainagar\nSaveetha Medical College and Hospital, Kanchipuram\nShri Sathya Sai Medical College and Research Institute, Kancheepuram\nSree Balaji Medical College and Hospital, Chennai\nSree Mookambika Institute of Medical Sciences, Kanyakumari\nSri Muthukumaran Medical College,Chennai\nSri Ramachandra Medical College & Research Institute, Chennai\nSri Venkateswaraa Medical College Hospital and Research Institute, Chennai\nSrinivasan Medical College and Hospital\nSRM Medical College Hospital & Research Centre, Kancheepuram\nST Peters Medical College, Hospital & Research Institute\nStanley Medical College, Chennai\nSwamy Vivekanandha Medical College Hospital And Research Institute\nTagore Medical College and Hospital, Chennai\nThanjavur Medical College, Thanjavur\nTheni Government Medical College, Theni\nThiruvarur Govt. Medical College, Thiruvarur\nThoothukudi Medical College, Thoothukudi\nTirunelveli Medical College, Tirunelveli\nTrichy SRM Medical College Hospital & Research Centre, Trichy\nVelammal Medical College Hospital and Research Institute, Madurai\nVELS Medical College & Hospital*\nVinayaka Missions Kirupananda Variyar Medical College, Salem\nAll India Institute of Medical Sciences, Bibinagar\nApollo Institute of Medical Sciences and Research, Hyderabad\nArundathi Institute of Medical Sciences, Medchal\nAutonomous State Medical College and Hospital Yadadri\nAyaan Institute of Medical Sciences, Teaching Hospital & Research Centre, Kanaka Mamidi, R.R. Dist\nBhaskar Medical College, Yenkapally\nChalmeda Anand Rao Insttitute Of Medical Sciences, Karimnagar\nCMR Institute of Medical Science\nDeccan College of Medical Sciences, Hyderabad\nDr. Patnam Mahender Reddy Institute of Medical Sciences, Chevella, Rangareddy\nDr. VRK Womens Medical College, Aziznagar\nEmployees State Insurance Coporation Medical College, Sanath Nagar, Hyderabad\nFather Colombo Institute of Medical Sciences, Warangal\nGandhi Medical College, Secunderabad\nGOVERNMENT MEDICAL COLLEGE JANGAON\nGOVERNMENT MEDICAL COLLEGE KHAMMAM\nGOVERNMENT MEDICAL COLLEGE KUMURAM BHEEM ASIFAFABAD\nGovernment Medical College Medak\nGOVERNMENT MEDICAL COLLEGE VIKARABAD\nGovernment Medical College, Jagtial\nGovernment Medical College, Jayashankar Bhupalpally\nGovernment Medical College, Jogulumba Gadwal\nGovernment Medical College, Kamareddy\nGovernment Medical College, Karimnagar\nGovernment Medical College, Mahabubabad\nGovernment Medical College, Mahabubnagar\nGovernment Medical College, Maheshwaram\nGovernment Medical College, Mancherial\nGovernment Medical College, Mulugu\nGovernment Medical College, Nagarkurnool\nGovernment Medical College, Nalgonda\nGovernment Medical College, Narayanpet\nGovernment Medical College, Narsampet\nGovernment Medical College, Nirmal\nGovernment Medical College, Nizamabad\nGovernment medical College, Quthbullapur\nGovernment Medical College, Rajanna Sircilla\nGovernment Medical College, Ramagundam\nGovernment Medical College, Sangareddy\nGovernment Medical College, Siddipet\nGovernment Medical College, Suryapet\nGovernment Medical College, Wanaparthy\nGovernment Medical College, Bhadradri Kothagudem\nKakatiya Medical College, Warangal\nKamineni Academy of Medical Sciences & Research Center, Hyderabad\nKamineni Institute of Medical Sciences, Narketpally\nMahavir Institute of Medical Sciences, Vikarabad, Telengana\nMaheshwara Medical College, Chitkul, Patancheru, Medak\nMalla Reddy Institute of Medical Sciences, Hyderabad\nMallareddy Medical College for Women, Hyderabad\nMamata Academy of Medical Sciences, Bachupally\nMamata Medical College, Khammam\nMediciti Institute Of Medical Sciences, Ghanpur\nMNR Medical College & Hospital, Sangareddy\nNEELIMA INSTITUTE OF MEDICAL SCIENCES\nNova Institute of Medical Sciences and Research Centre\nOsmania Medical College, Hyderabad\nPrathima Institute Of Medical Sciences, Karimnagar\nPrathima Relief Institute of Medical Sciences, Warangal\nR.V.M. Institute of Medical Sciences and Research Centre, Siddipet\nRajiv Gandhi Institute of Medical Sciences, adilabad\nS V S Medical College, Mehboobnagar\nShadan Institute of Medical Sciences,Research Centre and Teaching Hospital, Peerancheru\nSurabhi Institute of Medical Sciences, Siddipet, Telangana\nTRR Institute of Medical Sciences, patancheru\nAgartala Government Medical College,Agartala\nTripura Medical College and Dr. B R A M Teaching Hospital, Agartala\nTripura Santiniketan Medical College, Dist- West Tripura\nAjay Sangaal Institute of Medical Sciences and Ayushman Hospital Shamli (UP)\nAll India Institute of Medical Sciences, Gorakhpur\nAll India Institute of Medical Sciences, Rae Bareli\nAutonomous State Medical College Sultanpur\nAutonomous State Medical College and Hospital Auraiya\nAutonomous State Medical College and Hospital Gonda\nAutonomous State Medical College and Hospital Kaushambi\nAutonomous State Medical College and Hospital Lakhimpuri kheri\nAutonomous State Medical College Kushinagar\nAutonomous State Medical College Lalitpur\nAutonomous State Medical College Pilibhit\nAutonomous State Medical College Pratapgarh\nAutonomous State Medical College Society Ghazipur\nAutonomous State Medical College Society, Etah, Uttar Pradesh\nAutonomous State Medical College Society, Fatehpur\nAutonomous State Medical College Society, Hardoi\nAutonomous State Medical College, Akbarpur, Kanpur\nAutonomous State Medical College, Siddharthnagar\nAutonomous State Medical College, Sonebhadra\nAutonomous State Society Medical College Mirzapur\nBaba Kina Ram Autonomous State Medical College and Hospital Chandauli\nBRD Medical College, Gorakhpur\nCareer Instt. Of Medical Sciences & Hospital, Lucknow\nDr. B.S. Kushwah Medical College, Kanpur\nDr. Ram Manohar Lohia Institute of Medical Sciences,Lucknow\nEra Lucknow Medical College , Lucknow\nF.H. Medical College & Hospital, Etamdapur, Agra\nG.S. Medical College & Hospital, Hapur, UP\nGovernment Allopathic Medical College, Banda, UP\nGovernment Institute of Medical Sciences, Kasna, Greater Noida\nGovernment Medical College & Super facility Hospital, Azamgarh\nGovernment Medical College, Badaun, U.P.\nGovernment Medical College, Shahjahanpur, UP\nGovernment Medical College, Faizabad\nGovernment Medical College, Firozabad\nGovernment Medical College, Kannauj\nGovernment Medical College, Rampur, Basti\nGSVM Medical College, Kanpur\nHeritage Institute of Medical Sciences, Varanasi\nHind Institute of Medical Sciences , Barabanki\nHind Institute of Medical Sciences, Sitapur\nInstitute of Medical Sciences, BHU, Varansi\nIntegral Institute of Medical Sciences & Research, Lucknow\nJawaharlal Nehru Medical College, Aligarh\nK.D. Medical College Hospital & Research Centre, Mathura\nKalyan Singh Government Medical College\nKing George Medical University, Lucknow\nKMC Medical College & Hospital, Maharajganj, Uttar Pradesh\nKrishna Mohan Medical College & Hospital, Mathura\nLLRM Medical College, Meerut\nMahamaya Rajkiya Allopathic Medical College, Ambedkarnagar\nMaharani Laxmi Bai Medical College, Jhansi\nMaharshi Devraha Baba Autonomous State Medical College, Deoria\nMahatma Vidur Autonomous State Medical College\nMajor S D Singh Medical College and Hospital, Fathehgarh, Farrukhabad\nMayo Institute of Medical Sciences, Barabanki\nMoti Lal Nehru Medical College, Allahabad\nMuzaffarnagar Medical College, Muzaffarnagar\nNaraina Medical College & Research Centre\nNational Capital Region Institute of Medical Sciences, Meerut\nNoida International Institute Of Medical Sciences\nPrasad Institute of Medical Sciences, Lucknow\nRajkiya Allopathic Medical College, Bahraich, UP\nRajkiya Medical College Jalaun, Orai, Uttar Pradesh\nRajshree Medical Research Institute, Bareilly\nRama Medical College and Hospital , Kanpur\nRama Medical College Hospital and Research Centre, Hapur\nRohilkhand Medical College & Hospital, Bareilly\nS N Medical College, Agra\nSantosh Medical College, Ghaziabad\nSaraswati Institute of Medical Sciences, Hapur\nSaraswati Medical College, Unnao, U.P.\nSchool of Medical Sciences & Research,Greater Noida\nShaikh-UL-Hind Maulana Mahmood Hasan Medical College, Saharanpur\nShri Gorakshnath Medical College Hospital & Arogya Dham Gorakhpur (UP)\nShri Ram Murti Smarak Institute of Medical Sciences, Bareilly\nShri Siddhi Vinayak Medical College & Hospital Sambhal (UP) 244302\nSKS Hospital Medical College & Research Centre\nSubharti Medical College, Meerut\nT S Misra Medical College & Hospital, Amusi, Lucknow\nTeerthanker Mahaveer Medical College, Moradabad\nUma Nath Singh Autonomous State Medical College Society Jaunpur\nUnited Institute of Medical Sciences, Allahabad\nUttar Pradesh University of Medical Sciences, (Prev. UP Rural Inst.of Med.Sc&R) Etawah\nVarun Arjun Medical College, Banthra, Shahjahanpur\nVenkateshwara Institute of Medical Sciences, Gajraula\nAll India Institute of Medical Sciences, Rishikesh\nDoon Medical College, Dehradun, Uttarakhand\nGautam Buddha Chikitsa Mahavidyalaya, Dehradum\nGovernment Medical College (Prev.Uttarakhand Forest Hospital Trust Med.Col.), Haldwani\nGovernment Medical College, Haridwar\nGraphic Era Institute of Medical Sciences Dehradun, Uttrakhand\nHimalayan Institute of Medical Sciences, Dehradun\nShri Guru Ram Rai Institute of Medical & Health Sciences, Dehradun\nSoban Singh jeena Government institute of Medical science & Research, Almora\nVeer Chandra Singh Garhwali Govt. Medical Sc. & Research Instt, Srinagar, Pauri Garhwal\nAll India Institute of Medical Sciences, Kalyani, Nadia\nBankura Sammilani Medical College, Bankura\nBarasat Government Medical College & Hospital\nBurdwan Medical College, Burdwan\nCalcutta National Medical College, Kolkata\nCollege of Medicine and Sagore Dutta Hospital, Kolkata\nCollege of Medicine and JNM Hospital, Kalyani, Nadia\nCoochbehar Government Medical College & Hospital, Coochbehar, WB\nDiamond Harbour Government Medical College and Hospital, West Bengal\nEast West Institute of Medical Sciences and Research, Burdwan\nEmployees State Insurance Corporation Medical College, Joka, Kolkata\nGouri Devi Institute of Medical Sciences and Hospital, Durgapur\nGovt. Medical College, Kolkata\nICARE Institute of Medical Sciences & Research, Haldia, Purba Midanpore\nInstitute of Postgraduate Medical Education & Research, Kolkata\nIQ-City Medical College, Burdwan\nJagannath Gupta Institute of Medical Sciences & Hospital, Kolkata\nJakir Hossain Medical College, Burdwan\nJalpaiguri Government Medical College\nJhargram Government Medical College & Hospital, Jhargram\nJIS School of Medical Science & Research, Howrah\nJMN Medical College, Nadia\nKPC Medical College, Jadavpur, Kolkata\nKrishnanagar Institute of Medical Sciences Pvt. Ltd Krishnanagar, Nadia (WB)\nMalda Medical College & Hospital, Malda\nMidnapore Medical College, Midnapore\nMurshidabad Medical College & Hospitals, Murshidabad\nNilratan Sircar Medical College, Kolkata\nNorth Bengal Medical College, Darjeeling\nPrafulla Chandra Sen Government Medical College & Hospital\nPurulia Government Medical College & Hospital\nRaiganj Government Medical College & Hospital, Raiganj\nRampurhat Government Medical College & Hospital, Rampurhat\nRG Kar Medical College, Kolkata\nSantiniketan Medical College, Bolpur, West Bengal\nSarat Chandra Chattopadhyay Government Medical College & Hospital\nShri Ramkrishna Institute of Medical Sciences & Sanaka Hospitals, Durgapur\nTamralipto Government Medical College & Hospital"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "other_institution",
+   "label": "Please share the full name and address of the college/institution where you studied MBBS",
+   "fieldtype": "Small Text",
+   "idx": 37
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "complete_mbbs",
+   "label": "In which year did you complete your MBBS? ",
+   "fieldtype": "Select",
+   "idx": 38,
+   "options": "\n2019\n2020\n2021\n2022\n2023\n2024\n2025\nOthers"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "any_other_year",
+   "label": "Please choose the year you completed your MBBS",
+   "fieldtype": "Select",
+   "idx": 39,
+   "options": "\n2000 or earlier\n2001\n2002\n2003\n2004\n2005\n2006\n2007\n2008\n2009\n2010\n2011\n2012\n2013\n2014\n2015\n2016\n2017\n2018"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "education_qualification",
+   "label": "Education Qualification",
+   "fieldtype": "Small Text",
+   "idx": 40
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "mbbs_experience",
+   "label": "Total years of clinical work experience after MBBS (excluding mandatory internship) ",
+   "fieldtype": "Select",
+   "idx": 41,
+   "options": "\n0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10 or more"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "state_medical_council",
+   "label": "Please select the state medical council that you are registered with ",
+   "fieldtype": "Select",
+   "idx": 42,
+   "options": "\nNot registered\nAndaman Nicobar Islands\nAndhra Pradesh\nArunachal Pradesh\nAssam\nBihar\nChandigarh\nChhattisgarh\nDadra and Nagar Haveli\nDelhi\nGoa\nGujarat\nHaryana\nHimachal Pradesh\nJammu and Kashmir\nJharkhand\nKarnataka\nKerala\nMadhya Pradesh\nMaharashtra\nManipur\nMeghalaya\nMizoram\nNagaland\nOdisha\nPuducherry\nPunjab\nRajasthan\nSikkim\nTamil Nadu\nTelangana\nTripura\nUttar Pradesh\nUttarakhand\nWest Bengal"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "interested_in",
+   "label": "Why are you interested in this Fellowship? ",
+   "fieldtype": "Small Text",
+   "idx": 43
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "monthly_salary",
+   "label": "What is your last drawn monthly compensation/salary?",
+   "fieldtype": "Select",
+   "idx": 44,
+   "options": "\nINR 0 to 20,000\nINR 21,000 to 30,000\nINR 31,000 to 40,000\nINR 41,000 to 50,000\nINR 51,000 to 60,000\nINR 61,000 to 70,000\nINR 71,000 to 80,000\nINR 81,000 to 90,000\nINR 91,000 to 1,00,000\nINR 1,00,001 or more"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "section_break_pdrv",
+   "label": "section_break_pdrv",
+   "fieldtype": "Section Break",
+   "idx": 45
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "preferred_location",
+   "label": "<h5>Preferred locations</h5>",
+   "fieldtype": "Heading",
+   "idx": 46
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "are_you_open",
+   "label": "Are you open to being placed in any location?",
+   "fieldtype": "Select",
+   "idx": 47,
+   "options": "\nYes\nNo"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "first_prefered",
+   "label": "Select your first preferred location",
+   "fieldtype": "Select",
+   "idx": 48,
+   "options": "\nArunachal Pradesh\nAssam\nBihar\nChhattisgarh\nGujarat\nKarnataka\nKerala\nMaharashtra\nMeghalaya\nOdisha\nRajasthan\nTamil Nadu\nUttarakhand"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "second_location",
+   "label": "Select your second preferred location",
+   "fieldtype": "Select",
+   "idx": 49,
+   "options": "\nArunachal Pradesh\nAssam\nBihar\nChhattisgarh\nGujarat\nKarnataka\nKerala\nMaharashtra\nMeghalaya\nOdisha\nRajasthan\nTamil Nadu\nUttarakhand"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "third_location",
+   "label": "Select your third preferred location",
+   "fieldtype": "Select",
+   "idx": 50,
+   "options": "\nArunachal Pradesh\nAssam\nBihar\nChhattisgarh\nGujarat\nKarnataka\nKerala\nMaharashtra\nMeghalaya\nOdisha\nRajasthan\nTamil Nadu\nUttarakhand"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "section_break_lqit",
+   "label": "section_break_lqit",
+   "fieldtype": "Section Break",
+   "idx": 51
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "selection_process",
+   "label": "The selection process will be completed in April 2026. Are you available to start the Fellowship in May 2026?",
+   "fieldtype": "Select",
+   "idx": 52,
+   "options": "\nYes\nNo"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "if_no_mention",
+   "label": "If No, then Please mention",
+   "fieldtype": "Small Text",
+   "idx": 53
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "english",
+   "label": "English",
+   "fieldtype": "Check",
+   "idx": 54
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "bengali",
+   "label": "Bengali",
+   "fieldtype": "Check",
+   "idx": 55
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "chhattisgarhi",
+   "label": "Chhattisgarhi",
+   "fieldtype": "Check",
+   "idx": 56
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "gujarati",
+   "label": "Gujarati",
+   "fieldtype": "Check",
+   "idx": 57
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "hindi",
+   "label": "Hindi",
+   "fieldtype": "Check",
+   "idx": 58
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "kannada",
+   "label": "Kannada",
+   "fieldtype": "Check",
+   "idx": 59
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "malayalam",
+   "label": "Malayalam",
+   "fieldtype": "Check",
+   "idx": 60
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "marathi",
+   "label": "Marathi",
+   "fieldtype": "Check",
+   "idx": 61
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "odia",
+   "label": "Odia",
+   "fieldtype": "Check",
+   "idx": 62
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "tamil",
+   "label": "Tamil",
+   "fieldtype": "Check",
+   "idx": 63
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "if_other",
+   "label": "Please let us know how you got to know about this opportunity",
+   "fieldtype": "Small Text",
+   "idx": 64
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "self_declaration",
+   "label": "Self-declaration of medical fitness ",
+   "fieldtype": "Section Break",
+   "idx": 65
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "medical_fitness",
+   "label": "Self-declaration of medical fitness ",
+   "fieldtype": "Small Text",
+   "idx": 66
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "authorisation",
+   "label": "Authorisation  ",
+   "fieldtype": "Check",
+   "idx": 67
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "section_break_prfc",
+   "label": "section_break_prfc",
+   "fieldtype": "Section Break",
+   "idx": 68
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "fellowship_mail",
+   "label": "Fellowship Mail",
+   "fieldtype": "Small Text",
+   "idx": 69
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "it_team_email",
+   "label": "IT Team Email",
+   "fieldtype": "Small Text",
+   "idx": 70
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "onboarding_email",
+   "label": "Onboarding Email",
+   "fieldtype": "Small Text",
+   "idx": 71
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "registration_form",
+   "label": "Registration Form",
+   "fieldtype": "Attach",
+   "idx": 72
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "column_break_agnv",
+   "label": "column_break_agnv",
+   "fieldtype": "Column Break",
+   "idx": 73
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "subrat_mail",
+   "label": "Subrat Mail",
+   "fieldtype": "Small Text",
+   "idx": 74
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "additional_cb",
+   "label": "Additional C & B",
+   "fieldtype": "Tab Break",
+   "idx": 75
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "current_residential_address_section",
+   "label": "Current Residential Address",
+   "fieldtype": "Section Break",
+   "idx": 76
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "door_number",
+   "label": "Door number",
+   "fieldtype": "Small Text",
+   "idx": 77
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "arealocality",
+   "label": "Area / locality ",
+   "fieldtype": "Small Text",
+   "idx": 78
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "pincode",
+   "label": "Pincode",
+   "fieldtype": "Small Text",
+   "idx": 79
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "address1",
+   "label": "Address",
+   "fieldtype": "Small Text",
+   "idx": 80
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "last_employment_section",
+   "label": "Last Employment",
+   "fieldtype": "Section Break",
+   "idx": 81
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "full_name_employer",
+   "label": "Full name of the Employer",
+   "fieldtype": "Small Text",
+   "idx": 82
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "district__city",
+   "label": "District / City",
+   "fieldtype": "Small Text",
+   "idx": 83
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "designation__role",
+   "label": "Designation / Role",
+   "fieldtype": "Small Text",
+   "idx": 84
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "emp_startdate",
+   "label": "Start Date",
+   "fieldtype": "Date",
+   "idx": 85
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "emp_enddate",
+   "label": "End Date",
+   "fieldtype": "Date",
+   "idx": 86
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "feedback_section",
+   "label": "Feedback",
+   "fieldtype": "Section Break",
+   "idx": 87
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "fbone_panel",
+   "label": "Feedback One Panelist",
+   "fieldtype": "Small Text",
+   "idx": 88
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "fbtwo_panel",
+   "label": "Feedback Two Panelist",
+   "fieldtype": "Small Text",
+   "idx": 89
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "application_status_verification_section",
+   "label": "Application status verification",
+   "fieldtype": "Section Break",
+   "idx": 90
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "otp_code",
+   "label": "OTP Code",
+   "fieldtype": "Small Text",
+   "idx": 91
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "otp_expiry",
+   "label": "OTP Expiry",
+   "fieldtype": "Datetime",
+   "idx": 92
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "field_details_tab",
+   "label": "Field Registration Form - Details",
+   "fieldtype": "Tab Break",
+   "idx": 93
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "section_break_venf",
+   "label": "Application Status",
+   "fieldtype": "Section Break",
+   "idx": 94
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "blocklist_reason",
+   "label": "Reason for Blocklist",
+   "fieldtype": "Small Text",
+   "idx": 95
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "hold_reason",
+   "label": "On Hold Reason",
+   "fieldtype": "Small Text",
+   "idx": 96
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "reasons_for_shortlist",
+   "label": "Reasons for Shortlist",
+   "fieldtype": "Select",
+   "idx": 97,
+   "options": "\nRelevant Qualification/Certification\nVery Relevant Experience\nEx-Employee\nGood Communication Skills\nGood Domain Knowledge\nMatching Skills\nOthers"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "other_shortlist",
+   "label": "Other reason for shortlist",
+   "fieldtype": "Small Text",
+   "idx": 98
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "column_break_vywh",
+   "label": "column_break_vywh",
+   "fieldtype": "Column Break",
+   "idx": 99
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "reasons_for_reject_field",
+   "label": "Reasons for Reject",
+   "fieldtype": "Select",
+   "idx": 100,
+   "options": "\nInsufficient years of work experience\nNot Relevant Experience\nInadequate Qualification\nInsufficient Details\nUnable to Contact\nSkills not Matching\nCandidate not interested\nCandidate has another offer\nNotice Period too Long\nOthers"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "other_reject",
+   "label": "Other reasons for reject",
+   "fieldtype": "Small Text",
+   "idx": 101
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "other_job",
+   "label": "Shortlist to another job",
+   "fieldtype": "Check",
+   "idx": 102
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "reason_otherjob",
+   "label": "Reason for shortlisting to another job",
+   "fieldtype": "Small Text",
+   "idx": 103
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "offer_acceptance_section",
+   "label": "Offer Acceptance",
+   "fieldtype": "Section Break",
+   "idx": 104
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "date_offer_field",
+   "label": "Offer Date",
+   "fieldtype": "Small Text",
+   "idx": 105
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "reason_decline",
+   "label": "Decline Reason",
+   "fieldtype": "Small Text",
+   "idx": 106
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "basic_details_section",
+   "label": "Basic Details",
+   "fieldtype": "Section Break",
+   "idx": 107
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "email_verified",
+   "label": "Email Verified",
+   "fieldtype": "Check",
+   "idx": 108
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "phone_verified",
+   "label": "Phone Verified",
+   "fieldtype": "Check",
+   "idx": 109
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "alternate_no",
+   "label": "Alternate contact no",
+   "fieldtype": "Small Text",
+   "idx": 110
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "preferred_location_form",
+   "label": "Please choose your Preferred Job Location",
+   "fieldtype": "Select",
+   "idx": 111
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "column_break_uvdw",
+   "label": "column_break_uvdw",
+   "fieldtype": "Column Break",
+   "idx": 112
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "native_state",
+   "label": "Native State",
+   "fieldtype": "Select",
+   "idx": 113,
+   "options": "\nAndaman Nicobar Islands\nAndhra Pradesh\nArunachal Pradesh\nAssam\nBihar\nChandigarh\nChhattisgarh\nDadra and Nagar Haveli and Daman and Diu\nDelhi\nGoa\nGujarat\nHaryana\nHimachal Pradesh\nJammu and Kashmir\nJharkhand\nKarnataka\nKerala\nLadakh\nLakshadweep\nMadhya Pradesh\nMaharashtra\nManipur\nMeghalaya\nMizoram\nNagaland\nOdisha\nPunjab\nRajasthan\nSikkim\nTamil Nadu\nTelangana\nTripura\nUttar Pradesh\nUttarakhand\nWest Bengal"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "native_district",
+   "label": "Native District",
+   "fieldtype": "Select",
+   "idx": 114,
+   "options": "\nAdilabad\nAgar Malwa\nAgra\nAhmadabad\nAhmadnagar\nAizawl\nAjmer\nAkola\nAlappuzha\nAligarh\nAlipurduar\nAlirajpur\nAllahabad\nAlmora\nAlwar\nAmbala\nAmbedkar Nagar\nAmethi\nAmravati\nAmreli\nAmritsar\nAmroha\nAnand\nAnantapur\nAnantnag\nAnjaw\nAnugul\nAnuppur\nAraria\nAriyalur\nArvalli\nArwal\nAshoknagar\nAuraiya\nAurangabad\nAzamgarh\nBagalkot\nBageshwar\nBaghpat\nBahraich\nBaksa\nBalaghat\nBalangir\nBaleshwar\nBallia\nBalod\nBaloda Bazar\nBalrampur\nBanas Kantha\nBanda\nBandipora\nBengaluru Rural\nBengaluru South\nBengaluru Urban\nBanka\nBankura\nBanswara\nBaramulla\nBara Banki\nBaran\nBarddhaman\nBareilly\nBargarh\nBarmer\nBarnala\nBarpeta\nBarwani\nBastar\nBasti\nBathinda\nBaudh\nBegusarai\nBelagavi\nBelgaum\nBellary\nBemetara\nBetul\nBhadohi\nBhadradri\nBhadrak\nBhagalpur\nBhandara\nBharatpur\nBharuch\nBhavnagar\nBhilwara\nBhind\nBhiwani\nBhojpur\nBhopal\nBid\nBidar\nBijapur\nBijnor\nBikaner\nBilaspur\nBirbhum\nBishnupur\nBiswanath\nBokaro\nBongaigaon\nBotad\nBudgam\nBudaun\nBulandshahr\nBuldana\nBundi\nBurhanpur\nBuxar\nCachar\nCentral\nChamarajanagar\nChamba\nChamoli\nChampawat\nChamphai\nChandauli\nChandel\nChandrapur\nChanglang\nCharaideo\nCharkhi Dadri\nChatra\nChennai\nChhatarpur\nChhindwara\nChhota Udepur\nChikkaballapura\nChikkamagaluru\nChirang\nChitradurga\nChitrakoot\nChittaurgarh\nChittoor\nChurachandpur\nChuru\nCoimbatore\nCuddalore\nCuttack\nDadra and Nagar Haveli\nDakshin Bastar Dantewada\nDakshin Dinajpur\nDakshina Kannada\nDaman\nDamoh\nDarbhanga\nDarjiling\nDarrang\nDatia\nDausa\nDavanagere\nDebagarh\nDehradun\nDeoghar\nDeoria\nDevbhoomi Dwarka\nDewas\nDhalai\nDhamtari\nDhanbad\nDhar\nDharmapuri\nDharwad\nDhaulpur\nDhemaji\nDhenkanal\nDhubri\nDhule\nDibang Valley\nDibrugarh\nDima Hasao\nDimapur\nDindigul\nDindori\nDiu\nDoda\nDohad\nDumka\nDungarpur\nDurg\nEast\nEast District\nEast Garo Hills\nEast Godavari\nEast Jaintia Hills\nEast Kameng\nEast Khasi Hills\nEast Siang\nErnakulam\nErode\nEtah\nEtawah\nFaizabad\nFaridabad\nFaridkot\nFarrukhabad\nFatehabad\nFatehgarh Sahib\nFatehpur\nFazilka\nFirozabad\nFirozpur\nGadag\nGadchiroli\nGajapati\nGanderbal\nGandhinagar\nGanjam\nGarhwa\nGarhwal\nGariyaband\nGautam Buddha Nagar\nGaya\nGhaziabad\nGhazipur\nGir Somnath\nGiridih\nGoalpara\nGodda\nGolaghat\nGomati\nGonda\nGondiya\nGopalganj\nGorakhpur\nGulbarga\nGumla\nGuna\nGuntur\nGurdaspur\nGurgaon\nGwalior\nHailakandi\nHamirpur\nHanumangarh\nHaora\nHapur\nHarda\nHardoi\nHardwar\nHassan\nHathras\nHaveri\nHazaribagh\nHingoli\nHisar\nHojai\nHoshangabad\nHoshiarpur\nHugli\nHyderabad\nIdukki\nImphal East\nImphal West\nIndore\nJabalpur\nJagatsinghapur\nJagtial\nJaintia Hills\nJaipur\nJaisalmer\nJajapur\nJalandhar\nJalaun\nJalgaon\nJalna\nJalor\nJalpaiguri\nJammu\nJamnagar\nJamtara\nJamui\nJangaon\nJanjgir - Champa\nJashpur\nJaunpur\nJayashankar\nJehanabad\nJhabua\nJhajjar\nJhalawar\nJhansi\nJhargram\nJharsuguda\nJhunjhunun\nJind\nJiribam\nJodhpur\nJogulamba\nJorhat\nJunagadh\nKabeerdham\nKachchh\nKaimur (Bhabua)\nKaithal\nKakching\nKalaburagi\nKalahandi\nKalimpong\nKamareddy\nKamjong\nKamrup\nKamrup Metropolitan\nKancheepuram\nKandhamal\nKangpokpi\nKangra\nKannauj\nKanniyakumari\nKannur\nKanpur Dehat\nKanpur Nagar\nKapurthala\nKarauli\nKarbi Anglong\nKaraikal\nKarimganj\nKarimnagar\nKarnal\nKarur\nKasaragod\nKasganj\nKathua\nKatihar\nKatni\nKaushambi\nKendrapara\nKendujhar\nKargil\nKhagaria\nKhammam\nKhandwa (East Nimar)\nKhargone (West Nimar)\nKheda\nKheri\nKhordha\nKhowai\nKhunti\nKinnaur\nKiphire\nKishanganj\nKishtwar\nKoch Bihar\nKodagu\nKodarma\nKohima\nKokrajhar\nKolar\nKolasib\nKolhapur\nKolkata\nKollam\nKomaram Bheem\nKondagaon\nKoppal\nKoraput\nKorba\nKoriya\nKota\nKottayam\nKozhikode\nKra Daadi\nKrishna\nKrishnagiri\nKullu\nKulgam\nKupwara\nKurnool\nKurukshetra\nKurung Kumey\nKushinagar\nLahul Spiti\nLakhimpur\nLakhisarai\nLakshadweep\nLalitpur\nLatehar\nLatur\nLawngtlai\nLeh\nLohardaga\nLohit\nLongleng\nLower Dibang Valley\nLower Siang\nLower Subansiri\nLucknow\nLudhiana\nLunglei\nMadhepura\nMadhubani\nMadurai\nMahabubabad\nMahasamund\nMahbubnagar\nMahe\nMahendragarh\nMahesana\nMahisagar\nMahoba\nMahrajganj\nMainpuri\nMajuli\nMalappuram\nMaldah\nMalkangiri\nMamit\nMancherial\nMandi\nMandla\nMandsaur\nMandya\nMansa\nMathura\nMau\nMayurbhanj\nMedak\nMedchal-Malkajgiri\nMeerut\nMewat\nMirzapur\nMoga\nMokokchung\nMon\nMoradabad\nMorbi\nMorena\nMorigaon\nMuktsar\nMumbai\nMumbai Suburban\nMungeli\nMunger\nMurshidabad\nMuzaffarnagar\nMuzaffarpur\nMysuru\nNabarangapur\nNadia\nNagaon\nNagapattinam\nNagarkurnool\nNagaur\nNagpur\nNainital\nNalanda\nNalbari\nNalgonda\nNamakkal\nNamsai\nNanded\nNandurbar\nNarayanpur\nNarmada\nNarsimhapur\nNashik\nNavsari\nNawada\nNayagarh\nNeemuch\nNew Delhi\nNicobar\nNirmal\nNizamabad\nNoney\nNorth\nNorth and Middle Andaman\nNorth District\nNorth East\nNorth Garo Hills\nNorth Goa\nNorth Tripura\nNorth Twenty Four Parganas\nNorth West\nNuapada\nOsmanabad\nPakur\nPalakkad\nPalamu\nPalghar\nPali\nPalwal\nPanch Mahals\nPanchkula\nPanipat\nPanna\nPapum Pare\nParbhani\nPaschim Bardhaman\nPaschim Medinipur\nPashchim Champaran\nPashchimi Singhbhum\nPatan\nPathanamthitta\nPathankot\nPatiala\nPatna\nPeddapalli\nPerambalur\nPeren\nPhek\nPherzawl\nPilibhit\nPithoragarh\nPoonch\nPorbandar\nPrakasam\nPratapgarh\nPuducherry\nPudukkottai\nPulwama\nPune\nPurba Bardhaman\nPurba Medinipur\nPurbi Champaran\nPurbi Singhbhum\nPuri\nPurnia\nPuruliya\nRae Bareli\nRaichur\nRaigarh\nRaipur\nRaisen\nRajanna\nRajgarh\nRajkot\nRajnandgaon\nRajouri\nRajsamand\nRamanagara\nRamanathapuram\nRamban\nRamgarh\nRampur\nRanchi\nRangareddy\nRatlam\nRatnagiri\nRayagada\nReasi\nRewa\nRewari\nRibhoi\nRohtak\nRohtas\nRudraprayag\nRupnagar\nSagar\nSaharanpur\nSaharsa\nSahibganj\nSahibzada Ajit Singh Nagar\nSaiha\nSalem\nSamastipur\nSamba\nSambalpur\nSambhal\nSangareddy\nSangli\nSangrur\nSant Kabir Nagar\nSaraikela-Kharsawan\nSaran\nSatara\nSatna\nSawai Madhopur\nSehore\nSenapati\nSeoni\nSepahijala\nSerchhip\nShahdara\nShahdol\nShahid Bhagat Singh Nagar\nShahjahanpur\nShajapur\nShamli\nSheikhpura\nSheohar\nSheopur\nShimla\nShimoga\nShivamogga\nShivpuri\nShopian\nShrawasti\nSiang\nSiddharthnagar\nSiddipet\nSidhi\nSikar\nSimdega\nSindhudurg\nSingrauli\nSirmaur\nSirohi\nSirsa\nSitamarhi\nSitapur\nSivaganga\nSivasagar\nSiwan\nSolan\nSolapur\nSonbhadra\nSonipat\nSonitpur\nSouth\nSouth Andaman\nSouth District\nSouth East Delhi\nSouth Garo Hills\nSouth Goa\nSouth Salamara-Mankachar\nSouth Tripura\nSouth Twenty Four Parganas\nSouth West\nSouth West Garo Hills\nSouth West Khasi Hills\nSri Ganganagar\nSri Potti Sriramulu Nellore\nSrinagar\nSrikakulam\nSubarnapur\nSukma\nSultanpur\nSundargarh\nSupaul\nSurajpur\nSurat\nSurendranagar\nSurguja\nSuryapet\nTamenglong\nTapi\nTarn Taran\nTawang\nTehri Garhwal\nTengnoupal\nThane\nThanjavur\nThe Dangs\nThe Nilgiris\nTheni\nThiruvallur\nThiruvananthapuram\nThiruvarur\nThoothukkudi\nThoubal\nThrissur\nTikamgarh\nTinsukia\nTirap\nTiruchirappalli\nTirunelveli\nTiruppur\nTiruvannamalai\nTonk\nTuensang\nTumakuru\nTumkur\nUdaipur\nUdalguri\nUdhampur\nUdham Singh Nagar\nUdupi\nUjjain\nUkhrul\nUmaria\nUna\nUnakoti\nUnnao\nUpper Siang\nUpper Subansiri\nUttar Bastar Kanker\nUttar Dinajpur\nUttara Kannada\nUttarkashi\nVadodara\nVaishali\nValsad\nVaranasi\nVellore\nVidisha\nVijarabad\nVijayapura\nViluppuram\nVirudhunagar\nVisakhapatnam\nVizianagaram\nWanaparthy\nWarangal Rural\nWarangal Urban\nWardha\nWashim\nWayanad\nWest\nWest District\nWest Garo Hills\nWest Godavari\nWest Jaintia Hills\nWest Kameng\nWest Karbi Anglong\nWest Khasi Hills\nWest Siang\nWest Tripura\nWokha\nYanam\nY.S.R.\nYadadri\nYadgir\nYamunanagar\nYavatmal\nZunheboto"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "department_change_reason",
+   "label": "Department Change Reason",
+   "fieldtype": "Small Text",
+   "idx": 115
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "education_qualifications_section",
+   "label": "Education Qualifications",
+   "fieldtype": "Section Break",
+   "idx": 116
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "teaching_degrees",
+   "label": "Teaching Degrees",
+   "fieldtype": "Small Text",
+   "idx": 117
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "section_break_kaqc",
+   "label": "Education Experience",
+   "fieldtype": "Section Break",
+   "idx": 118
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "teaching_year",
+   "label": "Total Teaching/Education Sector Expereince (Full-Time only in Years)",
+   "fieldtype": "Small Text",
+   "idx": 119
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "column_break_cgai",
+   "label": "column_break_cgai",
+   "fieldtype": "Column Break",
+   "idx": 120
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "teachingexp_month",
+   "label": "Total Teaching/Education Sector Expereince (Full-Time only in Months)",
+   "fieldtype": "Select",
+   "idx": 121,
+   "options": "\n0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "experience_section",
+   "label": "Health Experience",
+   "fieldtype": "Section Break",
+   "idx": 122
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "health_expyear",
+   "label": "Total health domain experience (In Years)",
+   "fieldtype": "Select",
+   "idx": 123,
+   "options": "\n0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n30+"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "column_break_pbcp",
+   "label": "column_break_pbcp",
+   "fieldtype": "Column Break",
+   "idx": 124
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "health_expmonth",
+   "label": "Total health domain experience (In Months)",
+   "fieldtype": "Select",
+   "idx": 125,
+   "options": "\n0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "section_break_ggzs",
+   "label": "section_break_ggzs",
+   "fieldtype": "Section Break",
+   "idx": 126
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "former_employee",
+   "label": "Are you a former employee of the Foundation",
+   "fieldtype": "Select",
+   "idx": 127,
+   "options": "\nYes\nNo"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "process_12",
+   "label": "Have you participated in the recruitment process at the Foundation in the last 12 months",
+   "fieldtype": "Select",
+   "idx": 128,
+   "options": "\nYes\nNo"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "section_break_glxs",
+   "label": "section_break_glxs",
+   "fieldtype": "Section Break",
+   "idx": 129
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "if_email_invite",
+   "label": "If email invite",
+   "fieldtype": "Small Text",
+   "idx": 130
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "employee_referral",
+   "label": "If Yes- Employee Name",
+   "fieldtype": "Small Text",
+   "idx": 131
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "ex_emplyee_name",
+   "label": "If Yes- Ex-Employee Name",
+   "fieldtype": "Small Text",
+   "idx": 132
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "if_recruiter_upload",
+   "label": "If Recruiter Upload, then mention the Recruiter",
+   "fieldtype": "Small Text",
+   "idx": 133
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "then_other",
+   "label": "Others, then specify",
+   "fieldtype": "Small Text",
+   "idx": 134
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "apf_associated",
+   "label": "Are you in any way associated with Azim Premji Foundation?",
+   "fieldtype": "Select",
+   "idx": 135,
+   "options": "\nYes\nNo"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "apf_family",
+   "label": "Do any of your family members work with Azim Premji Foundation?",
+   "fieldtype": "Select",
+   "idx": 136,
+   "options": "\nYes\nNo"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "worklocation",
+   "label": "Are you open to working outside your preferred location?",
+   "fieldtype": "Select",
+   "idx": 137,
+   "options": "\nYes\nNo"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "column_break_atsa",
+   "label": "column_break_atsa",
+   "fieldtype": "Column Break",
+   "idx": 138
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "english_medium",
+   "label": "Has your medium of education been English?",
+   "fieldtype": "Select",
+   "idx": 139,
+   "options": "\nYes\nNo"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "english_fluent",
+   "label": "Are you fluent in both spoken and written English?",
+   "fieldtype": "Select",
+   "idx": 140,
+   "options": "\nYes\nNo"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "test_location",
+   "label": "Choose your test location (you can also be invited for the online/computer-based written test)",
+   "fieldtype": "Small Text",
+   "idx": 141
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "preferred_test_mode",
+   "label": "Preferred Test Mode",
+   "fieldtype": "Select",
+   "idx": 142,
+   "options": "\nOnline\nOffline"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "written_subject",
+   "label": "Choose your subject for written test?",
+   "fieldtype": "Select",
+   "idx": 143,
+   "options": "\nEarly Childhood Education\nPrimary All subjects\nPrimary EVS\nPrimary English\nPrimary Hindi\nPrimary Kannada\nPrimary Mathematics\nUpper Primary English\nUpper Primary Sanskrit\nUpper Primary Bengali\nUpper Primary Science\nUpper Primary Social Science\nUpper Primary Maths\nUpper Primary Hindi\nUpper Primary Kannada\nSecondary/High School Geography\nSecondary/High School English\nSecondary/High School Hindi\nSecondary/High School Kannada\nSecondary/High School Physics\nSecondary/High School Chemistry\nSecondary/High School Biology\nSecondary/High School Maths\nSecondary/High School Political Science\nSr.Secondary/PU Lecturer History\nSr.Secondary/PU Lecturer Biology\nSr.Secondary/PU Lecturer Chemistry\nSr.Secondary/PU Lecturer Economics\nSr.Secondary/PU Lecturer English\nSr.Secondary/PU Lecturer Geography\nSr.Secondary/PU Lecturer Hindi\nSr.Secondary/PU Lecturer Kannada\nSr.Secondary/PU Lecturer Mathematics\nSr.Secondary/PU Lecturer Physics\nSr.Secondary/PU Lecturer Political Science\nSr.Secondary/PU Lecturer Sociology\nSr.Secondary/PU Lecturer Psychology\nMusic\nPhysical Education\nVisual Art\nSpecial Education\nStudent counsellor"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "ctet_qualify",
+   "label": "Did you qualify for CTET(Central Teacher Eligibility Test)?",
+   "fieldtype": "Select",
+   "idx": 144,
+   "options": "\nYes\nNo"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "remarks",
+   "label": "Remarks",
+   "fieldtype": "Small Text",
+   "idx": 145
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "date_of_applied",
+   "label": "Date of Applied",
+   "fieldtype": "Date",
+   "idx": 146
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "section_break_eviu",
+   "label": "section_break_eviu",
+   "fieldtype": "Section Break",
+   "idx": 147
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "recruiter_round_feedback_form",
+   "label": "Recruiter Round Feedback Form",
+   "fieldtype": "Attach",
+   "idx": 148
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "round_one_feedback_from",
+   "label": "Round One FeedBack Form",
+   "fieldtype": "Attach",
+   "idx": 149
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "round_two_feedback_form",
+   "label": "Round Two Feedback Form",
+   "fieldtype": "Attach",
+   "idx": 150
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "round_tree_feedback_form",
+   "label": "Round Tree Feedback Form",
+   "fieldtype": "Attach",
+   "idx": 151
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "application_forms",
+   "label": "Application Form",
+   "fieldtype": "Attach",
+   "idx": 152
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "self_declaration_field",
+   "label": "Self Declaration",
+   "fieldtype": "Attach",
+   "idx": 153
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "filed_merit_track_test",
+   "label": "Filed Merit track Test",
+   "fieldtype": "Attach",
+   "idx": 154
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "cool_of_period",
+   "label": "Cool of Period",
+   "fieldtype": "Small Text",
+   "idx": 155
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "field_mail",
+   "label": "Field Mail",
+   "fieldtype": "Small Text",
+   "idx": 156
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "application_form_details_tab",
+   "label": "Application Form Details",
+   "fieldtype": "Tab Break",
+   "idx": 157
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "current_location1",
+   "label": "Current Location",
+   "fieldtype": "Small Text",
+   "idx": 158
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "permanent_address1",
+   "label": "Permanent Address",
+   "fieldtype": "Small Text",
+   "idx": 159
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "total_experience1",
+   "label": "Total Years of work Experience",
+   "fieldtype": "Small Text",
+   "idx": 160
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "current_organisation1",
+   "label": "Current Organisation",
+   "fieldtype": "Small Text",
+   "idx": 161
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "last_designation",
+   "label": "Last designation & role",
+   "fieldtype": "Small Text",
+   "idx": 162
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "last_drawn_salary",
+   "label": "Last drawn CTC",
+   "fieldtype": "Small Text",
+   "idx": 163
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "section_break_ivob",
+   "label": "section_break_ivob",
+   "fieldtype": "Section Break",
+   "idx": 164
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "date_of_recruiter_round",
+   "label": "Date of Recruiter round",
+   "fieldtype": "Date",
+   "idx": 165
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "recruiter_round_name",
+   "label": "Name of Recruiter - Recruiter Round",
+   "fieldtype": "Small Text",
+   "idx": 166
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "recruiter_round_status",
+   "label": "Recruiter round Status",
+   "fieldtype": "Small Text",
+   "idx": 167
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "date_of_functional_round",
+   "label": "Date of Functional round",
+   "fieldtype": "Date",
+   "idx": 168
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "functional_panel1",
+   "label": "Name of Functional round panel Member-1",
+   "fieldtype": "Small Text",
+   "idx": 169
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "functional_panel2",
+   "label": "Name of Functional round panel Member-2",
+   "fieldtype": "Small Text",
+   "idx": 170
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "functional_round_status",
+   "label": "Functional round Status",
+   "fieldtype": "Small Text",
+   "idx": 171
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "column_break_xfwh",
+   "label": "column_break_xfwh",
+   "fieldtype": "Column Break",
+   "idx": 172
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "date_of_final_round",
+   "label": "Date of Final round",
+   "fieldtype": "Date",
+   "idx": 173
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "final_panel1",
+   "label": "Name of Leader round panel Member-1",
+   "fieldtype": "Small Text",
+   "idx": 174
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "final_panel2",
+   "label": "Name of Final round panel Member-2",
+   "fieldtype": "Small Text",
+   "idx": 175
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "final_round_status",
+   "label": "Final round Status",
+   "fieldtype": "Small Text",
+   "idx": 176
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "phil_details_tab",
+   "label": "Phil Registration Form - Details",
+   "fieldtype": "Tab Break",
+   "idx": 177
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "geo",
+   "label": "Geographies",
+   "fieldtype": "Small Text",
+   "idx": 178
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "themes",
+   "label": "Themes",
+   "fieldtype": "Small Text",
+   "idx": 179
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "position",
+   "label": "Position",
+   "fieldtype": "Small Text",
+   "idx": 180
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "column_break_pgqy",
+   "label": "column_break_pgqy",
+   "fieldtype": "Column Break",
+   "idx": 181
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "assignment",
+   "label": "Assignment",
+   "fieldtype": "Check",
+   "idx": 182
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "application_submission",
+   "label": "Application Submission",
+   "fieldtype": "Check",
+   "idx": 183
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "assignement_date",
+   "label": "Assignment Submission Date",
+   "fieldtype": "Date",
+   "idx": 184
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "application_submission_date",
+   "label": "Application Submission Date",
+   "fieldtype": "Date",
+   "idx": 185
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "section_break_lmfz",
+   "label": "section_break_lmfz",
+   "fieldtype": "Section Break",
+   "idx": 186
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "current_location",
+   "label": "Current Location ",
+   "fieldtype": "Small Text",
+   "idx": 187
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "column_break_eljd",
+   "label": "column_break_eljd",
+   "fieldtype": "Column Break",
+   "idx": 188
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "completion_year",
+   "label": "Year of completion of your highest level of education",
+   "fieldtype": "Small Text",
+   "idx": 189
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "section_break_satj",
+   "label": "section_break_satj",
+   "fieldtype": "Section Break",
+   "idx": 190
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "philanthropy_mail",
+   "label": "Philanthropy Mail",
+   "fieldtype": "Small Text",
+   "idx": 191
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "feedback_form_two",
+   "label": "Feedback Form Two",
+   "fieldtype": "Attach",
+   "idx": 192
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "feedback_form_three",
+   "label": "Feedback Form Three",
+   "fieldtype": "Attach",
+   "idx": 193
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "phil_application_pdf",
+   "label": "Application PDF",
+   "fieldtype": "Attach",
+   "idx": 194
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "submitted_assignment",
+   "label": "Submitted Assignment",
+   "fieldtype": "Attach",
+   "idx": 195
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "schol_details_tab",
+   "label": "Scholarship Recruitment Form - Details",
+   "fieldtype": "Tab Break",
+   "idx": 196
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "submission_status",
+   "label": "Submission Status",
+   "fieldtype": "Select",
+   "idx": 197,
+   "options": "\nCV Submitted\nRound 1 Interview Scheduled\nRound 2 Interview Scheduled\nFeedback 1 Submitted\nFeedback 2 Submitted\nDocument Submitted\nApplication Submitted"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "column_break_lwij",
+   "label": "column_break_lwij",
+   "fieldtype": "Column Break",
+   "idx": 198
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "section_break_bmsy",
+   "label": "section_break_bmsy",
+   "fieldtype": "Section Break",
+   "idx": 199
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "marital_status",
+   "label": "Marital status",
+   "fieldtype": "Select",
+   "idx": 200,
+   "options": "\nSingle\nMarried\nDivorced\nSeparated\nWidowed\nPrefer not to say"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "documents_status",
+   "label": "Documents status",
+   "fieldtype": "Select",
+   "idx": 201,
+   "options": "\nNot submitted\nSubmitted"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "column_break_fvoe",
+   "label": "column_break_fvoe",
+   "fieldtype": "Column Break",
+   "idx": 202
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "current_ctc",
+   "label": "Current CTC",
+   "fieldtype": "Small Text",
+   "idx": 203
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "expected_ctc",
+   "label": "Expected CTC",
+   "fieldtype": "Small Text",
+   "idx": 204
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "folder_path",
+   "label": "Drive Folder",
+   "fieldtype": "Small Text",
+   "idx": 205
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "submit_cv",
+   "label": "Submit Your CV here",
+   "fieldtype": "Attach",
+   "idx": 206
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "address_section",
+   "label": "Address",
+   "fieldtype": "Section Break",
+   "idx": 207
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "current_address_column",
+   "label": "Current Address",
+   "fieldtype": "Column Break",
+   "idx": 208
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "address",
+   "label": "Address",
+   "fieldtype": "Small Text",
+   "idx": 209
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "permanent_address_column",
+   "label": "Permanent Address",
+   "fieldtype": "Column Break",
+   "idx": 210
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "same_as_current_address",
+   "label": "Permanent Address is same as Current Address",
+   "fieldtype": "Check",
+   "idx": 211
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "permanent_address",
+   "label": "Address",
+   "fieldtype": "Small Text",
+   "idx": 212
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "permanent_state",
+   "label": "State",
+   "fieldtype": "Select",
+   "idx": 213,
+   "options": "Andaman Nicobar Islands\nAndhra Pradesh\nArunachal Pradesh\nAssam\nBihar\nChandigarh\nChhattisgarh\nDadra and Nagar Haveli and Daman and Diu\nDelhi\nGoa\nGujarat\nHaryana\nHimachal Pradesh\nJammu and Kashmir\nJharkhand\nKarnataka\nKerala\nLadakh\nLakshadweep\nMadhya Pradesh\nMaharashtra\nManipur\nMeghalaya\nMizoram\nNagaland\nOdisha\nPunjab\nRajasthan\nSikkim\nTamil Nadu\nTelangana\nTripura\nUttar Pradesh\nUttarakhand\nWest Bengal\nPuducherry"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "permanent_district",
+   "label": "District / City",
+   "fieldtype": "Small Text",
+   "idx": 214
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "section_break_afuq",
+   "label": "section_break_afuq",
+   "fieldtype": "Section Break",
+   "idx": 215
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "role_apply",
+   "label": "Please choose the role applying for",
+   "fieldtype": "Select",
+   "idx": 216,
+   "options": "\nAssociate\nResource Person\nTech Support Executive\nTech Support Lead\nVideo Developer"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "jd_read",
+   "label": "You have read the JD for the role applying and understand the role",
+   "fieldtype": "Select",
+   "idx": 217,
+   "options": "\nYes\nNo"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "selection_process_schol",
+   "label": "Have you been part of the Foundation\u2019s selection process during the past 12 months?",
+   "fieldtype": "Select",
+   "idx": 218,
+   "options": "\nYes\nNo"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "role_applied",
+   "label": "If Yes, please mention the detail of role",
+   "fieldtype": "Small Text",
+   "idx": 219
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "location_applied",
+   "label": "If Yes, please mention the detail of location",
+   "fieldtype": "Small Text",
+   "idx": 220
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "month_applied",
+   "label": "If Yes, please mention the detail of month",
+   "fieldtype": "Select",
+   "idx": 221,
+   "options": "\nJanuary\nFebruary\nMarch\nApril\nMay\nJune\nJuly\nAugust\nSeptember\nOctober\nNovember\nDecember"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "education_tab",
+   "label": "Education",
+   "fieldtype": "Tab Break",
+   "idx": 222
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "year_completion",
+   "label": "Year of completion of your highest level of education",
+   "fieldtype": "Select",
+   "idx": 223,
+   "options": "\nStill pursuing\n2020-2025\nEarlier than 2020"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "relocation",
+   "label": "Are you open to relocating to Kalaburgi for this role?",
+   "fieldtype": "Select",
+   "idx": 224,
+   "options": "\nYes\nNo"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "total_year_of_experience",
+   "label": "Mention your total years of experience in years",
+   "fieldtype": "Int",
+   "idx": 225
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "total_months_of_experience",
+   "label": "Mention your total years of experience in months",
+   "fieldtype": "Int",
+   "idx": 226
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "total_experience_schol",
+   "label": "Is your total work experience between 2-5 years?",
+   "fieldtype": "Select",
+   "idx": 227,
+   "options": "\nYes\nNo"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "if_no_experience_years",
+   "label": "If No, then specify your total experience",
+   "fieldtype": "Int",
+   "idx": 228
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "comfortable_tasks",
+   "label": "<h5>Which of the following tasks are you comfortable performing in Microsoft Excel?</h5>",
+   "fieldtype": "Heading",
+   "idx": 229
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "spreadsheet",
+   "label": "Creating and Performing Spreadsheets",
+   "fieldtype": "Check",
+   "idx": 230
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "basic_formula",
+   "label": "Using Basic Formulas (SUM, AVERAGE, COUNT)",
+   "fieldtype": "Check",
+   "idx": 231
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "functions",
+   "label": "Using functions like VLOOKUP, IF, INDEX/MATCH",
+   "fieldtype": "Check",
+   "idx": 232
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "pivot_charts",
+   "label": "Creating Pivot tables and Charts",
+   "fieldtype": "Check",
+   "idx": 233
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "language",
+   "label": "<h5>Please select the language(s) you are proficient in</h5>",
+   "fieldtype": "Heading",
+   "idx": 234
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "english_schol",
+   "label": "English",
+   "fieldtype": "Check",
+   "idx": 235
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "religional_languages",
+   "label": "Regional languages",
+   "fieldtype": "Check",
+   "idx": 236
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "state_of_residence",
+   "label": "State of Residence",
+   "fieldtype": "Select",
+   "idx": 237,
+   "options": "\nAndhra Pradesh\nArunachal Pradesh\nAssam\nBihar\nChhattisgarh\nGoa\nGujarat\nHaryana\nHimachal Pradesh\nJharkhand\nKarnataka\nKerala\nMadhya Pradesh\nMaharashtra\nManipur\nMeghalaya\nMizoram\nNagaland\nOdisha\nPunjab\nRajasthan\nSikkim\nTamil Nadu\nTelangana\nTripura\nUttar Pradesh\nUttarakhand\nWest Bengal"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "srt_mail",
+   "label": "SRT Mail",
+   "fieldtype": "Small Text",
+   "idx": 238
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "test_results_tab",
+   "label": "Test Results",
+   "fieldtype": "Tab Break",
+   "idx": 239
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "total_score",
+   "label": "Total Score of the Candidate",
+   "fieldtype": "Small Text",
+   "idx": 240
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "score_percentile",
+   "label": "Score Percentile of the Candidate",
+   "fieldtype": "Small Text",
+   "idx": 241
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "insert_record",
+   "label": "Insert Record",
+   "fieldtype": "Button",
+   "idx": 242
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "utilities_tab",
+   "label": "Utilities",
+   "fieldtype": "Tab Break",
+   "idx": 243
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "verify_email",
+   "label": "Verify Email",
+   "fieldtype": "Button",
+   "idx": 244
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "send_verification_code",
+   "label": "Send verification code",
+   "fieldtype": "Button",
+   "idx": 245
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "verification_code",
+   "label": "Verification code",
+   "fieldtype": "Int",
+   "idx": 246
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "qualification_tab",
+   "label": "Qualification",
+   "fieldtype": "Tab Break",
+   "idx": 247
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "education_section",
+   "label": "Education",
+   "fieldtype": "Section Break",
+   "idx": 248
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "post_graduation_column",
+   "label": "Post graduation",
+   "fieldtype": "Column Break",
+   "idx": 249
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "pg_degree",
+   "label": "Name of the Master's Degree",
+   "fieldtype": "Small Text",
+   "idx": 250
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "pg_specialisation",
+   "label": "PG Specialisation",
+   "fieldtype": "Small Text",
+   "idx": 251
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "pg_institute",
+   "label": "Name of the Institution",
+   "fieldtype": "Small Text",
+   "idx": 252
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "pg_university",
+   "label": "Name of the University",
+   "fieldtype": "Small Text",
+   "idx": 253
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "pg_year",
+   "label": "Year of completion",
+   "fieldtype": "Select",
+   "idx": 254,
+   "options": "\nCurrently Pursuing\n2025\n2024\n2023\n2022\n2021\n2020\n2019\n2018\n2017\n2016\n2015\n2014\n2013\n2012\n2011\n2010\n2010\n2009\n2008\n2007\n2006\n2005\n2004\n2003\n2002\n2001\n2000"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "mode_course",
+   "label": "Mode of Course",
+   "fieldtype": "Select",
+   "idx": 255,
+   "options": "\nRegular\nCorrespondence"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "bachelors_degree_column",
+   "label": "Bachelor's Degree",
+   "fieldtype": "Column Break",
+   "idx": 256
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "ug_degree",
+   "label": "Name of the Bachelor's Degree",
+   "fieldtype": "Small Text",
+   "idx": 257
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "ug_specialisation",
+   "label": "UG Specialisation",
+   "fieldtype": "Small Text",
+   "idx": 258
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "ug_institute",
+   "label": "Name of the Institution",
+   "fieldtype": "Small Text",
+   "idx": 259
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "ug_university",
+   "label": "Name of the University",
+   "fieldtype": "Small Text",
+   "idx": 260
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "ug_year",
+   "label": "Year of completion",
+   "fieldtype": "Select",
+   "idx": 261,
+   "options": "\nCurrently Pursuing\n2025\n2024\n2023\n2022\n2021\n2020\n2019\n2018\n2017\n2016\n2015\n2014\n2013\n2012\n2011\n2010\n2010\n2009\n2008\n2007\n2006\n2005\n2004\n2003\n2002\n2001\n2000"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "course",
+   "label": "Mode of Course",
+   "fieldtype": "Select",
+   "idx": 262,
+   "options": "\nRegular\nCorrespondence"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "qualification",
+   "label": "Add Educational Qualification",
+   "fieldtype": "Check",
+   "idx": 263
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "educational_qualification_section",
+   "label": " Educational Qualification",
+   "fieldtype": "Section Break",
+   "idx": 264
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "name_of_the_degree",
+   "label": "Name of the Degree",
+   "fieldtype": "Small Text",
+   "idx": 265
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "name_of_the_institution",
+   "label": "Name of the Institution",
+   "fieldtype": "Small Text",
+   "idx": 266
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "name_of_the_university",
+   "label": "Name of the University",
+   "fieldtype": "Small Text",
+   "idx": 267
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "column_break_wfpe",
+   "label": "column_break_wfpe",
+   "fieldtype": "Column Break",
+   "idx": 268
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "year_of_completion",
+   "label": "Year of completion",
+   "fieldtype": "Select",
+   "idx": 269,
+   "options": "\nCurrently Pursuing\n2025\n2024\n2023\n2022\n2021\n2020\n2019\n2018\n2017\n2016\n2015\n2014\n2013\n2012\n2011\n2010\n2010\n2009\n2008\n2007\n2006\n2005\n2004\n2003\n2002\n2001\n2000"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "mode_of_course",
+   "label": "Mode of Course",
+   "fieldtype": "Select",
+   "idx": 270,
+   "options": "\nRegular\nCorrespondence"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "add_educational_qualification",
+   "label": "Add Educational Qualification",
+   "fieldtype": "Check",
+   "idx": 271
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "educational_qualification_2_section",
+   "label": " Educational Qualification 2",
+   "fieldtype": "Section Break",
+   "idx": 272
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "degree",
+   "label": "Name of the Degree",
+   "fieldtype": "Small Text",
+   "idx": 273
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "institution",
+   "label": "Name of the Institution",
+   "fieldtype": "Small Text",
+   "idx": 274
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "university",
+   "label": "Name of the University",
+   "fieldtype": "Small Text",
+   "idx": 275
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "column_break_sske",
+   "label": "column_break_sske",
+   "fieldtype": "Column Break",
+   "idx": 276
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "completion",
+   "label": "Year of completion",
+   "fieldtype": "Select",
+   "idx": 277,
+   "options": "\nCurrently Pursuing\n2025\n2024\n2023\n2022\n2021\n2020\n2019\n2018\n2017\n2016\n2015\n2014\n2013\n2012\n2011\n2010\n2010\n2009\n2008\n2007\n2006\n2005\n2004\n2003\n2002\n2001\n2000"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "modeofcourse",
+   "label": "Mode of Course",
+   "fieldtype": "Select",
+   "idx": 278,
+   "options": "\nRegular\nCorrespondence"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "experience_tab",
+   "label": "Experience & Employment",
+   "fieldtype": "Tab Break",
+   "idx": 279
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "experience_section_schol",
+   "label": "Experience",
+   "fieldtype": "Section Break",
+   "idx": 280
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "prior_exp",
+   "label": "Do you have prior work experience?",
+   "fieldtype": "Select",
+   "idx": 281,
+   "options": "\nYes\nNo"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "exp_years",
+   "label": "What is total number of work experience you have in number of years",
+   "fieldtype": "Int",
+   "idx": 282
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "current_employment",
+   "label": "Current / Latest Employment Details",
+   "fieldtype": "Section Break",
+   "idx": 283
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "employer_name",
+   "label": "Name of the Organisation / Employer",
+   "fieldtype": "Small Text",
+   "idx": 284
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "employment_city",
+   "label": "District / City",
+   "fieldtype": "Small Text",
+   "idx": 285
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "employment_state",
+   "label": "State",
+   "fieldtype": "Select",
+   "idx": 286,
+   "options": "Andaman Nicobar Islands\nAndhra Pradesh\nArunachal Pradesh\nAssam\nBihar\nChandigarh\nChhattisgarh\nDadra and Nagar Haveli and Daman and Diu\nDelhi\nGoa\nGujarat\nHaryana\nHimachal Pradesh\nJammu and Kashmir\nJharkhand\nKarnataka\nKerala\nLadakh\nLakshadweep\nMadhya Pradesh\nMaharashtra\nManipur\nMeghalaya\nMizoram\nNagaland\nOdisha\nPunjab\nRajasthan\nSikkim\nTamil Nadu\nTelangana\nTripura\nUttar Pradesh\nUttarakhand\nWest Bengal\nPuducherry"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "designation",
+   "label": "Designation / Role",
+   "fieldtype": "Small Text",
+   "idx": 287
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "part_fulltime",
+   "label": "Part-time / Full-time",
+   "fieldtype": "Select",
+   "idx": 288,
+   "options": "\nPart-time\nFull-time"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "column_break_tpxg",
+   "label": "column_break_tpxg",
+   "fieldtype": "Column Break",
+   "idx": 289
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "employed_from",
+   "label": "Employed from",
+   "fieldtype": "Date",
+   "idx": 290
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "currently_employed",
+   "label": "Currently Employed",
+   "fieldtype": "Check",
+   "idx": 291
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "employed_to",
+   "label": "Employed to",
+   "fieldtype": "Date",
+   "idx": 292
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "takehome_salary",
+   "label": "Monthly take-home salary",
+   "fieldtype": "Int",
+   "idx": 293
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "annual_salary",
+   "label": "Annual Salary / Compensation (CTC)",
+   "fieldtype": "Int",
+   "idx": 294
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "notice_period",
+   "label": "Notice Period (Days)",
+   "fieldtype": "Select",
+   "idx": 295,
+   "options": "\nLess than 15 days\n16 - 30 days\n31 - 45 days\n46 - 60 days\n61 - 90 days or more"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "previous_employment",
+   "label": "Previous three employment details",
+   "fieldtype": "Section Break",
+   "idx": 296
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "organization_employer1",
+   "label": "Name of the Organization/ Employer",
+   "fieldtype": "Small Text",
+   "idx": 297
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "district_city1",
+   "label": "District / City",
+   "fieldtype": "Small Text",
+   "idx": 298
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "state1",
+   "label": "State",
+   "fieldtype": "Select",
+   "idx": 299,
+   "options": "Andaman Nicobar Islands\nAndhra Pradesh\nArunachal Pradesh\nAssam\nBihar\nChandigarh\nChhattisgarh\nDadra and Nagar Haveli and Daman and Diu\nDelhi\nGoa\nGujarat\nHaryana\nHimachal Pradesh\nJammu and Kashmir\nJharkhand\nKarnataka\nKerala\nLadakh\nLakshadweep\nMadhya Pradesh\nMaharashtra\nManipur\nMeghalaya\nMizoram\nNagaland\nOdisha\nPunjab\nRajasthan\nSikkim\nTamil Nadu\nTelangana\nTripura\nUttar Pradesh\nUttarakhand\nWest Bengal\nPuducherry"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "designation_role",
+   "label": "Designation / Role",
+   "fieldtype": "Small Text",
+   "idx": 300
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "column_break_tutx",
+   "label": "column_break_tutx",
+   "fieldtype": "Column Break",
+   "idx": 301
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "part_full_time",
+   "label": "Part-time / Full-time",
+   "fieldtype": "Select",
+   "idx": 302,
+   "options": "\nPart-time\nFull-time"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "employed_date",
+   "label": "Employed From",
+   "fieldtype": "Date",
+   "idx": 303
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "employed_to1",
+   "label": "Employed To",
+   "fieldtype": "Date",
+   "idx": 304
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "add_row",
+   "label": "Add Employment",
+   "fieldtype": "Check",
+   "idx": 305
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "employment2",
+   "label": "Previous Employment - 2",
+   "fieldtype": "Section Break",
+   "idx": 306
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "organization2",
+   "label": "Name of the Organization/ Employer",
+   "fieldtype": "Small Text",
+   "idx": 307
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "district2",
+   "label": "District / City",
+   "fieldtype": "Small Text",
+   "idx": 308
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "state2",
+   "label": "State",
+   "fieldtype": "Select",
+   "idx": 309,
+   "options": "Andaman Nicobar Islands\nAndhra Pradesh\nArunachal Pradesh\nAssam\nBihar\nChandigarh\nChhattisgarh\nDadra and Nagar Haveli and Daman and Diu\nDelhi\nGoa\nGujarat\nHaryana\nHimachal Pradesh\nJammu and Kashmir\nJharkhand\nKarnataka\nKerala\nLadakh\nLakshadweep\nMadhya Pradesh\nMaharashtra\nManipur\nMeghalaya\nMizoram\nNagaland\nOdisha\nPunjab\nRajasthan\nSikkim\nTamil Nadu\nTelangana\nTripura\nUttar Pradesh\nUttarakhand\nWest Bengal\nPuducherry"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "designation2",
+   "label": "Designation / Role",
+   "fieldtype": "Small Text",
+   "idx": 310
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "column_break_nrfm",
+   "label": "column_break_nrfm",
+   "fieldtype": "Column Break",
+   "idx": 311
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "parttime2",
+   "label": "Part-time / Full-time",
+   "fieldtype": "Select",
+   "idx": 312,
+   "options": "\nPart-time\nFull-time"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "employed_from2",
+   "label": "Employed From",
+   "fieldtype": "Date",
+   "idx": 313
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "employed_to2",
+   "label": "Employed To",
+   "fieldtype": "Date",
+   "idx": 314
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "add_row2",
+   "label": "Add Row",
+   "fieldtype": "Check",
+   "idx": 315
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "employment3",
+   "label": "Previous Employment - 3",
+   "fieldtype": "Section Break",
+   "idx": 316
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "organization3",
+   "label": "Name of the Organization/ Employer",
+   "fieldtype": "Small Text",
+   "idx": 317
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "district3",
+   "label": "District / City",
+   "fieldtype": "Small Text",
+   "idx": 318
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "state3",
+   "label": "State",
+   "fieldtype": "Select",
+   "idx": 319,
+   "options": "Andaman Nicobar Islands\nAndhra Pradesh\nArunachal Pradesh\nAssam\nBihar\nChandigarh\nChhattisgarh\nDadra and Nagar Haveli and Daman and Diu\nDelhi\nGoa\nGujarat\nHaryana\nHimachal Pradesh\nJammu and Kashmir\nJharkhand\nKarnataka\nKerala\nLadakh\nLakshadweep\nMadhya Pradesh\nMaharashtra\nManipur\nMeghalaya\nMizoram\nNagaland\nOdisha\nPunjab\nRajasthan\nSikkim\nTamil Nadu\nTelangana\nTripura\nUttar Pradesh\nUttarakhand\nWest Bengal\nPuducherry"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "designation3",
+   "label": "Designation / Role",
+   "fieldtype": "Small Text",
+   "idx": 320
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "column_break_bryc",
+   "label": "column_break_bryc",
+   "fieldtype": "Column Break",
+   "idx": 321
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "parttime3",
+   "label": "Part-time / Full-time",
+   "fieldtype": "Select",
+   "idx": 322,
+   "options": "\nPart-time\nFull-time"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "employed_from3",
+   "label": "Employed From",
+   "fieldtype": "Date",
+   "idx": 323
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "employed_to3",
+   "label": "Employed To",
+   "fieldtype": "Date",
+   "idx": 324
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "location_langugage",
+   "label": "Relocation & Language",
+   "fieldtype": "Tab Break",
+   "idx": 325
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "project_location",
+   "label": "Willing to relocate to the project location",
+   "fieldtype": "Select",
+   "idx": 326,
+   "options": "\nKalaburagi\nRaipur\nBoth\nNone"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "noticeperiod",
+   "label": "What is your notice period",
+   "fieldtype": "Select",
+   "idx": 327,
+   "options": "\n0-15\n15-30\n30+ days"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "any_gaps",
+   "label": "Were there any gaps in your education / employment?",
+   "fieldtype": "Select",
+   "idx": 328,
+   "options": "\nYes\nNo"
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "yes_gaps",
+   "label": "If yes, mention the period (MM/YYYY) and details for all gaps",
+   "fieldtype": "Small Text",
+   "idx": 329
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "language_section",
+   "label": "Language",
+   "fieldtype": "Section Break",
+   "idx": 330
+  },
+  {
+   "doctype": "DocField",
+   "fieldname": "info_yourself",
+   "label": "Any other relevant information about yourself that you would like to share with us",
+   "fieldtype": "Small Text",
+   "idx": 331
+  }
+ ],
+ "permissions": [
+  {
+   "doctype": "DocPerm",
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1,
+   "share": 1,
+   "print": 1,
+   "email": 1
+  }
+ ],
+ "links": [],
+ "actions": [],
+ "states": [],
+ "field_order": [
+  "common_details_sb",
+  "application_status",
+  "offer_status",
+  "full_name",
+  "gender",
+  "date_of_birth",
+  "age",
+  "email_address",
+  "phone_number",
+  "role",
+  "department",
+  "unit",
+  "location",
+  "job_code",
+  "zwayam_id",
+  "state",
+  "district_city",
+  "resume",
+  "highest_education",
+  "total_experience",
+  "opportunity_source",
+  "languages_known",
+  "feedback_form",
+  "health_details_tab",
+  "date_offer",
+  "column_break_olqa",
+  "reasons_for_reject",
+  "reasons_for_hold",
+  "reasons_for_shorlist",
+  "section_break_gwdk",
+  "doj_date",
+  "joining_address",
+  "section_break_rqsd",
+  "foundation_selection",
+  "mbbs_institution",
+  "mbbs_college",
+  "other_institution",
+  "complete_mbbs",
+  "any_other_year",
+  "education_qualification",
+  "mbbs_experience",
+  "state_medical_council",
+  "interested_in",
+  "monthly_salary",
+  "section_break_pdrv",
+  "preferred_location",
+  "are_you_open",
+  "first_prefered",
+  "second_location",
+  "third_location",
+  "section_break_lqit",
+  "selection_process",
+  "if_no_mention",
+  "english",
+  "bengali",
+  "chhattisgarhi",
+  "gujarati",
+  "hindi",
+  "kannada",
+  "malayalam",
+  "marathi",
+  "odia",
+  "tamil",
+  "if_other",
+  "self_declaration",
+  "medical_fitness",
+  "authorisation",
+  "section_break_prfc",
+  "fellowship_mail",
+  "it_team_email",
+  "onboarding_email",
+  "registration_form",
+  "column_break_agnv",
+  "subrat_mail",
+  "additional_cb",
+  "current_residential_address_section",
+  "door_number",
+  "arealocality",
+  "pincode",
+  "address1",
+  "last_employment_section",
+  "full_name_employer",
+  "district__city",
+  "designation__role",
+  "emp_startdate",
+  "emp_enddate",
+  "feedback_section",
+  "fbone_panel",
+  "fbtwo_panel",
+  "application_status_verification_section",
+  "otp_code",
+  "otp_expiry",
+  "field_details_tab",
+  "section_break_venf",
+  "blocklist_reason",
+  "hold_reason",
+  "reasons_for_shortlist",
+  "other_shortlist",
+  "column_break_vywh",
+  "reasons_for_reject_field",
+  "other_reject",
+  "other_job",
+  "reason_otherjob",
+  "offer_acceptance_section",
+  "date_offer_field",
+  "reason_decline",
+  "basic_details_section",
+  "email_verified",
+  "phone_verified",
+  "alternate_no",
+  "preferred_location_form",
+  "column_break_uvdw",
+  "native_state",
+  "native_district",
+  "department_change_reason",
+  "education_qualifications_section",
+  "teaching_degrees",
+  "section_break_kaqc",
+  "teaching_year",
+  "column_break_cgai",
+  "teachingexp_month",
+  "experience_section",
+  "health_expyear",
+  "column_break_pbcp",
+  "health_expmonth",
+  "section_break_ggzs",
+  "former_employee",
+  "process_12",
+  "section_break_glxs",
+  "if_email_invite",
+  "employee_referral",
+  "ex_emplyee_name",
+  "if_recruiter_upload",
+  "then_other",
+  "apf_associated",
+  "apf_family",
+  "worklocation",
+  "column_break_atsa",
+  "english_medium",
+  "english_fluent",
+  "test_location",
+  "preferred_test_mode",
+  "written_subject",
+  "ctet_qualify",
+  "remarks",
+  "date_of_applied",
+  "section_break_eviu",
+  "recruiter_round_feedback_form",
+  "round_one_feedback_from",
+  "round_two_feedback_form",
+  "round_tree_feedback_form",
+  "application_forms",
+  "self_declaration_field",
+  "filed_merit_track_test",
+  "cool_of_period",
+  "field_mail",
+  "application_form_details_tab",
+  "current_location1",
+  "permanent_address1",
+  "total_experience1",
+  "current_organisation1",
+  "last_designation",
+  "last_drawn_salary",
+  "section_break_ivob",
+  "date_of_recruiter_round",
+  "recruiter_round_name",
+  "recruiter_round_status",
+  "date_of_functional_round",
+  "functional_panel1",
+  "functional_panel2",
+  "functional_round_status",
+  "column_break_xfwh",
+  "date_of_final_round",
+  "final_panel1",
+  "final_panel2",
+  "final_round_status",
+  "phil_details_tab",
+  "geo",
+  "themes",
+  "position",
+  "column_break_pgqy",
+  "assignment",
+  "application_submission",
+  "assignement_date",
+  "application_submission_date",
+  "section_break_lmfz",
+  "current_location",
+  "column_break_eljd",
+  "completion_year",
+  "section_break_satj",
+  "philanthropy_mail",
+  "feedback_form_two",
+  "feedback_form_three",
+  "phil_application_pdf",
+  "submitted_assignment",
+  "schol_details_tab",
+  "submission_status",
+  "column_break_lwij",
+  "section_break_bmsy",
+  "marital_status",
+  "documents_status",
+  "column_break_fvoe",
+  "current_ctc",
+  "expected_ctc",
+  "folder_path",
+  "submit_cv",
+  "address_section",
+  "current_address_column",
+  "address",
+  "permanent_address_column",
+  "same_as_current_address",
+  "permanent_address",
+  "permanent_state",
+  "permanent_district",
+  "section_break_afuq",
+  "role_apply",
+  "jd_read",
+  "selection_process_schol",
+  "role_applied",
+  "location_applied",
+  "month_applied",
+  "education_tab",
+  "year_completion",
+  "relocation",
+  "total_year_of_experience",
+  "total_months_of_experience",
+  "total_experience_schol",
+  "if_no_experience_years",
+  "comfortable_tasks",
+  "spreadsheet",
+  "basic_formula",
+  "functions",
+  "pivot_charts",
+  "language",
+  "english_schol",
+  "religional_languages",
+  "state_of_residence",
+  "srt_mail",
+  "test_results_tab",
+  "total_score",
+  "score_percentile",
+  "insert_record",
+  "utilities_tab",
+  "verify_email",
+  "send_verification_code",
+  "verification_code",
+  "qualification_tab",
+  "education_section",
+  "post_graduation_column",
+  "pg_degree",
+  "pg_specialisation",
+  "pg_institute",
+  "pg_university",
+  "pg_year",
+  "mode_course",
+  "bachelors_degree_column",
+  "ug_degree",
+  "ug_specialisation",
+  "ug_institute",
+  "ug_university",
+  "ug_year",
+  "course",
+  "qualification",
+  "educational_qualification_section",
+  "name_of_the_degree",
+  "name_of_the_institution",
+  "name_of_the_university",
+  "column_break_wfpe",
+  "year_of_completion",
+  "mode_of_course",
+  "add_educational_qualification",
+  "educational_qualification_2_section",
+  "degree",
+  "institution",
+  "university",
+  "column_break_sske",
+  "completion",
+  "modeofcourse",
+  "experience_tab",
+  "experience_section_schol",
+  "prior_exp",
+  "exp_years",
+  "current_employment",
+  "employer_name",
+  "employment_city",
+  "employment_state",
+  "designation",
+  "part_fulltime",
+  "column_break_tpxg",
+  "employed_from",
+  "currently_employed",
+  "employed_to",
+  "takehome_salary",
+  "annual_salary",
+  "notice_period",
+  "previous_employment",
+  "organization_employer1",
+  "district_city1",
+  "state1",
+  "designation_role",
+  "column_break_tutx",
+  "part_full_time",
+  "employed_date",
+  "employed_to1",
+  "add_row",
+  "employment2",
+  "organization2",
+  "district2",
+  "state2",
+  "designation2",
+  "column_break_nrfm",
+  "parttime2",
+  "employed_from2",
+  "employed_to2",
+  "add_row2",
+  "employment3",
+  "organization3",
+  "district3",
+  "state3",
+  "designation3",
+  "column_break_bryc",
+  "parttime3",
+  "employed_from3",
+  "employed_to3",
+  "location_langugage",
+  "project_location",
+  "noticeperiod",
+  "any_gaps",
+  "yes_gaps",
+  "language_section",
+  "info_yourself"
+ ]
+}
