@@ -11,7 +11,8 @@ frappe.pages['-zayam-data-import'].on_page_load = function (wrapper) {
 const DOCTYPE_CHOICES = [
 	{ label: __('Select...'), value: '' },
 	{ label: __('Grant'), value: 'Phil Registration Form' },
-	{ label: __('Field'), value: 'Field Registration Form' }
+	{ label: __('Field'), value: 'Field Registration Form' },
+	{ label: __('Zayam Datas'), value: 'Zayam Datas' }
 ];
 
 function make_doctype_picker($container, opts) {
@@ -282,7 +283,21 @@ function render_import_card(page) {
 			.btn-map-columns::before, .btn-map-columns-results::before { content: '🗺️ '; }
 			.btn-map-columns:hover, .btn-map-columns-results:hover { opacity: 0.85; }
 			.btn-map-columns { margin-right: auto; }
-			.zayam-results-actions { margin-top: 14px; }
+			.zayam-results-actions { margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap; }
+			.btn-download-results {
+				background: var(--zayam-accent-import);
+				color: #fff;
+				border: none;
+				padding: 9px 18px;
+				border-radius: 8px;
+				font-size: 12.5px;
+				font-weight: 600;
+				cursor: pointer;
+				text-decoration: none;
+				transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+			}
+			.btn-download-results::before { content: '⬇️ '; }
+			.btn-download-results:hover { opacity: 0.9; text-decoration: none; color: #fff; }
 			.zayam-map-columns-dialog .modal-dialog { max-width: 760px; }
 			.zayam-map-columns-dialog .form-group.frappe-control { margin-bottom: 20px; }
 			.zayam-map-columns-dialog .control-label { font-size: 13.5px; font-weight: 600; padding-bottom: 2px; }
@@ -756,7 +771,12 @@ function render_import_card(page) {
 		const overrides = get_overrides();
 		new frappe.ui.FileUploader({
 			folder: 'Home',
-			restrictions: { allowed_file_types: ['.xlsx', '.xls', '.csv'], max_file_size: 50 * 1024 * 1024 },
+			// Zayam Datas alone has 67 columns — a 2-lakh-row export of that
+			// width can comfortably exceed the old 50MB ceiling (especially
+			// as .csv, which compresses far worse than .xlsx) and would get
+			// rejected here before the import job ever started. Raised to
+			// 300MB to leave headroom above what 2 lakh rows realistically need.
+			restrictions: { allowed_file_types: ['.xlsx', '.xls', '.csv'], max_file_size: 300 * 1024 * 1024 },
 			on_success(file_doc) {
 				$(page.body).find('.zayam-import-results').hide();
 				frappe.call({
@@ -1078,18 +1098,23 @@ function data_table_group_html(cls, icon, label, entries, columns) {
 			(c) => `<th class="${c.manual ? 'is-manual-mapping' : ''}">${frappe.utils.escape_html(c.header)}${c.manual ? ' <span class="zayam-manual-badge" title="' + __('Manually mapped') + '">↻</span>' : ''}</th>`
 		)
 		.join('');
+	// The reason a row failed used to be the LAST column in a table that can
+	// run to 60+ real fields wide — meaning "why did this fail" (the one
+	// thing anyone opening the Failed group actually wants) was invisible
+	// unless you scrolled all the way across. It's now the 2nd column,
+	// right after Zwayam Id, so it's visible without scrolling at all.
 	const rows_html = entries
 		.map(
 			(e) => `
 				<tr>
 					<td>${frappe.utils.escape_html(e.zayam_id || '')}</td>
+					${show_error ? `<td class="zayam-detail-error">${e.error ? frappe.utils.escape_html(e.error) : ''}</td>` : ''}
 					${columns
 					.map((c) => {
 						const value = e.data ? e.data[c.fieldname] : null;
 						return `<td class="${c.manual ? 'is-manual-mapping' : ''}">${value === null || value === undefined ? '' : frappe.utils.escape_html(String(value))}</td>`;
 					})
 					.join('')}
-					${show_error ? `<td class="zayam-detail-error">${e.error ? frappe.utils.escape_html(e.error) : ''}</td>` : ''}
 				</tr>
 			`
 		)
@@ -1100,7 +1125,7 @@ function data_table_group_html(cls, icon, label, entries, columns) {
 			<div class="zayam-detail-group-title ${cls}">${icon} ${label} (${entries.length})</div>
 			<div class="zayam-preview-table-wrap">
 				<table class="zayam-preview-table">
-					<thead><tr><th>${__('Zwayam Id')}</th>${header_html}${show_error ? `<th>${__('Error')}</th>` : ''}</tr></thead>
+					<thead><tr><th>${__('Zwayam Id')}</th>${show_error ? `<th>${__('Error')}</th>` : ''}${header_html}</tr></thead>
 					<tbody>${rows_html}</tbody>
 				</table>
 			</div>
@@ -1108,7 +1133,7 @@ function data_table_group_html(cls, icon, label, entries, columns) {
 	`;
 }
 
-function show_import_results(page, file_url, doctype, overrides, manual_mapping, { counts: raw_counts, details, truncated, unmatched_columns, columns, all_columns, new_master_entries, assignable_fields, processed, total_rows }) {
+function show_import_results(page, file_url, doctype, overrides, manual_mapping, { job_id, results_filename, counts: raw_counts, details, truncated, unmatched_columns, columns, all_columns, new_master_entries, assignable_fields, processed, total_rows }) {
 	clear_active_job();
 
 	unmatched_columns = unmatched_columns || [];
@@ -1167,7 +1192,12 @@ function show_import_results(page, file_url, doctype, overrides, manual_mapping,
 			truncation_note('failed', __('failed')) +
 			data_table_group_html('is-failed', '⚠', __('Failed'), details.failed, columns) +
 			new_master_html +
-			`<div class="zayam-results-actions"><button class="btn btn-map-columns-results">${__('Map Columns')}</button></div>`
+			`<div class="zayam-results-actions">
+				<button class="btn btn-map-columns-results">${__('Map Columns')}</button>
+				${results_filename && job_id
+			? `<a class="btn btn-download-results" href="/api/method/ms_calendar.api.zayam_data_import.download_import_results?job_id=${encodeURIComponent(job_id)}">${__('Download Full Results (CSV)')}</a>`
+			: ''}
+			</div>`
 		)
 		.show();
 

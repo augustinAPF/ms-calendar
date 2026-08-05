@@ -706,6 +706,10 @@ def create_interview_event(
         "Online" if is_online == 1 else "Face-to-Face"
     )
     mode_is_online = (is_online == 1) or (display_mode.lower() == "online")
+    # Shown to interviewers/candidate in place of "Online" — Teams meetings are
+    # branded as "Video Conference" everywhere except the internal is_online
+    # checks above, which must keep comparing against the raw "online" value.
+    display_mode_label = "Video Conference" if display_mode.lower() == "online" else display_mode
     candidate_phone = (candidate_phone or "").strip()
     # Fallback: fetch phone from application record if not passed from JS
     if not candidate_phone and application_id:
@@ -1470,7 +1474,7 @@ comments/recommendations for the calibration process and final selection decisio
             Applicants_name=Applicants_name,
             Applicants_Role=Applicants_Role,
             interview_date_str=interview_date_str,
-            display_mode=display_mode,
+            display_mode=display_mode_label,
             round_label=round_label,
             interview_time_str=interview_time_str,
             end_time_str=end_time_str,
@@ -1493,7 +1497,7 @@ comments/recommendations for the calibration process and final selection decisio
             current_ctc=current_ctc,
             expected_ctc=expected_ctc,
             interview_date_str=interview_date_str,
-            display_mode=display_mode,
+            display_mode=display_mode_label,
             round_label=round_label,
             interview_time_str=interview_time_str,
             end_time_str=end_time_str,
@@ -1738,7 +1742,7 @@ comments/recommendations for the calibration process and final selection decisio
             Applicants_name=Applicants_name,
             Applicants_Role=Applicants_Role,
             interview_date_str=interview_date_str,
-            display_mode=display_mode,
+            display_mode=display_mode_label,
             round_label=round_label,
             interview_time_str=interview_time_str,
             end_time_str=end_time_str,
@@ -1760,7 +1764,7 @@ comments/recommendations for the calibration process and final selection decisio
             current_ctc=current_ctc,
             expected_ctc=expected_ctc,
             interview_date_str=interview_date_str,
-            display_mode=display_mode,
+            display_mode=display_mode_label,
             round_label=round_label,
             interview_time_str=interview_time_str,
             end_time_str=end_time_str,
@@ -1784,7 +1788,7 @@ comments/recommendations for the calibration process and final selection decisio
             current_ctc=current_ctc,
             expected_ctc=expected_ctc,
             interview_date_str=interview_date_str,
-            display_mode=display_mode,
+            display_mode=display_mode_label,
             round_label=round_label,
             interview_time_str=interview_time_str,
             end_time_str=end_time_str,
@@ -1988,7 +1992,7 @@ comments/recommendations for the calibration process and final selection decisio
             "Please find the details below.</p>"
             "<p>"
             f"<b>Date:</b> {interview_date_str}<br>"
-            f"<b>Interview Mode:</b> {display_mode}<br>"
+            f"<b>Interview Mode:</b> {display_mode_label}<br>"
             f"<b>Interview Round:</b> {round_label}<br>"
             f"<b>Interview Time:</b> {interview_time_str} \u2013 {end_time_str}<br>"
             "</p>"
@@ -2067,7 +2071,7 @@ comments/recommendations for the calibration process and final selection decisio
             interview_date_str=interview_date_str,
             interview_time_str=interview_time_str,
             end_time_str=end_time_str,
-            display_mode=display_mode,
+            display_mode=display_mode_label,
             candidate_mode_html=candidate_mode_html,
             Note_to_candidate_html=note_to_candidate_html,
             candidate_advice_html=candidate_advice_html,
@@ -2251,6 +2255,7 @@ comments/recommendations for the calibration process and final selection decisio
     if hybrid_interviewer_list:
         _hybrid_mode = (interview_mode_hybrid or "").strip() or display_mode
         _hybrid_is_online = _hybrid_mode.lower() == "online"
+        _hybrid_mode_label = "Video Conference" if _hybrid_is_online else _hybrid_mode
         # If BOTH the main group and the hybrid group are joining Online,
         # this is one single call, not two — reuse the main event's own
         # Teams meeting instead of creating a second, unconnected one that
@@ -2274,7 +2279,7 @@ comments/recommendations for the calibration process and final selection decisio
             _hybrid_location_html = _hm + _ha
 
         _hybrid_subject = (
-            f"Interview Scheduled ({_hybrid_mode}) – {Applicants_name} | "
+            f"Interview Scheduled ({_hybrid_mode_label}) – {Applicants_name} | "
             f"{round_label} for {Applicants_Role}"
         )
         _hybrid_draft_body = f"""
@@ -2282,7 +2287,7 @@ comments/recommendations for the calibration process and final selection decisio
         <p>An interview with <b>{Applicants_name}</b> for the role of
         <b>{Applicants_Role}</b> has been confirmed.</p>
         <p><b>Date:</b> {interview_date_str}<br>
-        <b>Interview Mode:</b> {_hybrid_mode}<br>
+        <b>Interview Mode:</b> {_hybrid_mode_label}<br>
         <b>Interview Round:</b> {round_label}<br>
         <b>Interview Time:</b> {interview_time_str} – {end_time_str}</p>
         {_hybrid_location_html}
@@ -2399,7 +2404,7 @@ comments/recommendations for the calibration process and final selection decisio
             <p>An interview with <b>{Applicants_name}</b> for the role of
             <b>{Applicants_Role}</b> has been confirmed.</p>
             <p><b>Date:</b> {interview_date_str}<br>
-            <b>Interview Mode:</b> {_hybrid_mode}<br>
+            <b>Interview Mode:</b> {_hybrid_mode_label}<br>
             <b>Interview Round:</b> {round_label}<br>
             <b>Interview Time:</b> {interview_time_str} – {end_time_str}</p>
             {_hybrid_join_html}

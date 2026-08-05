@@ -53,10 +53,13 @@ mapping for every doctype. The steps:
 """
 
 import csv
+import datetime
 import os
 import re
+import zipfile
 
 import frappe
+from dateutil import parser as dateutil_parser
 from openpyxl import Workbook, load_workbook
 
 _MATCH_FIELD = "zayam_id"
@@ -162,6 +165,8 @@ def _build_config(doctype):
 
     header_aliases = {}
     int_fields = set()
+    date_fields = set()
+    datetime_fields = set()
     link_fields = {}
     assignable_fields = []
     display_field = None
@@ -177,6 +182,12 @@ def _build_config(doctype):
 
         if df.fieldtype == "Int":
             int_fields.add(df.fieldname)
+
+        if df.fieldtype == "Date":
+            date_fields.add(df.fieldname)
+
+        if df.fieldtype == "Datetime":
+            datetime_fields.add(df.fieldname)
 
         if df.fieldtype == "Link" and df.options and df.options != "DocType":
             link_fields[df.fieldname] = df.options
@@ -210,6 +221,8 @@ def _build_config(doctype):
         "display_field": display_field or _MATCH_FIELD,
         "resume_field": resume_field,
         "int_fields": int_fields,
+        "date_fields": date_fields,
+        "datetime_fields": datetime_fields,
         "header_aliases": header_aliases,
         "link_fields": link_fields,
         "assignable_fields": assignable_fields,
@@ -323,7 +336,48 @@ def _build_all_columns(raw_headers, col_field_map, manual_mapping, samples=None)
     ]
 
 
-def _cell_value(cell, fieldname, int_fields):
+def _silent_parse_date(value, as_datetime=False):
+    """
+    Mirrors frappe.utils.getdate()/get_datetime()'s own parsing logic, but
+    NEVER goes through frappe.throw() on failure.
+
+    getdate() calls frappe.throw(..., title="Invalid Date") when a string
+    can't be parsed as a date. frappe.throw() queues the message via
+    frappe.msgprint() *before* raising the exception — so even though
+    _cell_value's own try/except catches that exception fine and the row
+    is safely skipped, the queued message is already sitting in
+    frappe.local.message_log and gets flushed to the client regardless.
+    Across a 20,000+ row file, every row with one unparseable date value
+    queues one more "X is not a valid date string" message, and they all
+    land on the client at once as a wall of repeated "Invalid Date"
+    dialogs — even though every affected row was already handled
+    correctly (the bad value just becomes None). Doing the same parsing
+    with dateutil directly, with no frappe.throw() in the failure path at
+    all, gets identical results with none of that side effect.
+    """
+    if value in (None, ""):
+        return None
+    # openpyxl's own quirk for a date-formatted cell holding Excel's "day
+    # zero" serial value (a common stand-in for "blank" on templated
+    # exports) is to hand back a bare datetime.time — there's no date
+    # component here at all, so it must map to "no value", not fall
+    # through to string parsing below (which would default the missing
+    # date portion to *today*, silently fabricating a date that was never
+    # actually in the file).
+    if isinstance(value, datetime.time):
+        return None
+    if isinstance(value, datetime.datetime):
+        return value if as_datetime else value.date()
+    if isinstance(value, datetime.date):
+        return datetime.datetime.combine(value, datetime.time()) if as_datetime else value
+    try:
+        parsed = dateutil_parser.parse(str(value))
+    except (ValueError, OverflowError, TypeError, dateutil_parser.ParserError):
+        return None
+    return parsed if as_datetime else parsed.date()
+
+
+def _cell_value(cell, fieldname, int_fields, date_fields=None, datetime_fields=None):
     value = cell.value
     if value is None:
         return None
@@ -333,6 +387,26 @@ def _cell_value(cell, fieldname, int_fields):
             return int(value)
         except (TypeError, ValueError):
             return None
+
+    # Zwayam exports are free-text spreadsheets, not a fixed date format —
+    # values like "09-24-20" (MM-DD-YY) reached the DB completely raw before
+    # this check existed, and MariaDB rejects anything that isn't an
+    # ISO-ish date outright ("Incorrect date value: '09-24-20' for column
+    # ... date_of_application"), failing the ENTIRE row (not just that one
+    # column) even though every other cell in it was fine. _silent_parse_date
+    # handles this ambiguity correctly via dateutil (same as frappe.utils.
+    # getdate would) without frappe.throw()'s message-queuing side effect.
+    # An empty/blank cell must short-circuit to None here — parsing "" would
+    # otherwise return *today's date* instead of "no value".
+    if date_fields and fieldname in date_fields:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return _silent_parse_date(value)
+
+    if datetime_fields and fieldname in datetime_fields:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return _silent_parse_date(value, as_datetime=True)
 
     if isinstance(value, str):
         value = value.strip()
@@ -374,7 +448,32 @@ def _load_sheet(file_doc):
         for row in rows:
             ws.append(row)
         return ws
-    return load_workbook(path).active
+
+    try:
+        # read_only=True makes openpyxl stream rows lazily straight off the
+        # underlying XML instead of parsing the entire workbook into memory
+        # up front — the default mode is what was making preview_excel hang
+        # the whole tab ("Pages Unresponsive") on a real ~21k-row/67-column
+        # export: the file is fully loaded before a single preview row can
+        # be returned, even though only `limit` rows ever get sent back.
+        # data_only=True reads formula cells' last-calculated value instead
+        # of the formula string itself, which is what a data import wants.
+        return load_workbook(path, read_only=True, data_only=True).active
+    except zipfile.BadZipFile:
+        # A .xlsx is a ZIP container under the hood — this specific error
+        # means the file is missing its End-Of-Central-Directory record,
+        # which only happens when the upload was cut off partway through
+        # (network drop, tab closed mid-upload, etc.), not from anything
+        # about the data inside it. Surfacing openpyxl/zipfile's raw
+        # "File is not a zip file" traceback here left the user staring at
+        # a Python exception with no idea it just meant "re-upload this".
+        frappe.throw(
+            f"'{file_doc.file_name}' could not be read as an Excel file — it "
+            f"looks like the upload was interrupted partway through (the file "
+            f"is missing data a valid .xlsx must end with). Please try "
+            f"uploading it again, or use a .csv export instead if this keeps "
+            f"happening."
+        )
 
 
 @frappe.whitelist()
@@ -446,6 +545,8 @@ def preview_excel(
     match_field = config["match_field"]
     header_aliases = config["header_aliases"]
     int_fields = config["int_fields"]
+    date_fields = config["date_fields"]
+    datetime_fields = config["datetime_fields"]
 
     file_doc = frappe.get_doc("File", {"file_url": file_url})
     sheet = _load_sheet(file_doc)
@@ -478,7 +579,9 @@ def preview_excel(
         row_values = {}
         for idx, fieldname in sorted_cols:
             value = (
-                _cell_value(row[idx], fieldname, int_fields) if idx < len(row) else None
+                _cell_value(row[idx], fieldname, int_fields, date_fields, datetime_fields)
+                if idx < len(row)
+                else None
             )
             # If two columns map to the same field (e.g. a manually mapped
             # column collides with an auto-matched one), don't let a blank
@@ -576,17 +679,38 @@ def enqueue_import(
     return {"job_id": job_id, "total_rows": total_rows}
 
 
+def _results_csv_filename(job_id):
+    return f"zayam_import_results_{_safe_identifier(job_id)}.csv"
+
+
+def _results_csv_path(job_id):
+    return frappe.utils.get_site_path("private", "files", _results_csv_filename(job_id))
+
+
 def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping, user):
     """
     The actual row-by-row import, run in the background (see enqueue_import).
     Progress and results are written to cache every _PROGRESS_EVERY rows (and
     at the end) instead of being returned directly, since a 100k+ row result
     is too large to hold in memory/redis or send to the browser in one piece
-    — only the first _MAX_DETAIL_ENTRIES rows per bucket are kept for display,
-    with `truncated` flags telling the page a bucket was cut off.
+    — only the first _MAX_DETAIL_ENTRIES rows per bucket are kept for display
+    on the page itself, with `truncated` flags telling the page a bucket was
+    cut off. That's fine for an on-screen preview (rendering 18,000+ table
+    rows in the browser would be slow to the point of freezing the tab), but
+    someone reviewing a large import still needs to see EVERY row's outcome
+    somewhere — so every single row (not just the first 500 per bucket) is
+    also written straight to a CSV file on disk as it's processed, which the
+    page offers as a "Download Full Results" link once the job finishes.
     """
     job_id = import_job_id
     status = _get_status(job_id) or _new_status(job_id, doctype, 0, [], user)
+
+    csv_file = open(_results_csv_path(job_id), "w", newline="", encoding="utf-8-sig")
+    csv_writer = csv.writer(csv_file)
+    # Set immediately (not only on success) so even a run that dies partway
+    # through still leaves a downloadable file covering whatever it did
+    # manage to process before failing.
+    status["results_filename"] = _results_csv_filename(job_id)
 
     try:
         frappe.set_user(user)
@@ -594,6 +718,8 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
         match_field = config["match_field"]
         display_field = config["display_field"]
         int_fields = config["int_fields"]
+        date_fields = config["date_fields"]
+        datetime_fields = config["datetime_fields"]
         link_fields = config["link_fields"]
 
         file_doc = frappe.get_doc("File", {"file_url": file_url})
@@ -611,18 +737,29 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
         status["assignable_fields"] = config["assignable_fields"]
         _save_status(job_id, status)
 
+        # Same left-to-right column order as the on-page preview, so the
+        # downloaded CSV's columns line up with what was shown on screen.
+        sorted_cols = sorted(col_field_map.items())
+        csv_writer.writerow(
+            ["Zayam Id", "Status", "Reason / Error"]
+            + [raw_headers[idx] for idx, _ in sorted_cols]
+        )
+
         new_master_entries = {}
 
         for i, row in enumerate(sheet.iter_rows(min_row=2), start=1):
             row_values = {}
             for idx, fieldname in col_field_map.items():
                 if idx < len(row):
-                    value = _cell_value(row[idx], fieldname, int_fields)
+                    value = _cell_value(
+                        row[idx], fieldname, int_fields, date_fields, datetime_fields
+                    )
                     if value is not None:
                         row_values[fieldname] = value
 
             match_value = row_values.get(match_field)
             status["processed"] = i
+            row_cells = [row_values.get(fieldname, "") for _, fieldname in sorted_cols]
 
             if not match_value:
                 _record_result(
@@ -635,6 +772,7 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
                         "reason": "no_zayam_id",
                     },
                 )
+                csv_writer.writerow(["", "Skipped", "No Zayam Id"] + row_cells)
             else:
                 row_values.update(overrides)
                 entry = {
@@ -663,10 +801,12 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
                         doc.update(row_values)
                         doc.save(ignore_permissions=True)
                         _record_result(status, "updated", entry)
+                        csv_writer.writerow([match_value, "Updated", ""] + row_cells)
                     else:
                         doc = frappe.get_doc({"doctype": doctype, **row_values})
                         doc.insert(ignore_permissions=True)
                         _record_result(status, "created", entry)
+                        csv_writer.writerow([match_value, "Created", ""] + row_cells)
                 except Exception as e:
                     # Roll back only this row (not the whole batch) so earlier
                     # successful, not-yet-committed rows in this run survive.
@@ -676,11 +816,17 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
                     )
                     entry["error"] = frappe.utils.strip_html(str(e))
                     _record_result(status, "failed", entry)
+                    csv_writer.writerow(
+                        [match_value, "Failed", entry["error"]] + row_cells
+                    )
 
             # Commit periodically so progress survives a worker restart instead
-            # of losing everything in one big transaction.
+            # of losing everything in one big transaction. The CSV is flushed
+            # on the same cadence so a crash doesn't leave rows sitting in
+            # Python's write buffer, never actually reaching disk.
             if i % 25 == 0:
                 frappe.db.commit()
+                csv_file.flush()
             if i % _PROGRESS_EVERY == 0:
                 status["new_master_entries"] = {
                     dt: sorted(v) for dt, v in new_master_entries.items()
@@ -701,6 +847,8 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
             title="Zayam Data Import Job Failed", message=frappe.get_traceback()
         )
         _save_status(job_id, status)
+    finally:
+        csv_file.close()
 
 
 @frappe.whitelist()
@@ -715,6 +863,34 @@ def get_import_status(job_id):
             "This import job was not found — it may have expired or the job_id is wrong."
         )
     return status
+
+
+@frappe.whitelist()
+def download_import_results(job_id):
+    """
+    Streams back the CSV that _run_import_job wrote incrementally to disk —
+    one row per record actually processed (Created/Updated/Skipped/Failed,
+    with its exact reason), for ALL rows, not just the first
+    _MAX_DETAIL_ENTRIES shown on the page itself. That on-page cap exists
+    purely so the browser isn't asked to render tens of thousands of table
+    rows at once; this endpoint has no such limit since it's just streaming
+    a file that already exists on disk.
+    """
+    frappe.only_for("System Manager")
+    status = _get_status(job_id)
+    if not status:
+        frappe.throw(
+            "This import job was not found — it may have expired or the job_id is wrong."
+        )
+
+    path = _results_csv_path(job_id)
+    if not os.path.exists(path):
+        frappe.throw("No results file was found for this import job.")
+
+    with open(path, "rb") as f:
+        frappe.response["filecontent"] = f.read()
+    frappe.response["filename"] = _results_csv_filename(job_id)
+    frappe.response["type"] = "download"
 
 
 def _zayam_id_from_filename(file_name):
