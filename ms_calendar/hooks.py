@@ -11,12 +11,25 @@ app_license = "mit"
 
 doc_events = {
     "Field Offline Result": {"after_insert": "ms_calendar.events.after_insert"},
+    # FIX: "Field Registration Form" used to appear as TWO separate keys in
+    # this dict (once here, once further down next to the "Field
+    # Registration Form1" note). A Python dict literal keeps only the LAST
+    # occurrence of a duplicate key — so the second definition (just the
+    # OTP validate hook) was silently discarding this ENTIRE first one,
+    # meaning send_registration_form_after_insert/on_update (SMS),
+    # resume_rename.on_field_registration, and
+    # check_registration_duplicate_on_save have not been firing on this
+    # doctype at all. Merged into one entry so all of them actually run.
     "Field Registration Form": {
         "after_insert": "ms_calendar.ms_calendar.sms_utils.send_registration_form_after_insert",
-        "on_update": "ms_calendar.ms_calendar.sms_utils.send_registration_form_on_update",
+        "on_update": [
+            "ms_calendar.ms_calendar.sms_utils.send_registration_form_on_update",
+            "ms_calendar.api.applicant_master_sync.sync_field_registration_to_applicant_master",
+        ],
         "validate": [
             "ms_calendar.api.resume_rename.on_field_registration",
             "ms_calendar.api.ms_field.check_registration_duplicate_on_save",
+            "ms_calendar.api.otp.enforce_otp_verification",
         ],
     },
     "File": {
@@ -26,32 +39,32 @@ doc_events = {
         "validate": [
             "ms_calendar.api.resume_rename.on_phil_registration",
             "ms_calendar.api.ms_field.check_registration_duplicate_on_save",
-        ]
+        ],
+        "on_update": "ms_calendar.api.applicant_master_sync.sync_phil_registration_to_applicant_master",
     },
+    # NOTE: this site's live doctype is "Field Registration Form" (no "1") —
+    # this "1" variant is a mismatch left over from local vs. cloud naming
+    # and doesn't fire on this site at all. Left as-is (not this site's
+    # active doctype) rather than merged into the entry above.
     "Field Registration Form1": {
         "validate": [
             "ms_calendar.api.resume_rename.on_field_registration",
             "ms_calendar.api.ms_field.check_registration_duplicate_on_save",
         ]
     },
-    # NOTE: this site's live doctype is "Field Registration Form" (no "1") —
-    # see the "Field Registration Form1" entry above, which is a mismatch left
-    # over from local vs. cloud naming and doesn't fire on this site at all.
-    # OTP enforcement is registered under the name that actually exists here.
-    "Field Registration Form": {
-        "validate": "ms_calendar.api.otp.enforce_otp_verification",
-    },
     "Health Registration Form": {
         "validate": [
             "ms_calendar.api.resume_rename.on_health_registration",
             "ms_calendar.api.ms_field.check_registration_duplicate_on_save",
-        ]
+        ],
+        "on_update": "ms_calendar.api.applicant_master_sync.sync_health_registration_to_applicant_master",
     },
     "Health Document Collection": {
         "on_update": "ms_calendar.api.resume_rename.on_health_document_collection"
     },
     "Scholarship Recruitment Form": {
-        "validate": "ms_calendar.api.resume_rename.on_scholarship_registration"
+        "validate": "ms_calendar.api.resume_rename.on_scholarship_registration",
+        "on_update": "ms_calendar.api.applicant_master_sync.sync_scholarship_registration_to_applicant_master",
     },
     "Leader Final Round Feedback Form": {
         "after_insert": [

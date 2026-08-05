@@ -12,7 +12,7 @@ const DOCTYPE_CHOICES = [
 	{ label: __('Select...'), value: '' },
 	{ label: __('Grant'), value: 'Phil Registration Form' },
 	{ label: __('Field'), value: 'Field Registration Form' },
-	{ label: __('Zayam Datas'), value: 'Zayam Datas' }
+	{ label: __('Applicant Master'), value: 'Applicant Master' }
 ];
 
 function make_doctype_picker($container, opts) {
@@ -361,6 +361,39 @@ function render_import_card(page) {
 			}
 			.zayam-progress-stats b { color: var(--text-color); }
 			.zayam-progress-note { margin-top: 10px; font-size: 12px; color: var(--text-muted); }
+			.btn-stop-import {
+				margin-top: 14px;
+				background: transparent;
+				color: var(--red-500);
+				border: 1px solid var(--red-500);
+				padding: 8px 18px;
+				border-radius: 8px;
+				font-size: 12.5px;
+				font-weight: 600;
+				cursor: pointer;
+				transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+			}
+			.btn-stop-import:hover { opacity: 0.8; }
+			.btn-stop-import:disabled { opacity: 0.5; cursor: default; }
+			.btn-restart-import {
+				background: var(--subtle-fg, rgba(128, 128, 128, 0.1));
+				color: var(--text-color);
+				border: 1px solid var(--border-color);
+				padding: 9px 18px;
+				border-radius: 8px;
+				font-size: 12.5px;
+				font-weight: 600;
+				cursor: pointer;
+				transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+			}
+			.btn-restart-import::before { content: '↻ '; }
+			.btn-restart-import:hover { opacity: 0.85; }
+			.zayam-cancelled-note {
+				font-size: 12.5px;
+				color: var(--yellow-600, #b45309);
+				margin-bottom: 10px;
+				font-weight: 600;
+			}
 			.zayam-import-results { margin-top: 22px; text-align: left; animation: zayamFadeUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
 			.zayam-pdf-preview { margin-top: 22px; text-align: left; animation: zayamFadeUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
 			.zayam-import-results .stat-row {
@@ -771,7 +804,7 @@ function render_import_card(page) {
 		const overrides = get_overrides();
 		new frappe.ui.FileUploader({
 			folder: 'Home',
-			// Zayam Datas alone has 67 columns — a 2-lakh-row export of that
+			// Applicant Master alone has 67 columns — a 2-lakh-row export of that
 			// width can comfortably exceed the old 50MB ceiling (especially
 			// as .csv, which compresses far worse than .xlsx) and would get
 			// rejected here before the import job ever started. Raised to
@@ -904,12 +937,23 @@ function load_active_job() {
 	}
 }
 
-function render_import_progress(page, status) {
+// render_import_progress replaces the whole panel's HTML every poll tick
+// (every 2s) — a plain $btn.prop('disabled', true) after clicking "Stop"
+// would get wiped out and reset back to a fresh, clickable button on the
+// very next tick, making it look like the click didn't register. Tracking
+// which job_ids have a stop already in flight (independent of any single
+// render call) lets each re-render know to keep showing "Stopping…" until
+// the terminal state actually arrives and polling stops altogether.
+const ZAYAM_STOP_REQUESTED = new Set();
+
+function render_import_progress(page, status, job_id) {
 	const $progress = $(page.body).find('.zayam-import-progress');
 	const total = status.total_rows || 0;
 	const processed = status.processed || 0;
 	const pct = total ? Math.min(100, Math.round((processed / total) * 100)) : 0;
 	const counts = status.counts || { created: 0, updated: 0, skipped: 0, failed: 0 };
+	job_id = job_id || status.job_id;
+	const stopping = job_id && ZAYAM_STOP_REQUESTED.has(job_id);
 
 	$progress
 		.html(`
@@ -921,9 +965,30 @@ function render_import_progress(page, status) {
 				<span>${__('Skipped')}: <b>${counts.skipped}</b></span>
 				<span>${__('Failed')}: <b>${counts.failed}</b></span>
 			</div>
-			<div class="zayam-progress-note">${__('This keeps running in the background — feel free to navigate away, or even close this tab; reopen this page to check progress.')}</div>
+			<div class="zayam-progress-note">${stopping
+			? __('Stopping — finishing the row currently in progress, then it will stop cleanly.')
+			: __('This keeps running in the background — feel free to navigate away, or even close this tab; reopen this page to check progress.')}</div>
+			${job_id ? `<button class="btn btn-stop-import" data-job-id="${job_id}" ${stopping ? 'disabled' : ''}>${stopping ? __('Stopping…') : __('Stop Import')}</button>` : ''}
 		`)
 		.show();
+
+	// Rebound on every re-render (the whole panel's HTML is replaced each
+	// poll tick) — clicking asks the background job to stop at its next
+	// commit checkpoint (within ~25 rows) rather than killing it outright,
+	// so whatever's already been imported stays intact and consistent.
+	$progress.find('.btn-stop-import').on('click', function () {
+		const $btn = $(this);
+		const id = $btn.data('job-id');
+		ZAYAM_STOP_REQUESTED.add(id);
+		$btn.prop('disabled', true).text(__('Stopping…'));
+		frappe.call({
+			method: 'ms_calendar.api.zayam_data_import.cancel_import',
+			args: { job_id: id },
+			callback() {
+				frappe.show_alert({ message: __('Stopping — this may take a few seconds.'), indicator: 'orange' });
+			}
+		});
+	});
 }
 
 function poll_import_status(page, job_id, on_terminal) {
@@ -951,6 +1016,7 @@ function poll_import_status(page, job_id, on_terminal) {
 
 function handle_terminal_status(page, file_url, doctype, overrides, manual_mapping, status) {
 	$(page.body).find('.zayam-import-progress').empty().hide();
+	if (status.job_id) ZAYAM_STOP_REQUESTED.delete(status.job_id);
 	if (status.state === 'failed') {
 		clear_active_job();
 		frappe.msgprint({
@@ -975,7 +1041,7 @@ function start_import_job(page, file_url, doctype, overrides, manual_mapping) {
 			save_active_job(job_id, file_url, doctype, overrides, manual_mapping);
 			$(page.body).find('.zayam-preview').empty().hide();
 			$(page.body).find('.zayam-import-results').empty().hide();
-			render_import_progress(page, { processed: 0, total_rows, counts: {}, state: 'running' });
+			render_import_progress(page, { processed: 0, total_rows, counts: {}, state: 'running' }, job_id);
 			poll_import_status(page, job_id, (status) => handle_terminal_status(page, file_url, doctype, overrides, manual_mapping, status));
 		}
 	});
@@ -1133,7 +1199,7 @@ function data_table_group_html(cls, icon, label, entries, columns) {
 	`;
 }
 
-function show_import_results(page, file_url, doctype, overrides, manual_mapping, { job_id, results_filename, counts: raw_counts, details, truncated, unmatched_columns, columns, all_columns, new_master_entries, assignable_fields, processed, total_rows }) {
+function show_import_results(page, file_url, doctype, overrides, manual_mapping, { job_id, state, results_filename, counts: raw_counts, details, truncated, unmatched_columns, columns, all_columns, new_master_entries, assignable_fields, processed, total_rows }) {
 	clear_active_job();
 
 	unmatched_columns = unmatched_columns || [];
@@ -1171,10 +1237,16 @@ function show_import_results(page, file_url, doctype, overrides, manual_mapping,
 	$(page.body).find('.panel-pdf').show();
 	activate_step(page, 2);
 
+	const was_cancelled = state === 'cancelled';
+	const title_text = was_cancelled ? __('Import stopped') : __('Import complete');
+
 	const $results = $(page.body).find('.zayam-import-results');
 	$results
 		.html(
-			`<div class="zayam-preview-title">${__('Import complete')} — ${processed || 0} ${__('of')} ${total_rows || 0} ${__('rows processed')}</div>` +
+			`<div class="zayam-preview-title">${title_text} — ${processed || 0} ${__('of')} ${total_rows || 0} ${__('rows processed')}</div>` +
+			(was_cancelled
+				? `<div class="zayam-cancelled-note">⏹ ${__('You stopped this import partway through. Everything up to row {0} was already saved — nothing was lost, and nothing after that point was touched.', [processed || 0])}</div>`
+				: '') +
 			counts
 				.map(
 					(row) => `
@@ -1194,6 +1266,7 @@ function show_import_results(page, file_url, doctype, overrides, manual_mapping,
 			new_master_html +
 			`<div class="zayam-results-actions">
 				<button class="btn btn-map-columns-results">${__('Map Columns')}</button>
+				<button class="btn btn-restart-import">${was_cancelled ? __('Resume — Restart Same Import') : __('Restart Same Import')}</button>
 				${results_filename && job_id
 			? `<a class="btn btn-download-results" href="/api/method/ms_calendar.api.zayam_data_import.download_import_results?job_id=${encodeURIComponent(job_id)}">${__('Download Full Results (CSV)')}</a>`
 			: ''}
@@ -1206,6 +1279,17 @@ function show_import_results(page, file_url, doctype, overrides, manual_mapping,
 			const merged = Object.assign({}, manual_mapping, new_mapping);
 			start_import_job(page, file_url, doctype, overrides, merged);
 		});
+	});
+
+	// Re-runs the exact same already-uploaded file — no re-picking a file
+	// needed, since file_url from the first upload still points at it.
+	// Rows already imported just get matched by Zwayam Id and updated in
+	// place (not duplicated), so this is also the correct way to pick a
+	// stopped import back up: it naturally skips nothing and re-processes
+	// from the top, safely overwriting already-correct rows with the same
+	// values and continuing on to whatever wasn't reached yet.
+	$results.find('.btn-restart-import').on('click', () => {
+		start_import_job(page, file_url, doctype, overrides, manual_mapping);
 	});
 }
 

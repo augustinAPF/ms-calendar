@@ -62,7 +62,22 @@ import frappe
 from dateutil import parser as dateutil_parser
 from openpyxl import Workbook, load_workbook
 
-_MATCH_FIELD = "zayam_id"
+# A doctype's actual match-key field isn't always literally named
+# "zayam_id" — e.g. Applicant Master's field is "zwayam_id" (label
+# "Zwayam ID"), by explicit design of that doctype's schema. Rather than
+# require every doctype to rename its field to match this module's
+# original naming, _resolve_match_field checks for either name and uses
+# whichever one actually exists.
+_MATCH_FIELD_CANDIDATES = ["zayam_id", "zwayam_id"]
+
+
+def _resolve_match_field(doctype):
+    meta = frappe.get_meta(doctype)
+    for candidate in _MATCH_FIELD_CANDIDATES:
+        if meta.get_field(candidate):
+            return candidate
+    return None
+
 
 _SKIP_FIELDTYPES = {
     "Section Break",
@@ -103,6 +118,29 @@ def _save_status(job_id, status):
     frappe.cache().set_value(
         _status_cache_key(job_id), status, expires_in_sec=_STATUS_TTL
     )
+
+
+# Stopping a running import is a cooperative flag, not a hard kill of the
+# background worker — _run_import_job holds its own in-memory `status`
+# dict and only writes it to cache periodically, so it never sees anything
+# written into that dict from outside. This is a SEPARATE, tiny cache key
+# the running loop actively re-reads on the same cadence as its periodic
+# commits, so "Stop" takes effect within ~25 rows rather than requiring a
+# violent process kill (which would also risk leaving the DB mid-batch).
+def _cancel_cache_key(job_id):
+    return f"zayam_import_cancel:{job_id}"
+
+
+def _request_cancel(job_id):
+    frappe.cache().set_value(_cancel_cache_key(job_id), True, expires_in_sec=_STATUS_TTL)
+
+
+def _is_cancel_requested(job_id):
+    return bool(frappe.cache().get_value(_cancel_cache_key(job_id)))
+
+
+def _clear_cancel_flag(job_id):
+    frappe.cache().delete_value(_cancel_cache_key(job_id))
 
 
 def _new_status(job_id, doctype, total_rows, columns, user):
@@ -157,10 +195,12 @@ def _build_config(doctype):
     """
     meta = frappe.get_meta(doctype)
 
-    if not meta.get_field(_MATCH_FIELD):
+    match_field = _resolve_match_field(doctype)
+    if not match_field:
+        candidates = "' or '".join(_MATCH_FIELD_CANDIDATES)
         frappe.throw(
-            f"'{doctype}' does not have a '{_MATCH_FIELD}' field yet. "
-            f"Add a Zayam Id custom field to this doctype before importing."
+            f"'{doctype}' does not have a '{candidates}' field yet. "
+            f"Add one of these as a custom field to this doctype before importing."
         )
 
     header_aliases = {}
@@ -207,18 +247,19 @@ def _build_config(doctype):
         )
 
     # "Zwayam Id" is a real misspelling that shows up in some exports —
-    # recognise it as the same column as the actual Zayam Id field.
-    header_aliases["zwayam_id"] = _MATCH_FIELD
-    header_aliases["zwayamid"] = _MATCH_FIELD
+    # recognise it as the same column as the actual match field, whichever
+    # of the two candidate fieldnames this doctype actually uses.
+    header_aliases["zwayam_id"] = match_field
+    header_aliases["zwayamid"] = match_field
 
     # Zwayam's own "All Unit form" export doesn't call the column "Zayam
     # Id" at all — it labels it "Application/Register Number".
-    header_aliases["application_register_number"] = _MATCH_FIELD
-    header_aliases["register_number"] = _MATCH_FIELD
+    header_aliases["application_register_number"] = match_field
+    header_aliases["register_number"] = match_field
 
     return {
-        "match_field": _MATCH_FIELD,
-        "display_field": display_field or _MATCH_FIELD,
+        "match_field": match_field,
+        "display_field": display_field or match_field,
         "resume_field": resume_field,
         "int_fields": int_fields,
         "date_fields": date_fields,
@@ -229,14 +270,25 @@ def _build_config(doctype):
     }
 
 
-def _ensure_link_value_exists(target_doctype, value):
+def _ensure_link_value_exists(target_doctype, value, known_values=None):
     """
     If `value` isn't an existing record of target_doctype, create one on
     the fly (e.g. a new Theme/Geo/Location/Role appearing in a Zayam
     export shouldn't fail the whole row — it should just extend the
     master list). Returns True if a new record was created.
+
+    `known_values`, when given, is a mutable set of every name already
+    confirmed to exist for target_doctype — pre-populated in bulk ONCE per
+    import job (see _run_import_job) rather than queried per row. A single
+    master value (e.g. one Department) can appear on every row of a
+    200,000-row file; trusting this cache instead of hitting the DB for
+    every single occurrence is what turns that into one query for the
+    whole job instead of 200,000.
     """
-    if not value or frappe.db.exists(target_doctype, value):
+    if not value:
+        return False
+    exists = (value in known_values) if known_values is not None else frappe.db.exists(target_doctype, value)
+    if exists:
         return False
 
     meta = frappe.get_meta(target_doctype)
@@ -254,6 +306,8 @@ def _ensure_link_value_exists(target_doctype, value):
             doc_dict[title_field] = value
 
     frappe.get_doc(doc_dict).insert(ignore_permissions=True)
+    if known_values is not None:
+        known_values.add(value)
     return True
 
 
@@ -487,10 +541,11 @@ def export_template(doctype="Phil Registration Form"):
     from io import BytesIO
 
     meta = frappe.get_meta(doctype)
-    if not meta.get_field(_MATCH_FIELD):
+    if not _resolve_match_field(doctype):
+        candidates = "' or '".join(_MATCH_FIELD_CANDIDATES)
         frappe.throw(
-            f"'{doctype}' does not have a '{_MATCH_FIELD}' field yet. "
-            f"Add a Zayam Id custom field to this doctype before exporting a template."
+            f"'{doctype}' does not have a '{candidates}' field yet. "
+            f"Add one of these as a custom field to this doctype before exporting a template."
         )
 
     headers = [
@@ -679,6 +734,30 @@ def enqueue_import(
     return {"job_id": job_id, "total_rows": total_rows}
 
 
+@frappe.whitelist()
+def cancel_import(job_id):
+    """
+    Requests that a running import stop. This doesn't kill the background
+    worker outright — it flips a flag that _run_import_job checks on the
+    same cadence as its periodic commits (every 25 rows), so it finishes
+    whatever row it's currently on, commits normally, and stops cleanly —
+    no partial/uncommitted row, no corrupt state to clean up afterward.
+    Rows already processed before the stop stay exactly as they are; the
+    job's results (counts, CSV download) reflect everything done up to
+    that point, same as a normal completion.
+    """
+    frappe.only_for("System Manager")
+    status = _get_status(job_id)
+    if not status:
+        frappe.throw(
+            "This import job was not found — it may have expired or the job_id is wrong."
+        )
+    if status.get("state") != "running":
+        return {"already_stopped": True}
+    _request_cancel(job_id)
+    return {"already_stopped": False}
+
+
 def _results_csv_filename(job_id):
     return f"zayam_import_results_{_safe_identifier(job_id)}.csv"
 
@@ -737,6 +816,30 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
         status["assignable_fields"] = config["assignable_fields"]
         _save_status(job_id, status)
 
+        # Pre-fetch, once, everything the row loop would otherwise have to
+        # ask the database for on EVERY row:
+        #  - every existing match-field value already in this doctype, so
+        #    "does this row already exist?" is a dict lookup instead of a
+        #    query — the single biggest per-row cost for a large re-import
+        #    where most rows already exist.
+        #  - every existing name in each Link field's target doctype, so
+        #    _ensure_link_value_exists never has to query for a master
+        #    value (e.g. one Department) that's about to repeat across
+        #    thousands of rows.
+        # Both dicts/sets are kept updated as rows are created below, so a
+        # duplicate value appearing later in the SAME file is still caught
+        # correctly without ever going back to the database for it.
+        existing_by_match_value = {
+            row[match_field]: row.name
+            for row in frappe.get_all(
+                doctype, fields=[match_field, "name"], filters=[[match_field, "!=", ""]]
+            )
+        }
+        link_known_values = {
+            target_doctype: set(frappe.get_all(target_doctype, pluck="name"))
+            for target_doctype in set(link_fields.values())
+        }
+
         # Same left-to-right column order as the on-page preview, so the
         # downloaded CSV's columns line up with what was shown on screen.
         sorted_cols = sorted(col_field_map.items())
@@ -746,6 +849,7 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
         )
 
         new_master_entries = {}
+        cancelled = False
 
         for i, row in enumerate(sheet.iter_rows(min_row=2), start=1):
             row_values = {}
@@ -790,12 +894,14 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
                     # the row — e.g. a new Theme in the export just gets added.
                     for fieldname, target_doctype in link_fields.items():
                         value = row_values.get(fieldname)
-                        if value and _ensure_link_value_exists(target_doctype, value):
+                        if value and _ensure_link_value_exists(
+                            target_doctype, value, link_known_values.get(target_doctype)
+                        ):
                             new_master_entries.setdefault(target_doctype, set()).add(
                                 value
                             )
 
-                    existing = frappe.db.get_value(doctype, {match_field: match_value})
+                    existing = existing_by_match_value.get(match_value)
                     if existing:
                         doc = frappe.get_doc(doctype, existing)
                         doc.update(row_values)
@@ -805,6 +911,7 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
                     else:
                         doc = frappe.get_doc({"doctype": doctype, **row_values})
                         doc.insert(ignore_permissions=True)
+                        existing_by_match_value[match_value] = doc.name
                         _record_result(status, "created", entry)
                         csv_writer.writerow([match_value, "Created", ""] + row_cells)
                 except Exception as e:
@@ -823,10 +930,16 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
             # Commit periodically so progress survives a worker restart instead
             # of losing everything in one big transaction. The CSV is flushed
             # on the same cadence so a crash doesn't leave rows sitting in
-            # Python's write buffer, never actually reaching disk.
+            # Python's write buffer, never actually reaching disk. "Stop
+            # Import" is checked on this exact same cadence: whatever's been
+            # committed up to here is safe to stop on cleanly, with no
+            # in-flight row left half-done.
             if i % 25 == 0:
                 frappe.db.commit()
                 csv_file.flush()
+                if _is_cancel_requested(job_id):
+                    cancelled = True
+                    break
             if i % _PROGRESS_EVERY == 0:
                 status["new_master_entries"] = {
                     dt: sorted(v) for dt, v in new_master_entries.items()
@@ -834,11 +947,13 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
                 _save_status(job_id, status)
 
         frappe.db.commit()
-        status["state"] = "done"
+        status["state"] = "cancelled" if cancelled else "done"
         status["new_master_entries"] = {
             dt: sorted(v) for dt, v in new_master_entries.items()
         }
         _save_status(job_id, status)
+        if cancelled:
+            _clear_cancel_flag(job_id)
     except Exception as e:
         frappe.db.rollback()
         status["state"] = "failed"
@@ -1020,12 +1135,12 @@ def attach_application_pdf(file_url, file_name=None, doctype="Phil Registration 
 def get_zayam_enabled_doctypes(
     doctype, txt, searchfield, start, page_len, filters, **kwargs
 ):
-    """Query method for the doctype Link field: only list doctypes that already have a Zayam Id field."""
+    """Query method for the doctype Link field: only list doctypes that already have a Zayam Id (or Zwayam Id) field."""
     names = frappe.get_all(
-        "DocField", filters={"fieldname": _MATCH_FIELD}, pluck="parent"
+        "DocField", filters={"fieldname": ["in", _MATCH_FIELD_CANDIDATES]}, pluck="parent"
     )
     names += frappe.get_all(
-        "Custom Field", filters={"fieldname": _MATCH_FIELD}, pluck="dt"
+        "Custom Field", filters={"fieldname": ["in", _MATCH_FIELD_CANDIDATES]}, pluck="dt"
     )
     names = sorted(set(names))
     if txt:

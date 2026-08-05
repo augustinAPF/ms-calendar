@@ -26,10 +26,22 @@ def send_sms(
 		return
 
 	# ── load settings ──────────────────────────────────────────────────────────
+	# Snapshot the message log first: if "Field SMS Settings" (or its
+	# sms_templates child doctype) is broken/missing, frappe.get_single()
+	# can raise from deep inside Frappe's own meta-loading code, which
+	# queues a message via frappe.msgprint() *before* raising it — a plain
+	# except here catches the exception fine but can't undo that queued
+	# message, so it would otherwise leak into whatever page triggered
+	# this (e.g. saving a Field Registration Form) as a confusing "DocType
+	# Field SMS Template not found" popup that has nothing to do with what
+	# the user was actually doing.
+	message_log = frappe.local.message_log
+	snapshot_len = len(message_log)
 	try:
 		settings = frappe.get_single("Field SMS Settings")
 		auth_key = settings.get_password("auth_key", raise_exception=False)
 	except Exception:
+		del message_log[snapshot_len:]
 		_log_sms(
 			applicant_id=applicant_id, applicant_name=applicant_name,
 			full_name_aadhaar=full_name_aadhaar, phone=phone,
@@ -113,10 +125,15 @@ def send_whatsapp(
 		return
 
 	# ── load settings ──────────────────────────────────────────────────────────
+	# See the matching comment in send_sms() above — frappe.get_single() can
+	# queue a message before raising, which a plain except can't undo.
+	message_log = frappe.local.message_log
+	snapshot_len = len(message_log)
 	try:
 		settings = frappe.get_single("Field SMS Settings")
 		auth_key = settings.get_password("auth_key", raise_exception=False)
 	except Exception:
+		del message_log[snapshot_len:]
 		_log_sms(
 			applicant_id=applicant_id, applicant_name=applicant_name,
 			full_name_aadhaar=full_name_aadhaar, phone=phone,

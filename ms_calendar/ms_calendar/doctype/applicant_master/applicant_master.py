@@ -4,5 +4,5 @@
 from frappe.model.document import Document
 
 
-class ZayamDatas(Document):
+class ApplicantMaster(Document):
 	pass

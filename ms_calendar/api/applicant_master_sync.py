@@ -1,0 +1,409 @@
+"""
+Applicant Master sync — Health / Field / Philanthropy / Scholarship
+=====================================================================
+
+Applicant Master unifies common applicant data across four separate
+registration forms (Health, Field, Philanthropy, Scholarship). Each field
+that's shared across forms documents its per-form source fieldname directly
+in its own `description` (e.g. "Common field. Source fields -> Health:
+application_status; Field: application_status; ..."), and each form also
+has its own "<Form> - Details" tab holding fields specific to that one
+form. Every FIELD_MAPPING_* dict below was built the same way: parse those
+descriptions/tab sections, then cross-check every candidate against that
+form's ACTUAL live field list — not just trust the description text, since
+several of those had drifted out of date (e.g. Field Registration Form's
+"offer", "units", and "job_code" are declared as source fields in
+Applicant Master's descriptions but no longer exist on that form at all,
+so they're intentionally left unmapped rather than guessed at; same
+pattern shows up for Phil and Scholarship below).
+
+All four forms have a live "zayam_id" field, which is always the match key
+into Applicant Master's "zwayam_id" field — forced explicitly in each
+mapping below rather than only relying on the description text, since
+Health Registration Form's own field description doesn't mention "Health:"
+for that field at all even though the field itself exists.
+
+Whenever any of these four forms is saved, its sync_<form>_to_applicant_
+master hook copies every mapped field's current value into the matching
+Applicant Master record (matched by Zwayam Id), creating one if none
+exists yet. A save on the source form is never blocked by a sync problem —
+failures are logged to Error Log instead of raised.
+"""
+
+import frappe
+
+# Applicant Master fieldname -> Field Registration Form fieldname.
+# Deliberately excludes fields whose declared source no longer exists on
+# Field Registration Form (offer_status<-offer, unit<-units, job_code) —
+# see module docstring. Also excludes common fields with no Field-form
+# source at all (state, district_city, total_experience, feedback_form)
+# and a handful of Field-specific fields that don't have a live
+# counterpart on the form (reason_decline, email_verified, phone_verified,
+# preferred_location_form, department_change_reason, if_email_invite,
+# employee_referral, ex_emplyee_name, if_recruiter_upload,
+# preferred_test_mode, remarks, date_of_applied, cool_of_period,
+# date_offer_field) — add these once/if the corresponding field is added
+# to Field Registration Form.
+FIELD_MAPPING = {
+    "application_status": "application_status",
+    "full_name": "full_name_aadhaar",
+    "gender": "gender",
+    "date_of_birth": "dob",
+    "age": "age",
+    "email_address": "email_address",
+    "phone_number": "phone_number",
+    "role": "role",
+    "department": "department",
+    "location": "location",
+    "zwayam_id": "zayam_id",
+    "resume": "resume_upload",
+    "highest_education": "highest_education",
+    "opportunity_source": "opportunity",
+    "languages_known": "languages_known",
+    "blocklist_reason": "blocklist_reason",
+    "hold_reason": "hold_reason",
+    "reasons_for_shortlist": "reasons_for_shortlist",
+    "other_shortlist": "other_shortlist",
+    "reasons_for_reject_field": "reasons_for_reject",
+    "other_reject": "other_reject",
+    "other_job": "other_job",
+    "reason_otherjob": "reason_otherjob",
+    "alternate_no": "alternate_no",
+    "native_state": "native_state",
+    "native_district": "native_district",
+    "teaching_degrees": "teaching_degrees",
+    "teaching_year": "teaching_year",
+    "teachingexp_month": "teachingexp_month",
+    "health_expyear": "health_expyear",
+    "health_expmonth": "health_expmonth",
+    "former_employee": "former_employee",
+    "process_12": "process_12",
+    "then_other": "then_other",
+    "apf_associated": "apf_associated",
+    "apf_family": "apf_family",
+    "worklocation": "worklocation",
+    "english_medium": "english_medium",
+    "english_fluent": "english_fluent",
+    "test_location": "test_location",
+    "written_subject": "written_subject",
+    "ctet_qualify": "ctet_qualify",
+    "recruiter_round_feedback_form": "recruiter_round_feedback_form",
+    "round_one_feedback_from": "round_one_feedback_from",
+    "round_two_feedback_form": "round_two_feedback_form",
+    "round_tree_feedback_form": "round_tree_feedback_form",
+    "application_forms": "application_forms",
+    "self_declaration_field": "self_declaration",
+    "filed_merit_track_test": "filed_merit_track_test",
+    "field_mail": "field_mail",
+}
+
+
+
+# Applicant Master fieldname -> Health Registration Form fieldname.
+FIELD_MAPPING_HEALTH = {
+    "zwayam_id": "zayam_id",  # forced — see module docstring
+    "address1": "address1",
+    "age": "age",
+    "any_other_year": "any_other_year",
+    "application_status": "application_status",
+    "are_you_open": "are_you_open",
+    "arealocality": "arealocality",
+    "authorisation": "authorisation",
+    "bengali": "bengali",
+    "chhattisgarhi": "chhattisgarhi",
+    "complete_mbbs": "complete_mbbs",
+    "date_of_birth": "date_of_birth",
+    "date_offer": "date_offer",
+    "designation__role": "designation__role",
+    "district__city": "district__city",
+    "district_city": "taluk__district__city",
+    "door_number": "door_number",
+    "education_qualification": "education_qualification",
+    "email_address": "email_address",
+    "emp_enddate": "emp_enddate",
+    "emp_startdate": "emp_startdate",
+    "english": "english",
+    "fbone_panel": "fbone_panel",
+    "fbtwo_panel": "fbtwo_panel",
+    "feedback_form": "feedback_form",
+    "fellowship_mail": "fellowship_mail",
+    "first_prefered": "first_prefered",
+    "foundation_selection": "foundation_selection",
+    "full_name": "full_name",
+    "full_name_employer": "full_name_employer",
+    "gujarati": "gujarati",
+    "hindi": "hindi",
+    "if_no_mention": "if_no_mention",
+    "if_other": "if_other",
+    "interested_in": "interested_in",
+    "kannada": "kannada",
+    "languages_known": "languages_known",
+    "malayalam": "malayalam",
+    "marathi": "marathi",
+    "mbbs_college": "mbbs_college",
+    "mbbs_experience": "mbbs_experience",
+    "mbbs_institution": "mbbs_institution",
+    "medical_fitness": "medical_fitness",
+    "monthly_salary": "monthly_salary",
+    "odia": "odia",
+    "offer_status": "offer",
+    "opportunity_source": "opportunity",
+    "other_institution": "other_institution",
+    "phone_number": "phone_number",
+    "pincode": "pincode",
+    "reasons_for_hold": "reasons_for_hold",
+    "reasons_for_reject": "reasons_for_reject",
+    "reasons_for_shorlist": "reasons_for_shorlist",
+    "registration_form": "registration_form",
+    "resume": "resume",
+    "second_location": "second_location",
+    "selection_process": "selection_process",
+    "state": "state",
+    "state_medical_council": "state_medical_council",
+    "tamil": "tamil",
+    "third_location": "third_location",
+}
+
+
+# Applicant Master fieldname -> Phil Registration Form fieldname.
+FIELD_MAPPING_PHIL = {
+    "zwayam_id": "zayam_id",  # forced — see module docstring
+    "age": "age",
+    "application_status": "application_status",
+    "application_submission": "application_submission",
+    "application_submission_date": "application_submission_date",
+    "assignement_date": "assignement_date",
+    "assignment": "assignment",
+    "completion_year": "completion_year",
+    "current_location": "current_location",
+    "date_of_birth": "date_of_birth",
+    "email_address": "email",
+    "feedback_form": "feedback_form",
+    "feedback_form_three": "feedback_form_three",
+    "feedback_form_two": "feedback_form_two",
+    "full_name": "name1",
+    "geo": "geo",
+    "highest_education": "highest_level_of_education",
+    "location": "location",
+    "phil_application_pdf": "phil_application_pdf",
+    "philanthropy_mail": "philanthropy_mail",
+    "phone_number": "phone",
+    "position": "position",
+    "resume": "cv_attach",
+    "role": "role",
+    "submitted_assignment": "submitted_assignment",
+    "themes": "themes",
+    "total_experience": "total_experience",
+}
+
+
+# Applicant Master fieldname -> Scholarship Recruitment Form fieldname.
+FIELD_MAPPING_SCHOLARSHIP = {
+    "zwayam_id": "zayam_id",  # forced — see module docstring
+    "add_educational_qualification": "add_educational_qualification",
+    "add_row": "add_row",
+    "add_row2": "add_row2",
+    "address": "address",
+    "annual_salary": "annual_salary",
+    "any_gaps": "any_gaps",
+    "application_status": "application_status",
+    "basic_formula": "basic_formula",
+    "completion": "completion",
+    "course": "course",
+    "current_ctc": "current_ctc",
+    "currently_employed": "currently_employed",
+    "date_of_birth": "date_of_birth",
+    "degree": "degree",
+    "designation": "designation",
+    "designation2": "designation2",
+    "designation3": "designation3",
+    "designation_role": "designation_role",
+    "district2": "district2",
+    "district3": "district3",
+    "district_city": "district",
+    "district_city1": "district_city1",
+    "documents_status": "documents_status",
+    "email_address": "email",
+    "employed_date": "employed_date",
+    "employed_from": "employed_from",
+    "employed_from2": "employed_from2",
+    "employed_from3": "employed_from3",
+    "employed_to": "employed_to",
+    "employed_to1": "employed_to1",
+    "employed_to2": "employed_to2",
+    "employed_to3": "employed_to3",
+    "employer_name": "employer_name",
+    "employment_city": "employment_city",
+    "employment_state": "employment_state",
+    "exp_years": "exp_years",
+    "expected_ctc": "expected_ctc",
+    "feedback_form": "feedback_one_pdf",
+    "folder_path": "folder_path",
+    "full_name": "full_name_as_per_aadhar",
+    "functions": "functions",
+    "gender": "gender",
+    "highest_education": "highest_level_of_education",
+    "if_no_experience_years": "if_no_experience_years",
+    "info_yourself": "info_yourself",
+    "institution": "institution",
+    "jd_read": "jd_read",
+    "languages_known": "languages_known",
+    "location_applied": "location_applied",
+    "marital_status": "marital_status",
+    "mode_course": "mode_course",
+    "mode_of_course": "mode_of_course",
+    "modeofcourse": "modeofcourse",
+    "month_applied": "month_applied",
+    "name_of_the_degree": "name_of_the_degree",
+    "name_of_the_institution": "name_of_the_institution",
+    "name_of_the_university": "name_of_the_university",
+    "notice_period": "notice_period",
+    "noticeperiod": "noticeperiod",
+    "opportunity_source": "opportunity",
+    "organization2": "organization2",
+    "organization3": "organization3",
+    "organization_employer1": "organization_employer1",
+    "part_full_time": "part_full_time",
+    "part_fulltime": "part_fulltime",
+    "parttime2": "parttime2",
+    "parttime3": "parttime3",
+    "permanent_address": "permanent_address",
+    "permanent_district": "permanent_district",
+    "permanent_state": "permanent_state",
+    "pg_degree": "pg_degree",
+    "pg_institute": "pg_institute",
+    "pg_specialisation": "pg_specialisation",
+    "pg_university": "pg_university",
+    "pg_year": "pg_year",
+    "phone_number": "phone_number",
+    "pivot_charts": "pivot_charts",
+    "prior_exp": "prior_exp",
+    "project_location": "project_location",
+    "qualification": "qualification",
+    "religional_languages": "religional_languages",
+    "relocation": "relocation",
+    "resume": "resume__cv",
+    "role": "role",
+    "role_applied": "role_applied",
+    "role_apply": "role_apply",
+    "same_as_current_address": "same_as_current_address",
+    "score_percentile": "score_percentile",
+    "spreadsheet": "spreadsheet",
+    "srt_mail": "srt_mail",
+    "state": "state",
+    "state1": "state1",
+    "state2": "state2",
+    "state3": "state3",
+    "state_of_residence": "state_of_residence",
+    "submission_status": "submission_status",
+    "submit_cv": "submit_cv",
+    "takehome_salary": "takehome_salary",
+    "total_experience": "total_years_of_experience",
+    "total_months_of_experience": "total_months_of_experience",
+    "total_score": "total_score",
+    "total_year_of_experience": "total_year_of_experience",
+    "ug_degree": "ug_degree",
+    "ug_institute": "ug_institute",
+    "ug_specialisation": "ug_specialisation",
+    "ug_university": "ug_university",
+    "ug_year": "ug_year",
+    "university": "university",
+    "verification_code": "verification_code",
+    "year_completion": "year_completion",
+    "year_of_completion": "year_of_completion",
+    "yes_gaps": "yes_gaps",
+}
+
+_MATCH_FIELD_SOURCE = "zayam_id"  # on all four forms
+_MATCH_FIELD_TARGET = "zwayam_id"  # on Applicant Master
+
+# Applicant Master fields that are Link fields, and what doctype they link
+# to. The source forms store these as free text (e.g. role "Cluster
+# Coordinator", department "Livelihood") which frequently won't match an
+# actual Role/Department record — saving a Link field with a value that
+# doesn't exist makes Frappe throw "Could not find {doctype}: {value}" at
+# save time, which would otherwise fail this whole sync (and, same as the
+# date-parsing issue found earlier, leaks a message to the user even
+# though the exception itself gets caught below). Validating each one
+# first and just skipping the field if it doesn't resolve avoids the error
+# entirely instead of merely swallowing it after the fact.
+_LINK_TARGETS = {
+    "role": "Role",
+    "department": "Department",
+    "location": "Location",
+    "unit": "Unit",
+}
+
+
+def _drop_unresolvable_links(values):
+    for fieldname, target_doctype in _LINK_TARGETS.items():
+        value = values.get(fieldname)
+        if value and not frappe.db.exists(target_doctype, value):
+            del values[fieldname]
+
+
+def _sync_to_applicant_master(doc, field_mapping, source_label):
+    """
+    Shared by all four sync_<form>_to_applicant_master hooks below. Never
+    lets a sync problem block the user's actual save — logs and returns
+    instead of raising, since this is a background consistency step, not
+    something that should stop someone from saving their own registration
+    form.
+    """
+    match_value = doc.get(_MATCH_FIELD_SOURCE)
+    if not match_value:
+        return
+
+    # Snapshot the message log so that if something below still fails
+    # unexpectedly (despite the Link pre-check), any message queued as a
+    # side effect of that failure (frappe.throw queues its message before
+    # raising, so a plain try/except can't undo it) gets discarded along
+    # with the exception — the caller never sees it either way.
+    message_log = frappe.local.message_log
+    snapshot_len = len(message_log)
+
+    try:
+        values = {
+            am_field: doc.get(src_field) for am_field, src_field in field_mapping.items()
+        }
+        _drop_unresolvable_links(values)
+        # match_value itself is the authoritative Zwayam Id — set explicitly
+        # rather than relying solely on the mapping table above.
+        values[_MATCH_FIELD_TARGET] = match_value
+
+        existing = frappe.db.get_value(
+            "Applicant Master", {_MATCH_FIELD_TARGET: match_value}
+        )
+        if existing:
+            target = frappe.get_doc("Applicant Master", existing)
+            target.update(values)
+            target.save(ignore_permissions=True)
+        else:
+            target = frappe.get_doc({"doctype": "Applicant Master", **values})
+            target.insert(ignore_permissions=True)
+    except Exception:
+        frappe.log_error(
+            title="Applicant Master Sync Error",
+            message=f"{source_label} {doc.name} ({match_value}): {frappe.get_traceback()}",
+        )
+        del message_log[snapshot_len:]
+
+
+def sync_field_registration_to_applicant_master(doc, method=None):
+    """doc_events hook: on_update of Field Registration Form."""
+    _sync_to_applicant_master(doc, FIELD_MAPPING, "Field Registration Form")
+
+
+def sync_health_registration_to_applicant_master(doc, method=None):
+    """doc_events hook: on_update of Health Registration Form."""
+    _sync_to_applicant_master(doc, FIELD_MAPPING_HEALTH, "Health Registration Form")
+
+
+def sync_phil_registration_to_applicant_master(doc, method=None):
+    """doc_events hook: on_update of Phil Registration Form."""
+    _sync_to_applicant_master(doc, FIELD_MAPPING_PHIL, "Phil Registration Form")
+
+
+def sync_scholarship_registration_to_applicant_master(doc, method=None):
+    """doc_events hook: on_update of Scholarship Recruitment Form."""
+    _sync_to_applicant_master(doc, FIELD_MAPPING_SCHOLARSHIP, "Scholarship Recruitment Form")
