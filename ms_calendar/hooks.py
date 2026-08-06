@@ -62,6 +62,9 @@ doc_events = {
     "Health Document Collection": {
         "on_update": "ms_calendar.api.resume_rename.on_health_document_collection"
     },
+    "Philanthrophy Document Collection": {
+        "on_update": "ms_calendar.api.resume_rename.on_philanthropy_document_collection"
+    },
     "Scholarship Recruitment Form": {
         "validate": "ms_calendar.api.resume_rename.on_scholarship_registration",
         "on_update": "ms_calendar.api.applicant_master_sync.sync_scholarship_registration_to_applicant_master",
@@ -113,6 +116,15 @@ fixtures = [
                     "Field Registration Form1 Duplicate Check",
                     "Health Registration Form Duplicate Check",
                     "Phil Registration Form Duplicate Check",
+                    # Form JS for Custom DocTypes (see the doctype_js note
+                    # above and ms_calendar.api.sync_client_scripts) — these
+                    # get their `script` content refreshed automatically on
+                    # migrate, but that only reaches sites that already
+                    # have this fixture; a brand-new site needs the record
+                    # itself to exist first.
+                    "Philanthropy Interview Schedule",
+                    "Health Document Collection",
+                    "Philanthrophy Document Collection",
                 ],
             ]
         ],
@@ -183,10 +195,16 @@ fixtures = [
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
+# NOTE: Health Document Collection, Philanthrophy Document Collection, and
+# Philanthropy Interview Schedule are Custom DocTypes (custom=1) — Frappe's
+# FormMeta.add_code() hard-skips doctype_js for any custom doctype, so
+# entries for them here would silently never fire. Their form JS is
+# instead synced into a "Client Script" record on every migrate — see
+# ms_calendar.api.sync_client_scripts. The .js files themselves still live
+# under public/js/ as the source of truth; only the *loading mechanism*
+# differs from a normal (non-custom) doctype like "Job Opening" below.
 doctype_js = {
     "Job Opening": "public/js/job_opening.js",
-    "Health Document Collection": "public/js/health_document_collection.js",
-    "Philanthropy Interview Schedule": "public/js/philanthropy_interview_schedule.js",
 }
 doctype_list_js = {
     "Field Registration Form": "public/js/frf_list.js",
@@ -240,6 +258,14 @@ app_include_js = [
 # ------------
 
 before_migrate = ["ms_calendar.patches.fix_pkg_resources.execute"]
+
+# Custom DocTypes never load hooks.py's doctype_js (Frappe's own
+# FormMeta.add_code() hard-skips it for custom=1 doctypes) — their form JS
+# has to live in a Client Script record instead. This keeps those records
+# synced from their actual .js source files on every migrate, so editing
+# the file is enough. See ms_calendar.api.sync_client_scripts for the list
+# of doctypes this covers.
+after_migrate = ["ms_calendar.api.sync_client_scripts.sync_custom_doctype_client_scripts"]
 
 # before_install = "ms_calendar.install.before_install"
 # after_install = "ms_calendar.install.after_install"
