@@ -779,6 +779,41 @@ def update_interview_event(
             "showAs": "busy",
         },
     )
+    if res.status_code == 404:
+        # The Outlook event this record's event_id points at is gone —
+        # most likely someone deleted it directly in Outlook rather than
+        # through this app. PATCHing a deleted event always 404s, so
+        # rather than crash the whole reschedule, recover by creating a
+        # fresh event in its place. create_interview_event() already
+        # knows how to update this record's event_id once the new event
+        # exists (it accepts the same `name` this function was called
+        # with), so delegate to it instead of duplicating that logic.
+        frappe.log_error(
+            title="PHILANTHROPY_INTERVIEW_RESCHEDULE_STALE_EVENT",
+            message=(
+                f"Reschedule target Outlook event {doc.event_id} for {name} "
+                f"returned 404 (likely deleted directly in Outlook) — "
+                f"recreating a fresh event instead of failing the reschedule."
+            ),
+        )
+        return create_interview_event(
+            start_datetime=start_datetime,
+            end_datetime=end_datetime,
+            interviewer_emails=interviewer_emails,
+            interviewee_email=interviewee_email,
+            room_emails=room_emails,
+            is_online=is_online,
+            Organizer_email=Organizer_email,
+            InterviewersName=InterviewersName,
+            Applicants_name=Applicants_name,
+            application_id=application_id,
+            Applicants_Role=Applicants_Role,
+            Map_location=Map_location,
+            Comments_for_interviewer=Comments_for_interviewer,
+            Location_adress=Location_adress,
+            cc_emails=cc_emails,
+            name=name,
+        )
     res.raise_for_status()
 
     # Online meetings keep the same Teams link across a reschedule, so just
@@ -841,7 +876,7 @@ def update_interview_event(
     {logo_html}
     """
 
-    _subline = _theme_geo_subline(doc.theme, doc.geo)
+    _subline = _theme_geo_subline(doc.get("theme"), doc.get("geo"))
 
     frappe.sendmail(
         recipients=[interviewee_email],
@@ -914,7 +949,7 @@ def cancel_interview_event(name):
         frappe.sendmail(
             recipients=[doc.attendees],
             sender=doc.organizer_email,
-            subject=f"Interview Cancelled – Azim Premji Foundation ({interview_date}){_theme_geo_subline(doc.theme, doc.geo)}",
+            subject=f"Interview Cancelled – Azim Premji Foundation ({interview_date}){_theme_geo_subline(doc.get('theme'), doc.get('geo'))}",
             message=candidate_body,
             delayed=False,
         )
