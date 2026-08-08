@@ -1,8 +1,9 @@
 import frappe
 import os, ast, base64, time, re, requests
-from datetime import datetime, timedelta
-from frappe.utils import get_url, formatdate, format_time
+from datetime import datetime, timedelta, timezone
+from frappe.utils import get_url, formatdate, format_time, get_datetime
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 # @frappe.whitelist()
 # def create_interview_event(
@@ -386,6 +387,153 @@ def _theme_geo_subline(theme, geo):
 
 
 @frappe.whitelist()
+def get_org_rooms_and_availability(interview_date, start_time, end_time):
+    """
+    Lists every bookable room in the org and whether each is free for the
+    given slot — backs the "Select Meeting Rooms" dialog on Philanthropy
+    Interview Schedule. Self-contained here (uses this file's own
+    _graph_headers()) rather than routing through ms_calendar.api.msgraph;
+    that module's copy of this function is only kept around for the
+    unrelated "Schedule interview" doctype.
+    """
+    IST = ZoneInfo("Asia/Kolkata")
+    headers = _graph_headers()
+
+    # -------- ALL ROOMS (PAGINATED) --------
+    rooms = []
+    url = "https://graph.microsoft.com/v1.0/places/microsoft.graph.room"
+    try:
+        while url:
+            resp = requests.get(url, headers=headers, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            rooms.extend(data.get("value", []))
+            url = data.get("@odata.nextLink")
+    except requests.exceptions.RequestException as e:
+        frappe.log_error(
+            frappe.get_traceback(), "Philanthropy room availability: room list fetch failed"
+        )
+        frappe.throw(
+            f"Could not fetch the room list from Microsoft Graph — try again in a moment. ({e})"
+        )
+
+    room_emails = [r.get("emailAddress") for r in rooms if r.get("emailAddress")]
+
+    # -------- TIME RANGE --------
+    # Interviews are always entered in India time regardless of where this
+    # code happens to run — deriving the offset from the host machine's OS
+    # timezone would silently produce wrong busy/available results on any
+    # server not itself configured for Asia/Kolkata. Hardcode it instead.
+    start_local = get_datetime(f"{interview_date} {start_time}")
+    end_local = get_datetime(f"{interview_date} {end_time}")
+    start_utc = start_local.replace(tzinfo=IST).astimezone(timezone.utc)
+    end_utc = end_local.replace(tzinfo=IST).astimezone(timezone.utc)
+
+    # -------- AVAILABILITY IN BATCHES --------
+    MAX_BATCH = 20
+    schedule_url = (
+        "https://graph.microsoft.com/v1.0/"
+        "users/health.fellowship@azimpremjifoundation.org/calendar/getSchedule"
+    )
+    schedule_map = {}
+    availability_view_map = {}
+
+    for i in range(0, len(room_emails), MAX_BATCH):
+        batch = room_emails[i:i + MAX_BATCH]
+        body = {
+            "schedules": batch,
+            "startTime": {"dateTime": start_utc.isoformat(), "timeZone": "UTC"},
+            "endTime": {"dateTime": end_utc.isoformat(), "timeZone": "UTC"},
+            "availabilityViewInterval": 5,
+        }
+
+        try:
+            resp = requests.post(
+                schedule_url,
+                headers={**headers, "Content-Type": "application/json"},
+                json=body,
+                timeout=20,
+            )
+            resp.raise_for_status()
+        except requests.exceptions.RequestException:
+            # Don't fail the whole check because one batch of ~20 rooms
+            # timed out/errored — log it and treat those rooms as unknown
+            # (excluded below) rather than silently marking them available.
+            frappe.log_error(
+                frappe.get_traceback(),
+                f"Philanthropy room availability: getSchedule batch failed for {batch}",
+            )
+            continue
+
+        for item in resp.json().get("value", []):
+            key = item["scheduleId"].lower()
+            schedule_map[key] = item.get("scheduleItems", [])
+            # scheduleItems can come back EMPTY for a room that is genuinely
+            # busy — Graph only includes item-level detail when the calling
+            # app has full calendar detail visibility into that mailbox
+            # (blocked by the room's sharing/privacy settings or an Exchange
+            # Application Access Policy scoping the app to a subset of
+            # mailboxes). The aggregated availabilityView code string is
+            # still populated even then, so keep it as a second signal
+            # rather than trusting scheduleItems alone.
+            availability_view_map[key] = item.get("availabilityView", "")
+
+        time.sleep(0.1)
+
+    # -------- FINAL OUTPUT --------
+    final = []
+
+    for r in rooms:
+        email = r.get("emailAddress")
+        if not email:
+            continue
+        key = email.lower()
+
+        # A room whose batch request failed above has no entry in
+        # schedule_map at all — treat that as "unknown", not silently
+        # available, since we genuinely don't know its status.
+        if key not in schedule_map:
+            final.append({
+                "name": r.get("displayName"),
+                "email": email,
+                "capacity": r.get("capacity"),
+                "availability": [],
+                "is_available": False,
+                "status_unknown": True,
+            })
+            continue
+
+        busy = schedule_map[key]
+        available = True
+        for slot in busy:
+            s = datetime.fromisoformat(slot["start"]["dateTime"]).replace(tzinfo=timezone.utc)
+            e = datetime.fromisoformat(slot["end"]["dateTime"]).replace(tzinfo=timezone.utc)
+
+            if not (e <= start_utc or s >= end_utc):
+                available = False
+                break
+
+        # Cross-check against availabilityView even when scheduleItems came
+        # back empty/clean — each character covers one availabilityViewInterval
+        # (5 min) of the requested window; '0' is free, anything else
+        # (tentative/busy/OOF/working-elsewhere) means the room isn't clear
+        # for the full slot even though no individual item was visible.
+        view = availability_view_map.get(key, "")
+        if available and view and any(c != "0" for c in view):
+            available = False
+
+        final.append({
+            "name": r.get("displayName"),
+            "email": email,
+            "capacity": r.get("capacity"),
+            "availability": busy,
+            "is_available": available,
+        })
+
+    return {"rooms": final}
+
+
+@frappe.whitelist()
 def create_interview_event(
     start_datetime,
     end_datetime,
@@ -430,12 +578,17 @@ def create_interview_event(
     meeting_room = _resolve_meeting_room(room_emails, headers)
 
     _theme = _geo = None
+    application_pdf_url = None
     if application_id:
         _tg = frappe.db.get_value(
-            "Phil Registration Form", application_id, ["themes", "geo"], as_dict=True
+            "Phil Registration Form",
+            application_id,
+            ["themes", "geo", "phil_application_pdf"],
+            as_dict=True,
         )
         if _tg:
             _theme, _geo = _tg.get("themes"), _tg.get("geo")
+            application_pdf_url = _tg.get("phil_application_pdf")
     _subline = _theme_geo_subline(_theme, _geo)
 
     # -------- CREATE EVENT --------
@@ -538,6 +691,14 @@ def create_interview_event(
             paths = []
     else:
         paths = []
+
+    # Always include the candidate's Application PDF (Phil Registration Form)
+    # so interviewers have it on hand for the interview — this only ever
+    # reaches the Graph event's attachments below (i.e. the interviewer/room
+    # calendar invite), never the candidate's own frappe.sendmail further
+    # down, so the candidate is never sent their own PDF back.
+    if application_pdf_url and application_pdf_url not in paths:
+        paths.append(application_pdf_url)
 
     for web_path in paths:
         file_doc = frappe.get_all(
@@ -1088,3 +1249,109 @@ def send_interviewer_feedback_reminders():
         # Do NOT mark reminder_sent here - keep re-checking daily until
         # everyone submits or the 7-day window above closes it out.
         frappe.db.commit()
+
+
+def send_candidate_interview_reminders():
+    """Runs once daily (see hooks.py scheduler_events["daily"]).
+
+    Sends each candidate a one-time reminder email roughly a day before
+    their scheduled interview. Uses candidate_reminder_sent (a Check field
+    on Philanthropy Interview Schedule) so the daily run never re-sends —
+    the "daily" scheduler doesn't fire at an exact time, so this checks a
+    same-day-ahead window (0 < time to interview <= 24h) rather than trying
+    to hit "exactly 24 hours before".
+    """
+    now = frappe.utils.now_datetime()
+
+    schedules = frappe.get_all(
+        "Philanthropy Interview Schedule",
+        filters={
+            "candidate_reminder_sent": 0,
+            "is_cancelled": 0,
+            "interview_date": ["is", "set"],
+            "start_time": ["is", "set"],
+        },
+        fields=[
+            "name",
+            "applicants_name",
+            "role",
+            "attendees",
+            "organizer_email",
+            "interview_date",
+            "start_time",
+            "end_time",
+            "interview_type",
+            "event_id",
+            "google_map_link",
+        ],
+    )
+
+    for s in schedules:
+        if not (s.interview_date and s.start_time and s.attendees):
+            continue
+
+        try:
+            start_dt = frappe.utils.get_datetime(f"{s.interview_date} {s.start_time}")
+        except Exception:
+            continue
+
+        time_to_interview = start_dt - now
+        if time_to_interview <= timedelta(0) or time_to_interview > timedelta(days=1):
+            continue
+
+        # Online interviews: re-fetch the Teams join link fresh off the
+        # Graph event (it isn't persisted on the doc, only event_id is).
+        # In-person: fall back to the Google Map link, if any.
+        join_url = ""
+        if s.interview_type and s.event_id and s.organizer_email:
+            try:
+                headers = _graph_headers()
+                event_url = (
+                    f"https://graph.microsoft.com/v1.0/users/{s.organizer_email}"
+                    f"/events/{s.event_id}"
+                )
+                ev = requests.get(event_url, headers=headers).json()
+                if ev.get("onlineMeeting"):
+                    join_url = ev["onlineMeeting"].get("joinUrl", "")
+            except Exception:
+                pass
+
+        link = join_url or s.google_map_link or ""
+        interview_date_fmt = formatdate(s.interview_date, "dd MMMM yyyy")
+        interview_time_fmt = format_time(s.start_time)
+
+        link_html = (
+            f'<p>Please join using the link below:<br>'
+            f'<a href="{link}" target="_blank">{link}</a></p>'
+            if link
+            else ""
+        )
+
+        reminder_body = f"""
+        <p>Hi {s.applicants_name or "there"},</p>
+        <p>This is a reminder about your interview for the <strong>{s.role or ''}</strong>
+        position scheduled on <strong>{interview_date_fmt}</strong> at
+        <strong>{interview_time_fmt}</strong>.</p>
+        {link_html}
+        <p>Looking forward to speaking with you.</p>
+        <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+        {_logo_html()}
+        """
+
+        try:
+            frappe.sendmail(
+                recipients=[s.attendees],
+                sender=s.organizer_email,
+                subject=f"Reminder: Your Interview Tomorrow – Azim Premji Foundation ({interview_date_fmt})",
+                message=reminder_body,
+                delayed=False,
+            )
+            frappe.db.set_value(
+                "Philanthropy Interview Schedule", s.name, "candidate_reminder_sent", 1
+            )
+            frappe.db.commit()
+        except Exception:
+            frappe.log_error(
+                title="Candidate Interview Reminder Error",
+                message=frappe.get_traceback()[:2000],
+            )
