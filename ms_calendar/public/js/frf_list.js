@@ -127,6 +127,21 @@ async function open_result_dialog(candidate_id) {
     }
 }
 
+// section_wise_score/descriptive_response are stored server-side as JSON
+// text (Long Text fields, not Table fields — see merit_trac.py) — parse
+// back into an array here, defaulting to [] for anything old/blank/malformed
+// so a record saved before this field existed doesn't blow up the dialog.
+function parse_json_array(value) {
+    if (Array.isArray(value)) return value;
+    if (!value) return [];
+    try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+        return [];
+    }
+}
+
 function render_result_html(d, t) {
     const statBox = (lbl, val) => `
         <div style="flex:1;min-width:140px;background:#f8faff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;">
@@ -144,7 +159,7 @@ function render_result_html(d, t) {
         statBox("Attempted", `${t.total_attempted || "—"} / ${t.total_questions || "—"}`)
     ].join("");
 
-    const sections = t.section_wise_score || [];
+    const sections = parse_json_array(t.section_wise_score);
     const sectionRows = sections.map((s, i) => `
         <tr>
             <td style="padding:8px 12px;border-bottom:1px solid #e2e8f0;color:#94a3b8;">${i + 1}</td>
@@ -164,7 +179,7 @@ function render_result_html(d, t) {
         </table>`
         : `<div style="padding:14px;color:#94a3b8;">No section-wise scores recorded.</div>`;
 
-    const responses = t.descriptive_response || [];
+    const responses = parse_json_array(t.descriptive_response);
     const responsesHtml = responses.length
         ? responses.map((resp, i) => `
             <div style="border:1px solid #e2e8f0;border-radius:12px;padding:16px 18px;margin-bottom:12px;background:#fafbff;">

@@ -838,6 +838,12 @@ def create_interview_event(
         delayed=False,
     )
 
+    # interviewer_body (with its feedback-form link) reaches the interviewer
+    # only through the Outlook calendar invite's own body, via the PATCH
+    # above — deliberately not also sent as a separate standalone email here.
+    # An earlier attempt at adding one landed as a redundant 3rd email
+    # alongside this candidate email and the auto-generated calendar invite;
+    # two emails total (candidate + calendar invite) is the intended count.
     frappe.msgprint("✅ Event created successfully — Outlook notified automatically.")
 
     if name:
@@ -1006,6 +1012,19 @@ def update_interview_event(
         f'<p><strong>Meeting room:</strong> {meeting_room}</p>' if meeting_room else ""
     )
 
+    # Same feedback-form link create_interview_event sends the interviewer —
+    # missing here was the actual bug: a reschedule replaces the interviewer's
+    # only real, standalone email (the calendar invite's body isn't touched
+    # by this function's PATCH, but interviewers act on this email, not on
+    # re-opening the original invite) with one that never mentions feedback
+    # at all, so anyone whose interview got rescheduled — which is common —
+    # never received a working feedback link until the next-day reminder
+    # job (send_interviewer_feedback_reminders) eventually catches it.
+    feedback_url = get_url(
+        f"/philanthrophy-feedback-form/new"
+        f"?app_id={application_id}&applicant_name={Applicants_name}&role={Applicants_Role}"
+    )
+
     interviewer_body = f"""
     <p>Hi {InterviewersName},</p>
     <p>The interview below has been <strong>rescheduled</strong>:</p>
@@ -1018,6 +1037,8 @@ def update_interview_event(
     {meeting_room_html}
     </div>
     {meeting_html}
+    <p><strong>Feedback form:</strong>
+    <a href="{feedback_url}" target="_blank">Click here</a></p>
     <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
     {logo_html}
     """
