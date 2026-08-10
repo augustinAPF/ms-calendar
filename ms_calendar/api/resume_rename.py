@@ -69,7 +69,24 @@ def _rename_resume(doc, resume_field, name_field, label="Resume", extra_id_field
             # exist would recreate the exact bug this guards against.
             return
 
-        is_private = "/private/" in resume_url
+        # Sniff "/private/" from file_doc.file_url — NOT from `resume_url`
+        # (this doc's own Attach-field text, captured before this rename).
+        # file_doc.file_url is what get_full_path() above actually used to
+        # locate old_path/new_dir, so it's the only value guaranteed to
+        # match the folder the file was just renamed within. `resume_url`
+        # goes stale the moment a File's privacy changes independently of
+        # this doc — e.g. someone toggles "Make Private" on the File
+        # record itself, which moves the physical file and updates the
+        # File's own file_url but has no way to reach back and update
+        # every other doc/field whose Attach text still names the old
+        # public/private URL (see file_access_utils.get_file_bytes_
+        # resilient's own note on this same drift). Sniffing the stale
+        # doc-field text here would write a new_url whose /files/ vs
+        # /private/files/ prefix doesn't match where the rename above
+        # actually left the bytes, leaving the field pointing at a URL
+        # that 404s despite the file existing right next to it under the
+        # other prefix.
+        is_private = "/private/" in (file_doc.file_url or "")
         new_url = f"/private/files/{new_filename}" if is_private else f"/files/{new_filename}"
 
         frappe.db.set_value(
