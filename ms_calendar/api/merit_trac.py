@@ -504,7 +504,7 @@ from frappe.utils.file_manager import save_file
 def _attach_merittrac_report(test_doc, report_url):
     """
     Downloads the MeritTrac score report from `report_url` and attaches it as
-    a real file on the `field_merittrac_resuld` field. Best-effort — a failed
+    a real file on the `merittrac_report` field. Best-effort — a failed
     download must not block the rest of the result from being saved, since
     the report URL is a secondary detail, not the result itself.
     """
@@ -527,7 +527,7 @@ def _attach_merittrac_report(test_doc, report_url):
             is_private=1,
         )
         frappe.db.set_value(
-            test_doc.doctype, test_doc.name, "field_merittrac_resuld", file_doc.file_url
+            test_doc.doctype, test_doc.name, "merittrac_report", file_doc.file_url
         )
     except Exception:
         frappe.log_error(
@@ -713,9 +713,13 @@ def test_result_api():
         # not {"questionText":..., "candidateResponse":...} objects), so
         # building these unconditionally previously crashed every Scholarship
         # insert. Also skip any non-dict rows defensively either way.
+        #
+        # section_wise_score/descriptive_response are Long Text fields (JSON
+        # stored as text), not Table fields — frf_list.js's result dialog
+        # JSON.parse()s them back into arrays before rendering.
         if result_doctype == "Field MeritTrac Test Result":
             doc_fields["overall_percentage_score"] = percentage
-            doc_fields["section_wise_score"] = [
+            doc_fields["section_wise_score"] = frappe.as_json([
                 {
                     "section_name": section.get("name"),
                     "score": section.get("score"),
@@ -723,15 +727,15 @@ def test_result_api():
                 }
                 for section in section_wise_score
                 if isinstance(section, dict)
-            ]
-            doc_fields["descriptive_response"] = [
+            ])
+            doc_fields["descriptive_response"] = frappe.as_json([
                 {
                     "question_text": resp.get("questionText"),
                     "candidate_response": resp.get("candidateResponse"),
                 }
                 for resp in descriptive_response
                 if isinstance(resp, dict)
-            ]
+            ])
 
         test_doc = frappe.get_doc(doc_fields)
 

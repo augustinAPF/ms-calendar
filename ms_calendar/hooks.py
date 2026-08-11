@@ -65,6 +65,9 @@ doc_events = {
     "Philanthrophy Document Collection": {
         "on_update": "ms_calendar.api.resume_rename.on_philanthropy_document_collection"
     },
+    "Philanthrophy Feedback Form": {
+        "after_insert": "ms_calendar.api.feedback_merge.on_feedback_form_submitted"
+    },
     "Scholarship Recruitment Form": {
         "validate": "ms_calendar.api.resume_rename.on_scholarship_registration",
         "on_update": "ms_calendar.api.applicant_master_sync.sync_scholarship_registration_to_applicant_master",
@@ -328,6 +331,7 @@ after_migrate = ["ms_calendar.api.sync_client_scripts.sync_custom_doctype_client
 scheduler_events = {
 	"daily": [
 		"ms_calendar.api.ms_philanthropy.send_interviewer_feedback_reminders",
+		"ms_calendar.api.ms_philanthropy.send_candidate_interview_reminders",
 		"ms_calendar.api.ms_field.send_field_interview_feedback_reminders",
 	],
 	"cron": {
@@ -349,6 +353,13 @@ scheduler_events = {
 # extend_doctype_class = {
 # 	"Task": "ms_calendar.custom.task.CustomTaskMixin"
 # }
+#
+# Lets any logged-in staff member (System User role) open a CV/attachment
+# on the resume-bearing forms without hitting File's own default 403 —
+# see file_access.py for why that 403 happens in the first place.
+extend_doctype_class = {
+	"File": "ms_calendar.api.file_access.RelaxedAttachmentAccessMixin",
+}
 
 # Overriding Methods
 # ------------------------------

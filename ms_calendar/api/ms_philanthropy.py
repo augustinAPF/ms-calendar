@@ -533,6 +533,146 @@ def get_org_rooms_and_availability(interview_date, start_time, end_time):
     return {"rooms": final}
 
 
+def _attach_files_to_event(headers, organizer_email, event_id, attachment_paths, extra_paths=None):
+    """Resolve each url in `attachment_paths` (a JSON-encoded list of Attach-
+    field urls, as sent by philanthropy_interview_schedule.js's after_save —
+    frappe.call() JSON.stringify()s array args before sending) to a real
+    File record and POST it onto the given Graph event as an attachment.
+
+    Shared by create_interview_event and update_interview_event — the
+    reschedule path used to have no equivalent of this at all: its function
+    signature never declared an `attachment_paths` parameter, so
+    frappe.call()'s dispatcher (get_newargs — see frappe/__init__.py) simply
+    dropped that argument silently on every reschedule, no error either
+    side. Whatever CV/feedback/assignment file the recruiter had just
+    attached before saving never reached the event; only whatever was
+    attached back when the event was first created stuck around, since
+    update_interview_event's PATCH never touches attachments either.
+    """
+    attachment_files = []
+    if attachment_paths:
+        try:
+            paths = ast.literal_eval(attachment_paths)
+        except Exception:
+            paths = []
+    else:
+        paths = []
+
+    for extra in extra_paths or []:
+        if extra and extra not in paths:
+            paths.append(extra)
+
+    for web_path in paths:
+        # More than one File row can share the exact same file_url (a
+        # leftover duplicate from an earlier interrupted rename — same
+        # class of drift resume_rename.py's own stale-cleanup guards
+        # against). Querying without limit=1 and checking every candidate,
+        # rather than blindly trusting whichever the DB happens to return
+        # first, matters here specifically: a broken duplicate (wrong/
+        # stale file_name, no physical file behind it) sorting before the
+        # real one used to make this silently give up on an attachment
+        # that was actually sitting right there under a different row.
+        candidates = frappe.get_all(
+            "File",
+            filters={"file_url": web_path},
+            fields=["file_url", "file_name", "is_private"],
+        )
+        if not candidates:
+            frappe.log_error(
+                title="PHILANTHROPY_INTERVIEW_ATTACH_NO_FILE_RECORD",
+                message=f"No File record at all matches url={web_path!r} for event {event_id} — nothing to attach.",
+            )
+            continue
+
+        resolved_path = None
+        file_name = None
+        for candidate in candidates:
+            file_name = candidate.file_name
+            file_path = frappe.get_site_path(
+                "private" if candidate.is_private else "public", "files", file_name
+            )
+            if os.path.isfile(file_path):
+                resolved_path = file_path
+                break
+            # `is_private` can be stale vs. where the bytes actually live
+            # (bulk imports / reused "library file" attachments) — check the
+            # other folder before giving up on this candidate.
+            alt_path = frappe.get_site_path(
+                "public" if candidate.is_private else "private", "files", file_name
+            )
+            if os.path.isfile(alt_path):
+                resolved_path = alt_path
+                break
+
+        if not resolved_path:
+            frappe.log_error(
+                title="PHILANTHROPY_INTERVIEW_ATTACH_FILE_MISSING",
+                message=(
+                    f"url={web_path!r} for event {event_id} matched {len(candidates)} "
+                    f"File record(s), but none resolve to a real file on disk in "
+                    f"either public or private folders — nothing to attach."
+                ),
+            )
+            continue
+
+        with open(resolved_path, "rb") as f:
+            fb64 = base64.b64encode(f.read()).decode()
+
+        attachment_files.append((file_name, fb64))
+
+    attach_url = f"https://graph.microsoft.com/v1.0/users/{organizer_email}/events/{event_id}/attachments"
+
+    # Graph's attachments endpoint has no dedupe of its own — POSTing the
+    # same file twice just adds a second copy. update_interview_event now
+    # runs this on every Modify/reschedule (see its own comment on why), so
+    # an unchanged CV that's still in attachment_paths from a previous save
+    # would otherwise pile up one more copy each time. Skip anything whose
+    # name already matches an attachment already sitting on the event.
+    existing_names = set()
+    try:
+        existing = requests.get(attach_url, headers=headers, params={"$select": "name"}, timeout=30)
+        if existing.status_code == 200:
+            existing_names = {a.get("name") for a in existing.json().get("value", [])}
+    except Exception:
+        frappe.log_error(
+            title="PHILANTHROPY_INTERVIEW_ATTACH_LIST_ERROR",
+            message=f"Could not list existing attachments on event {event_id}: {frappe.get_traceback()}",
+        )
+
+    for fname, fb64 in attachment_files:
+        if fname in existing_names:
+            continue
+        try:
+            res = requests.post(
+                attach_url,
+                headers=headers,
+                json={
+                    "@odata.type": "#microsoft.graph.fileAttachment",
+                    "name": fname,
+                    "contentBytes": fb64,
+                },
+                timeout=60,
+            )
+            # This POST's response was never checked at all — a failure
+            # here (bad permissions, a >3MB attachment tripping Graph's
+            # simple-attachment size limit, a transient error) previously
+            # raised nothing and logged nothing, so a file could silently
+            # never reach the event with zero trace of why.
+            if res.status_code not in (200, 201):
+                frappe.log_error(
+                    title="PHILANTHROPY_INTERVIEW_ATTACH_FAILED",
+                    message=(
+                        f"Attaching {fname!r} to event {event_id} failed | "
+                        f"status={res.status_code} | body={res.text[:800]}"
+                    ),
+                )
+        except Exception:
+            frappe.log_error(
+                title="PHILANTHROPY_INTERVIEW_ATTACH_ERROR",
+                message=f"Attaching {fname!r} to event {event_id}: {frappe.get_traceback()}",
+            )
+
+
 @frappe.whitelist()
 def create_interview_event(
     start_datetime,
@@ -683,65 +823,13 @@ def create_interview_event(
     )
 
     # -------- ATTACH FILES --------
-    attachment_files = []
-    if attachment_paths:
-        try:
-            paths = ast.literal_eval(attachment_paths)
-        except:
-            paths = []
-    else:
-        paths = []
-
     # Always include the candidate's Application PDF (Phil Registration Form)
     # so interviewers have it on hand for the interview — this only ever
     # reaches the Graph event's attachments below (i.e. the interviewer/room
     # calendar invite), never the candidate's own frappe.sendmail further
     # down, so the candidate is never sent their own PDF back.
-    if application_pdf_url and application_pdf_url not in paths:
-        paths.append(application_pdf_url)
-
-    for web_path in paths:
-        file_doc = frappe.get_all(
-            "File",
-            filters={"file_url": web_path},
-            fields=["file_url", "file_name", "is_private"],
-        )
-        if not file_doc:
-            continue
-
-        file_doc = file_doc[0]
-        file_name = file_doc.file_name
-        file_path = frappe.get_site_path(
-            "private" if file_doc.is_private else "public", "files", file_name
-        )
-        if not os.path.isfile(file_path):
-            # `is_private` can be stale vs. where the bytes actually live
-            # (bulk imports / reused "library file" attachments) — check the
-            # other folder before dropping the attachment silently.
-            alt_path = frappe.get_site_path(
-                "public" if file_doc.is_private else "private", "files", file_name
-            )
-            if os.path.isfile(alt_path):
-                file_path = alt_path
-            else:
-                continue
-
-        with open(file_path, "rb") as f:
-            fb64 = base64.b64encode(f.read()).decode()
-
-        attachment_files.append((file_name, fb64))
-
-    attach_url = f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/events/{event_id}/attachments"
-    for fname, fb64 in attachment_files:
-        requests.post(
-            attach_url,
-            headers=headers,
-            json={
-                "@odata.type": "#microsoft.graph.fileAttachment",
-                "name": fname,
-                "contentBytes": fb64,
-            },
-        )
+    extra_paths = [application_pdf_url] if application_pdf_url else []
+    _attach_files_to_event(headers, Organizer_email, event_id, attachment_paths, extra_paths)
 
     logo_html = _logo_html()
 
@@ -757,11 +845,24 @@ def create_interview_event(
         else ""
     )
 
-    Map_location_html = (
+    # The map-link line used to render unconditionally whenever the
+    # interview was in-person, regardless of whether Map_location actually
+    # had a value — an empty/unset google_map_link still produced
+    # <a href=""> ("Click here" that goes nowhere, reads as "not
+    # clickable"). Venue text is shown on its own either way; the link
+    # line only appears when there's a real URL to link to.
+    venue_html = (
         f'<p style="margin:6px 0;"><strong>Venue:</strong> {Location_adress}</p>'
-        f'<p style="margin:6px 0;"><strong>Google Map Link:</strong>'
-        f'<a href="{Map_location}" target="_blank">Click here</a></p>'
+        if Location_adress
+        else ""
     )
+    map_link_html = (
+        f'<p style="margin:6px 0;"><strong>Google Map Link:</strong> '
+        f'<a href="{Map_location}" target="_blank">Click here</a></p>'
+        if Map_location
+        else ""
+    )
+    Map_location_html = venue_html + map_link_html
     map_html = Map_location_html if is_online == 0 else ""
 
     note_html = (
@@ -780,6 +881,7 @@ def create_interview_event(
     <p><strong>Time:</strong> {start_time} – {end_time}</p>
     <p><strong>Mode:</strong> {mode_label}</p>
     {meeting_room_html}
+    {map_html}
     </div>
     {meeting_html}
     <p><strong>Feedback form:</strong>
@@ -881,10 +983,15 @@ def update_interview_event(
     Comments_for_interviewer=None,
     Location_adress=None,
     cc_emails=None,
+    attachment_paths=None,
 ):
     """
     Reschedules an already-created interview: PATCHes the existing Outlook
-    event's time/room/attendees instead of creating a duplicate, then emails
+    event's time/room/attendees instead of creating a duplicate, attaches
+    any files passed in (CV, feedback PDF, assignment — same as at create
+    time; PATCHing time/attendees never touches existing attachments, and
+    this function previously had no attachment_paths parameter at all, so
+    frappe.call() silently dropped whatever the JS side sent), then emails
     the candidate and interviewers about the change.
     """
     doc = frappe.get_doc("Philanthropy Interview Schedule", name)
@@ -929,6 +1036,20 @@ def update_interview_event(
         + [{"emailAddress": {"address": i}, "type": "optional"} for i in cc_list]
         + [{"emailAddress": {"address": r}, "type": "resource"} for r in room_list]
     )
+
+    # Attach BEFORE the time/attendees PATCH below, not after — PATCHing
+    # start/end/attendees is what makes Exchange fire its own "meeting
+    # updated" notification to everyone on the invite, and that notification
+    # reflects whatever's on the event AT THAT MOMENT. Attaching afterwards
+    # (as this used to) meant the notification always went out before the
+    # new file existed on the event — the reason a freshly-attached CV
+    # never showed up after using "Modify The Schedule": it geniunely was
+    # being attached, just one step too late for anyone to see it in what
+    # they'd already been notified about. A failed attach here (e.g. the
+    # event was deleted directly in Outlook) is harmless — it only logs,
+    # the PATCH below still runs and its own 404 handling recovers the same
+    # way it always did.
+    _attach_files_to_event(headers, Organizer_email, doc.event_id, attachment_paths)
 
     res = requests.patch(
         event_url,
@@ -979,6 +1100,7 @@ def update_interview_event(
             Comments_for_interviewer=Comments_for_interviewer,
             Location_adress=Location_adress,
             cc_emails=cc_emails,
+            attachment_paths=attachment_paths,
             name=name,
         )
     res.raise_for_status()
@@ -1001,13 +1123,22 @@ def update_interview_event(
 
     logo_html = _logo_html()
 
-    map_html = (
+    # Same fix as create_interview_event's venue_html/map_link_html — don't
+    # render a "Google Map Link: Click here" that points at an empty href
+    # just because the interview is in-person; only when there's an actual
+    # URL to link to.
+    venue_html = (
         f'<p style="margin:6px 0;"><strong>Venue:</strong> {Location_adress}</p>'
-        f'<p style="margin:6px 0;"><strong>Google Map Link:</strong>'
-        f'<a href="{Map_location}" target="_blank">Click here</a></p>'
-        if is_online == 0
+        if Location_adress
         else ""
     )
+    map_link_html = (
+        f'<p style="margin:6px 0;"><strong>Google Map Link:</strong> '
+        f'<a href="{Map_location}" target="_blank">Click here</a></p>'
+        if Map_location
+        else ""
+    )
+    map_html = (venue_html + map_link_html) if is_online == 0 else ""
     meeting_room_html = (
         f'<p><strong>Meeting room:</strong> {meeting_room}</p>' if meeting_room else ""
     )
@@ -1035,6 +1166,7 @@ def update_interview_event(
     <p><strong>New Time:</strong> {start_time} – {end_time}</p>
     <p><strong>Mode:</strong> {mode_label}</p>
     {meeting_room_html}
+    {map_html}
     </div>
     {meeting_html}
     <p><strong>Feedback form:</strong>
@@ -1082,14 +1214,98 @@ def update_interview_event(
     return {"event_id": doc.event_id, "rescheduled": True}
 
 
+def _attendee_emails_for(doc):
+    emails = set()
+    for row in (doc.interviewer_email or []):
+        if row.interviewer_email:
+            emails.add(row.interviewer_email.strip())
+    for row in (doc.interviewers_cc_email or []):
+        if row.interviewer_email:
+            emails.add(row.interviewer_email.strip())
+    for email in (doc.room_email or "").split(","):
+        email = email.strip()
+        if email:
+            emails.add(email)
+    return emails
+
+
+def _remove_event_from_attendee_calendars(headers, ical_uid, attendee_emails):
+    """Best-effort: actually delete this meeting off each attendee's own
+    calendar, instead of leaving Graph's /cancel notice for them to act on.
+
+    Graph's /cancel action properly notifies attendees, but from their side
+    that still lands as a "Canceled: ..." entry Outlook leaves in place
+    until the attendee manually clicks "Remove event" (or has an Outlook-
+    side auto-removal setting enabled) — Outlook's calendar model doesn't
+    silently delete things from someone's calendar on the organizer's say-
+    so alone. This app authenticates with application-level Graph
+    credentials (client-credentials flow — see _graph_headers), the same
+    ones already used to create/manage events "as" the organizer's mailbox,
+    which under an app-only Calendars.ReadWrite grant reach any mailbox in
+    the tenant, not just the organizer's — so it can go remove each
+    attendee's own copy directly rather than waiting on them.
+
+    Every attendee's calendar carries a different Graph event id for "the
+    same" meeting, but they all share one iCalUId, which is what this
+    matches on.
+    """
+    if not ical_uid:
+        return
+    for attendee_email in attendee_emails:
+        try:
+            lookup = requests.get(
+                f"https://graph.microsoft.com/v1.0/users/{attendee_email}/events",
+                headers=headers,
+                params={"$filter": f"iCalUId eq '{ical_uid}'", "$select": "id"},
+            )
+            if lookup.status_code != 200:
+                # Previously silent — a permission problem (e.g. an Exchange
+                # Application Access Policy scoping this app away from an
+                # attendee's mailbox) looked identical to "nothing to clean
+                # up", with zero trace either way.
+                frappe.log_error(
+                    title="PHILANTHROPY_INTERVIEW_CANCEL_ATTENDEE_LOOKUP_FAILED",
+                    message=(
+                        f"Looking up {attendee_email}'s copy of iCalUId={ical_uid!r} "
+                        f"failed | status={lookup.status_code} | body={lookup.text[:500]}"
+                    ),
+                )
+                continue
+            for item in lookup.json().get("value", []):
+                del_res = requests.delete(
+                    f"https://graph.microsoft.com/v1.0/users/{attendee_email}/events/{item['id']}",
+                    headers=headers,
+                )
+                # Also previously unchecked — a DELETE that Graph rejected
+                # (403/404/etc.) left the "Canceled: ..." placeholder sitting
+                # in the attendee's calendar exactly as if this function had
+                # never run at all, with nothing logged to tell the two
+                # cases apart.
+                if del_res.status_code not in (200, 202, 204, 404):
+                    frappe.log_error(
+                        title="PHILANTHROPY_INTERVIEW_CANCEL_ATTENDEE_DELETE_FAILED",
+                        message=(
+                            f"Deleting {attendee_email}'s copy (event {item['id']}) of "
+                            f"iCalUId={ical_uid!r} failed | status={del_res.status_code} | "
+                            f"body={del_res.text[:500]}"
+                        ),
+                    )
+        except Exception:
+            frappe.log_error(
+                title="PHILANTHROPY_INTERVIEW_CANCEL_ATTENDEE_CLEANUP",
+                message=f"Failed to remove cancelled event from {attendee_email}'s calendar: {frappe.get_traceback()}",
+            )
+
+
 @frappe.whitelist()
 def cancel_interview_event(name):
     """
     Cancels an already-scheduled interview: cancels the Outlook event via
-    Graph (which also notifies the interviewer attendees), emails the
-    candidate directly (they were never a Graph attendee, only invited by
-    email), and clears event_id so the same record can be freely
-    rescheduled later.
+    Graph (notifying attendees), then actively deletes it off each
+    attendee's own calendar too rather than leaving that to Outlook's
+    manual "Remove event" prompt, emails the candidate directly (they were
+    never a Graph attendee, only invited by email), and clears event_id so
+    the same record can be freely rescheduled later.
     """
     doc = frappe.get_doc("Philanthropy Interview Schedule", name)
 
@@ -1098,12 +1314,26 @@ def cancel_interview_event(name):
 
     if doc.event_id and doc.organizer_email:
         headers = _graph_headers()
-        cancel_url = (
+        event_url = (
             f"https://graph.microsoft.com/v1.0/users/{doc.organizer_email}"
-            f"/events/{doc.event_id}/cancel"
+            f"/events/{doc.event_id}"
         )
+
+        # Needed before cancelling to find each attendee's own copy of this
+        # meeting afterwards — see _remove_event_from_attendee_calendars.
+        ical_uid = None
+        try:
+            ev = requests.get(event_url, headers=headers, params={"$select": "iCalUId"})
+            if ev.status_code == 200:
+                ical_uid = ev.json().get("iCalUId")
+        except Exception:
+            frappe.log_error(
+                title="PHILANTHROPY_INTERVIEW_CANCEL_ICALUID",
+                message=frappe.get_traceback(),
+            )
+
         res = requests.post(
-            cancel_url,
+            f"{event_url}/cancel",
             headers=headers,
             json={"comment": "This interview has been cancelled."},
         )
@@ -1112,6 +1342,8 @@ def cancel_interview_event(name):
                 title="PHILANTHROPY_INTERVIEW_CANCEL",
                 message=f"Graph cancel failed | status={res.status_code} | body={res.text[:800]}",
             )
+
+        _remove_event_from_attendee_calendars(headers, ical_uid, _attendee_emails_for(doc))
 
     interview_date = formatdate(doc.interview_date, "dd MMMM yyyy") if doc.interview_date else ""
     start_time = format_time(doc.start_time) if doc.start_time else ""

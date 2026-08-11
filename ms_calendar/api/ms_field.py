@@ -14,6 +14,49 @@ _CANDIDATE_SENDER = (
 )
 
 
+def _resolve_attachment_bytes(web_path):
+    """Resolve a File-field url (private or public) to (file_name, bytes),
+    trying every File row that shares this file_url rather than blindly
+    trusting whichever one `frappe.get_all(..., limit=1)` happens to return
+    first.
+
+    More than one File row can share the exact same file_url — a leftover
+    duplicate from an earlier interrupted rename (the same drift
+    resume_rename.py's own cleanup guards against, and the same class of
+    bug found and fixed in ms_philanthropy.py/msgraph.py's
+    _attach_files_to_event). A private CV/resume is exactly where this
+    bites hardest: if the first candidate row Frappe returns happens to be
+    a broken duplicate (stale is_private flag, or no physical file behind
+    it at all), get_file_bytes_resilient's own private/public fallback
+    can't help — it's resilient to a wrong is_private flag on the RIGHT
+    row, not to the row itself being the wrong one — and the whole
+    attachment was silently dropped with nothing but a caller-side log
+    entry, indistinguishable from the file genuinely being missing.
+
+    Returns (file_name, bytes). Raises FileNotFoundError if no candidate
+    resolves.
+    """
+    candidates = frappe.get_all(
+        "File", filters={"file_url": web_path}, fields=["name", "file_name"]
+    )
+    if not candidates:
+        raise FileNotFoundError(f"No File record for {web_path!r}")
+
+    last_error = None
+    for candidate in candidates:
+        try:
+            file_doc = frappe.get_doc("File", candidate["name"])
+            return file_doc.file_name, get_file_bytes_resilient(file_doc)
+        except Exception as e:
+            last_error = e
+            continue
+
+    raise FileNotFoundError(
+        f"{web_path!r} matched {len(candidates)} File record(s), but none "
+        f"resolved to real bytes on disk: {last_error}"
+    )
+
+
 def _requests_with_retry(method, url, max_retries=3, backoff=2, **kwargs):
     for attempt in range(max_retries):
         resp = requests.request(method, url, **kwargs)
@@ -1143,28 +1186,16 @@ def create_interview_event(
         attachment_list = []
 
     for web_path in attachment_list:
-        _fd = frappe.get_all(
-            "File",
-            filters={"file_url": web_path},
-            fields=["name", "file_name"],
-            limit=1,
-        )
-        if not _fd:
-            frappe.log_error(
-                f"File Doc not found: {web_path}", "Interview Event File Error"
-            )
-            continue
         try:
-            _f_obj = frappe.get_doc("File", _fd[0]["name"])
-            _f_bytes = get_file_bytes_resilient(_f_obj)
+            _f_fname, _f_bytes = _resolve_attachment_bytes(web_path)
             if len(_f_bytes) > 3 * 1024 * 1024:
                 frappe.log_error(
-                    f"File too large: {_fd[0]['file_name']}",
+                    f"File too large: {_f_fname}",
                     "Interview Event File Error",
                 )
                 continue
             final_files.append(
-                (_fd[0]["file_name"], base64.b64encode(_f_bytes).decode())
+                (_f_fname, base64.b64encode(_f_bytes).decode())
             )
         except Exception as _fe:
             frappe.log_error(
@@ -1273,29 +1304,23 @@ def create_interview_event(
                 if not web_path:
                     continue
 
+                # Cheap name-only lookup just for the dedup check below —
+                # falls back to deriving a name from the URL if no File
+                # record exists at all yet (matches the old behaviour).
                 _afd = frappe.get_all(
-                    "File",
-                    filters={"file_url": web_path},
-                    fields=["name", "file_name"],
-                    limit=1,
+                    "File", filters={"file_url": web_path}, fields=["file_name"], limit=1
                 )
-                if not _afd:
-                    # Fallback: derive filename from URL
-                    _af_name = web_path.split("/")[-1]
-                    _afd = [{"name": None, "file_name": _af_name}]
-
-                _af_fname = _afd[0]["file_name"]
+                _af_fname = _afd[0]["file_name"] if _afd else web_path.split("/")[-1]
 
                 # Skip if this file was already added (avoid duplicates)
                 if _af_fname.lower() in _already_added:
                     continue
 
                 try:
-                    if _afd[0]["name"]:
-                        _af_obj = frappe.get_doc("File", _afd[0]["name"])
-                    else:
-                        _af_obj = frappe.get_doc("File", {"file_url": web_path})
-                    _af_bytes = get_file_bytes_resilient(_af_obj)
+                    # Resolves against EVERY File row sharing this file_url,
+                    # not just whichever one the lookup above happened to
+                    # return first — see _resolve_attachment_bytes.
+                    _af_fname, _af_bytes = _resolve_attachment_bytes(web_path)
                     if len(_af_bytes) > 5 * 1024 * 1024:
                         frappe.log_error(
                             f"Auto-attach file too large: {_af_fname}",
@@ -2075,11 +2100,28 @@ comments/recommendations for the calibration process and final selection decisio
             candidate_advice_html=candidate_advice_html,
         )
 
-        # Send candidate email FROM the field recruitment mailbox — always.
+        # Send candidate email FROM the doctype's own "Candidate email
+        # Sendar" field when it's set (mirrors update_interview_event/
+        # cancel_interview_event further below, which already read this
+        # field instead of a fixed address) — falls back to the hardcoded
+        # field-recruitment mailbox only if that field is blank. Letting
+        # each record's own field pick the sender means changing it to any
+        # mailbox that already has working outgoing mail (Graph Mail.Send,
+        # or a real Frappe Email Account) fixes delivery immediately,
+        # without needing the field.recruitment mailbox's own Graph
+        # permissions sorted out first.
         # The interviewer/organizer mailbox (Organizer_email) is never used
-        # here — it's only for the interviewer-facing email above.
-        _candidate_sender_email = _CANDIDATE_SENDER_EMAIL
-        _candidate_sender = _CANDIDATE_SENDER
+        # here either way — it's only for the interviewer-facing email above.
+        _candidate_sender_email = (
+            frappe.db.get_value("Field Interview Schedule", doc_name, "candidate_email_sendar")
+            if doc_name
+            else None
+        ) or _CANDIDATE_SENDER_EMAIL
+        _candidate_sender = (
+            f"Field Recruitment Azim Premji Foundation <{_candidate_sender_email}>"
+            if _candidate_sender_email == _CANDIDATE_SENDER_EMAIL
+            else _candidate_sender_email
+        )
 
         # Skip if candidate is the same person as the organizer or any interviewer
         # (they already received the interviewer email; sending a second one is confusing).
@@ -2639,12 +2681,105 @@ def update_interview_event(
     return {"event_id": doc.ms_event_id, "rescheduled": True}
 
 
+def _field_attendee_emails(doc, hybrid=False):
+    """Email addresses that were actually added as Graph attendees on the
+    main event (interviewer_email + interviewers_cc_email + room_email) or,
+    when hybrid=True, on the separate hybrid_ms_event_id event
+    (hybrid_interviewers_email only — see update_interview_event above,
+    hybrid attendees are never given the main event's room/cc). Deliberately
+    excludes demo_feedback_interviewers_email — those only ever receive a
+    separate notification email, they're never added as Graph attendees on
+    either event, so there's no calendar entry of theirs to clean up.
+    """
+    if hybrid:
+        return {
+            row.interviewer_email.strip()
+            for row in (doc.hybrid_interviewers_email or [])
+            if row.interviewer_email
+        }
+    emails = {
+        row.interviewer_email.strip()
+        for row in (doc.interviewer_email or [])
+        if row.interviewer_email
+    }
+    emails |= {
+        row.interviewer_email.strip()
+        for row in (doc.interviewers_cc_email or [])
+        if row.interviewer_email
+    }
+    for email in (doc.room_email or "").split(","):
+        email = email.strip()
+        if email:
+            emails.add(email)
+    return emails
+
+
+def _remove_event_from_attendee_calendars(headers, ical_uid, attendee_emails):
+    """Best-effort: actually delete this meeting off each attendee's own
+    calendar, instead of leaving Outlook's "Canceled: ..." notice sitting
+    there until they manually click "Remove event". Mirrors
+    ms_philanthropy.py's helper of the same name — see its docstring for
+    the full explanation. This app's application-level Graph credentials
+    (client-credentials flow) reach any mailbox in the tenant, not just the
+    organizer's, so it can go remove each attendee's own copy directly
+    rather than waiting on them.
+
+    Every attendee's calendar carries a different Graph event id for "the
+    same" meeting, but they all share one iCalUId, which is what this
+    matches on.
+    """
+    if not ical_uid:
+        return
+    for attendee_email in attendee_emails:
+        try:
+            lookup = requests.get(
+                f"https://graph.microsoft.com/v1.0/users/{attendee_email}/events",
+                headers=headers,
+                params={"$filter": f"iCalUId eq '{ical_uid}'", "$select": "id"},
+                timeout=30,
+            )
+            if lookup.status_code != 200:
+                frappe.log_error(
+                    title="FIELD_INTERVIEW_CANCEL_ATTENDEE_LOOKUP_FAILED",
+                    message=(
+                        f"Looking up {attendee_email}'s copy of iCalUId={ical_uid!r} "
+                        f"failed | status={lookup.status_code} | body={lookup.text[:500]}"
+                    ),
+                )
+                continue
+            for item in lookup.json().get("value", []):
+                del_res = requests.delete(
+                    f"https://graph.microsoft.com/v1.0/users/{attendee_email}/events/{item['id']}",
+                    headers=headers,
+                    timeout=30,
+                )
+                if del_res.status_code not in (200, 202, 204, 404):
+                    frappe.log_error(
+                        title="FIELD_INTERVIEW_CANCEL_ATTENDEE_DELETE_FAILED",
+                        message=(
+                            f"Deleting {attendee_email}'s copy (event {item['id']}) of "
+                            f"iCalUId={ical_uid!r} failed | status={del_res.status_code} | "
+                            f"body={del_res.text[:500]}"
+                        ),
+                    )
+        except Exception:
+            frappe.log_error(
+                title="FIELD_INTERVIEW_CANCEL_ATTENDEE_CLEANUP",
+                message=f"Failed to remove cancelled event from {attendee_email}'s calendar: {frappe.get_traceback()}",
+            )
+
+
 @frappe.whitelist()
 def cancel_interview_event(name):
     """
     Cancels an already-scheduled Field Interview Schedule: deletes the
     Outlook event via Graph with sendUpdates=all (same mechanism already
     used for the reschedule path above, which also notifies attendees),
+    then actively deletes it off each interviewer/CC/room's own calendar
+    too — deleting the organizer's own copy notifies attendees, but leaves
+    a "Canceled: ..." placeholder sitting in each of their calendars until
+    they manually click "Remove event" (see
+    _remove_event_from_attendee_calendars for the full explanation) —
     emails the candidate directly (they are invited by email only, not as
     a Graph attendee), and clears ms_event_id so the same record can be
     freely rescheduled later.
@@ -2671,18 +2806,65 @@ def cancel_interview_event(name):
             )
             tok.raise_for_status()
             access_token = tok.json().get("access_token")
+            headers = {"Authorization": f"Bearer {access_token}"}
+
+            # Needed BEFORE deleting each event to find every attendee's own
+            # copy of it afterwards — see _remove_event_from_attendee_calendars.
+            main_ical_uid = None
+            try:
+                _ev = requests.get(
+                    f"https://graph.microsoft.com/v1.0/users/{doc.organizer_email}"
+                    f"/events/{doc.ms_event_id}",
+                    headers=headers,
+                    params={"$select": "iCalUId"},
+                    timeout=30,
+                )
+                if _ev.status_code == 200:
+                    main_ical_uid = _ev.json().get("iCalUId")
+            except Exception:
+                frappe.log_error(
+                    title="FIELD_INTERVIEW_CANCEL_ICALUID",
+                    message=frappe.get_traceback(),
+                )
+
+            hybrid_ical_uid = None
+            if doc.hybrid_ms_event_id:
+                try:
+                    _hev = requests.get(
+                        f"https://graph.microsoft.com/v1.0/users/{doc.organizer_email}"
+                        f"/events/{doc.hybrid_ms_event_id}",
+                        headers=headers,
+                        params={"$select": "iCalUId"},
+                        timeout=30,
+                    )
+                    if _hev.status_code == 200:
+                        hybrid_ical_uid = _hev.json().get("iCalUId")
+                except Exception:
+                    frappe.log_error(
+                        title="FIELD_INTERVIEW_CANCEL_HYBRID_ICALUID",
+                        message=frappe.get_traceback(),
+                    )
+
             requests.delete(
                 f"https://graph.microsoft.com/v1.0/users/{doc.organizer_email}"
                 f"/events/{doc.ms_event_id}?sendUpdates=all",
-                headers={"Authorization": f"Bearer {access_token}"},
+                headers=headers,
                 timeout=30,
             )
             if doc.hybrid_ms_event_id:
                 requests.delete(
                     f"https://graph.microsoft.com/v1.0/users/{doc.organizer_email}"
                     f"/events/{doc.hybrid_ms_event_id}?sendUpdates=all",
-                    headers={"Authorization": f"Bearer {access_token}"},
+                    headers=headers,
                     timeout=30,
+                )
+
+            _remove_event_from_attendee_calendars(
+                headers, main_ical_uid, _field_attendee_emails(doc)
+            )
+            if doc.hybrid_ms_event_id:
+                _remove_event_from_attendee_calendars(
+                    headers, hybrid_ical_uid, _field_attendee_emails(doc, hybrid=True)
                 )
         except Exception:
             frappe.log_error(
