@@ -68,21 +68,22 @@ doc_events = {
     "Philanthrophy Feedback Form": {
         "after_insert": "ms_calendar.api.feedback_merge.on_feedback_form_submitted"
     },
-    # Health - Common's 4 feedback-round doctypes -> Health Application
-    # Form's combined "All the Feedback Form PDF" field. on_update (not
-    # after_insert, unlike Philanthropy's single-doctype version above) so
-    # editing an already-saved round's feedback also rebuilds the PDF.
+    # MBBS Fellowship's 4 feedback-round doctypes (applicant_id links to
+    # Health Registration Form) -> its existing "feedback_form" field.
+    # on_update (not after_insert, unlike Philanthropy's single-doctype
+    # version above) so editing an already-saved round's feedback also
+    # rebuilds the combined PDF.
     "Health Feedback Form one": {
-        "on_update": "ms_calendar.api.ms_health.on_health_feedback_form_submitted"
+        "on_update": "ms_calendar.api.ms_health.on_mbbs_feedback_form_submitted"
     },
     "Health FeedBack Form Two": {
-        "on_update": "ms_calendar.api.ms_health.on_health_feedback_form_submitted"
+        "on_update": "ms_calendar.api.ms_health.on_mbbs_feedback_form_submitted"
     },
     "Health Feedback Form Three": {
-        "on_update": "ms_calendar.api.ms_health.on_health_feedback_form_submitted"
+        "on_update": "ms_calendar.api.ms_health.on_mbbs_feedback_form_submitted"
     },
     "Health Center Visit Form": {
-        "on_update": "ms_calendar.api.ms_health.on_health_feedback_form_submitted"
+        "on_update": "ms_calendar.api.ms_health.on_mbbs_feedback_form_submitted"
     },
     "Scholarship Recruitment Form": {
         "validate": "ms_calendar.api.resume_rename.on_scholarship_registration",
@@ -229,10 +230,12 @@ doctype_js = {
 doctype_list_js = {
     "Field Registration Form": "public/js/frf_list.js",
     "Phil Registration Form": "public/js/phil_registration_form_list.js",
+    "Scholarship Recruitment Form": "public/js/scholarship_recruitment_form_list.js",
 }
 app_include_js = [
     "/assets/ms_calendar/js/frf_list.js",
     "/assets/ms_calendar/js/phil_registration_form_list.js",
+    "/assets/ms_calendar/js/scholarship_recruitment_form_list.js",
     "/assets/ms_calendar/js/pathways_redirect.js",
 ]
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}

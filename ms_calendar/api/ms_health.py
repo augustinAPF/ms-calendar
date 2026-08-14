@@ -1215,14 +1215,23 @@ def send_candidate_interview_reminders():
 # ---------------------------------------------------------------------------
 # Combined feedback PDF — mirrors ms_calendar.api.feedback_merge's pattern
 # for Philanthropy (Philanthrophy Feedback Form -> Phil Registration Form's
-# "feedback_form" field), adapted for Health - Common's 4-way round split:
-# unlike Philanthropy's single feedback doctype, Health's rounds are spread
-# across four separate doctypes (Round 1/2/3 + a Visit form), so every
-# round gets rendered into ONE combined PDF and attached to Health
-# Application Form's "All the Feedback Form PDF" field.
+# "feedback_form" field), adapted for MBBS Fellowship's 4-way round split:
+# unlike Philanthropy's single feedback doctype, MBBS's rounds are spread
+# across four separate doctypes (Round 1/2/3 + a Center Visit form), each
+# linking applicant_id straight at Health Registration Form (NOT Health
+# Application Form — MBBS's applicant record, despite this being
+# ms_health.py). Every round gets rendered into ONE combined PDF and
+# attached to Health Registration Form's existing "feedback_form" field
+# (labelled "Health Feedback Form" on the form itself).
+#
+# "Health Common Feedback Form Round 1" / "Round 2 3 4" (built earlier this
+# session as Health - Common's own feedback doctypes, linking to Health
+# Application Form) are unused — the four MBBS doctypes below are the only
+# ones actually in use, so these two are dead/orphaned and can be deleted
+# whenever convenient.
 # ---------------------------------------------------------------------------
 
-HEALTH_FEEDBACK_ROUND_DOCTYPES = [
+MBBS_FEEDBACK_ROUND_DOCTYPES = [
     "Health Feedback Form one",
     "Health FeedBack Form Two",
     "Health Feedback Form Three",
@@ -1230,22 +1239,23 @@ HEALTH_FEEDBACK_ROUND_DOCTYPES = [
 ]
 
 # These fields are just the applicant's own details, copied onto every
-# feedback-round record at submission time — already shown once in the
-# combined PDF's header, so skipped when rendering each round's own content
-# to avoid repeating them under every single round.
-_HEALTH_FEEDBACK_HEADER_FIELDS = {
+# feedback-round record at submission time (fetch_from Health Registration
+# Form) — already shown once in the combined PDF's header, so skipped when
+# rendering each round's own content to avoid repeating them under every
+# single round.
+_MBBS_FEEDBACK_HEADER_FIELDS = {
     "applicant_id", "applicant_name", "application_status", "role",
     "department", "phone", "email_address", "email",
 }
 
 
-def _build_health_feedback_pdf(application_id):
+def _build_mbbs_feedback_pdf(registration_name):
     """Core PDF-merge logic, shared by the whitelisted, permission-checked
-    entrypoint below and on_health_feedback_form_submitted's automated
-    hook — the hook runs as whoever just filed feedback (often not
-    someone with write access to Health Application Form), so it calls
-    this directly rather than through generate_health_feedback_pdf()'s
-    permission gate.
+    entrypoint below and on_mbbs_feedback_form_submitted's automated
+    hook — the hook runs as whoever just filed feedback (often not someone
+    with write access to Health Registration Form), so it calls this
+    directly rather than through generate_mbbs_feedback_pdf()'s permission
+    gate.
 
     Rebuilds the WHOLE combined PDF from every round's current record each
     time, rather than appending just the one just-saved record — so an
@@ -1253,24 +1263,24 @@ def _build_health_feedback_pdf(application_id):
     edits: "Any additions / edits to the feedback from Round 1") is
     reflected too, instead of only ever growing.
     """
-    if not frappe.db.exists("Health Application Form", application_id):
-        return {"status": "error", "message": "Application not found"}
+    if not frappe.db.exists("Health Registration Form", registration_name):
+        return {"status": "error", "message": "Registration not found"}
 
-    app = frappe.get_doc("Health Application Form", application_id)
+    reg = frappe.get_doc("Health Registration Form", registration_name)
 
     html = f"""
     <h1>Interview Feedback Summary</h1>
-    <p><b>Applicant ID:</b> {application_id}</p>
-    <p><b>Applicant Name:</b> {app.full_name or ''}</p>
+    <p><b>Applicant ID:</b> {registration_name}</p>
+    <p><b>Applicant Name:</b> {reg.full_name or ''}</p>
     <hr>
     """
 
     any_feedback = False
-    for feedback_doctype in HEALTH_FEEDBACK_ROUND_DOCTYPES:
+    for feedback_doctype in MBBS_FEEDBACK_ROUND_DOCTYPES:
         meta = frappe.get_meta(feedback_doctype)
         docnames = frappe.get_all(
             feedback_doctype,
-            filters={"applicant_id": application_id},
+            filters={"applicant_id": registration_name},
             pluck="name",
             order_by="creation asc",
         )
@@ -1282,7 +1292,7 @@ def _build_health_feedback_pdf(application_id):
             for f in meta.fields:
                 if f.fieldtype in ("Section Break", "Column Break", "Tab Break", "HTML", "Attach", "Link"):
                     continue
-                if f.fieldname in _HEALTH_FEEDBACK_HEADER_FIELDS:
+                if f.fieldname in _MBBS_FEEDBACK_HEADER_FIELDS:
                     continue
                 value = fb.get(f.fieldname)
                 if not value:
@@ -1294,7 +1304,7 @@ def _build_health_feedback_pdf(application_id):
         return {"status": "error", "message": "No feedback found"}
 
     pdf = get_pdf(html)
-    filename = f"feedback_{application_id}.pdf"
+    filename = f"feedback_{registration_name}.pdf"
 
     # Regenerating replaces the previous combined PDF rather than piling up
     # a new file every time another round's feedback comes in — same fix
@@ -1304,9 +1314,9 @@ def _build_health_feedback_pdf(application_id):
     old_files = frappe.get_all(
         "File",
         filters={
-            "attached_to_doctype": "Health Application Form",
-            "attached_to_name": application_id,
-            "attached_to_field": "all_the_feedback_form_pdf",
+            "attached_to_doctype": "Health Registration Form",
+            "attached_to_name": registration_name,
+            "attached_to_field": "feedback_form",
         },
         pluck="name",
     )
@@ -1316,15 +1326,15 @@ def _build_health_feedback_pdf(application_id):
     file_doc = save_file(
         fname=filename,
         content=pdf,
-        dt="Health Application Form",
-        dn=application_id,
-        df="all_the_feedback_form_pdf",
+        dt="Health Registration Form",
+        dn=registration_name,
+        df="feedback_form",
         is_private=1,
     )
     file_url = file_doc.file_url
 
-    app.all_the_feedback_form_pdf = file_url
-    app.save(ignore_permissions=True)
+    reg.feedback_form = file_url
+    reg.save(ignore_permissions=True)
 
     return {
         "status": "success",
@@ -1334,44 +1344,44 @@ def _build_health_feedback_pdf(application_id):
 
 
 @frappe.whitelist()
-def generate_health_feedback_pdf(application_id):
-    if not application_id:
-        return {"status": "error", "message": "Application ID required"}
+def generate_mbbs_feedback_pdf(registration_name):
+    if not registration_name:
+        return {"status": "error", "message": "Registration name required"}
 
-    if not frappe.has_permission("Health Application Form", "write"):
+    if not frappe.has_permission("Health Registration Form", "write"):
         frappe.throw(
             "You don't have permission to generate feedback PDFs.",
             frappe.PermissionError,
         )
 
     try:
-        result = _build_health_feedback_pdf(application_id)
+        result = _build_mbbs_feedback_pdf(registration_name)
         frappe.db.commit()
         return result
     except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "Health Feedback PDF Error")
+        frappe.log_error(frappe.get_traceback(), "MBBS Feedback PDF Error")
         return {"status": "error", "message": str(e)}
 
 
-def on_health_feedback_form_submitted(doc, method=None):
-    """doc_events hook: on_update of all four Health feedback-round
-    doctypes (Health Feedback Form one/Two/Three, Health Center Visit
-    Form). on_update (not after_insert) so an edit to an already-saved
-    round's feedback also rebuilds the combined PDF — matches the
-    "collate from all panellists" wording built into Round 2's form,
-    which expects edits after the initial save.
+def on_mbbs_feedback_form_submitted(doc, method=None):
+    """doc_events hook: on_update of all four MBBS feedback-round doctypes
+    (Health Feedback Form one/Two/Three, Health Center Visit Form).
+    on_update (not after_insert) so an edit to an already-saved round's
+    feedback also rebuilds the combined PDF — matches the "collate from
+    all panellists" wording built into Round 2's form, which expects edits
+    after the initial save.
 
-    Best-effort: never blocks the feedback save itself. Whoever just
-    saved this often doesn't have write access to Health Application Form,
-    so this calls the permission-free core builder directly rather than
-    the whitelisted, permission-checked generate_health_feedback_pdf().
+    Best-effort: never blocks the feedback save itself. Whoever just saved
+    this often doesn't have write access to Health Registration Form, so
+    this calls the permission-free core builder directly rather than the
+    whitelisted, permission-checked generate_mbbs_feedback_pdf().
     """
     if not doc.applicant_id:
         return
     try:
-        _build_health_feedback_pdf(doc.applicant_id)
+        _build_mbbs_feedback_pdf(doc.applicant_id)
     except Exception:
         frappe.log_error(
-            title="Health Feedback PDF Auto-Generate Error",
+            title="MBBS Feedback PDF Auto-Generate Error",
             message=f"{doc.doctype} {doc.name} ({doc.applicant_id}): {frappe.get_traceback()}",
         )

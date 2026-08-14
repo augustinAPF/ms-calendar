@@ -16,6 +16,12 @@ attachments elsewhere in the system) keeps Frappe's normal, stricter
 behaviour via super().
 """
 
+import base64
+import io
+import json
+import os
+import zipfile
+
 import frappe
 
 # The same set of doctypes resume_rename.py already treats as "the
@@ -72,6 +78,87 @@ class RelaxedAttachmentAccessMixin:
         if user != "Guest" and _is_desk_user(user) and _is_relaxed_attachment(self):
             return True
         return super().is_downloadable()
+
+
+@frappe.whitelist()
+def download_cvs_as_zip(doctype, names):
+    """Bulk-downloads every checked record's resume/CV (from
+    _RESUME_FIELD_BY_DOCTYPE above) as one zip — backs the "Download All
+    CVs" list-view action added for Scholarship Recruitment Form (works
+    for any of the other doctypes in that map too, list-view wiring
+    permitting).
+
+    Called via frappe.call() (POST), not a raw window.open() GET —
+    unlike a normal file download, this needs frappe.call()'s error
+    handling: a raw browser navigation to a whitelisted method that
+    throws just renders the bare error response in a blank tab (no
+    frappe.msgprint, nothing actionable), which is exactly how a genuine
+    permission/setup problem here would otherwise look like an
+    unexplained "Forbidden" page. Returns the zip as base64 in the
+    response `message`; the client decodes it into a Blob and triggers
+    the actual save itself.
+    """
+    if not _is_desk_user(frappe.session.user):
+        frappe.throw("You don't have permission to download these files.", frappe.PermissionError)
+
+    if doctype not in _RESUME_FIELD_BY_DOCTYPE:
+        frappe.throw(f"Bulk CV download isn't set up for {doctype}.")
+
+    if isinstance(names, str):
+        names = json.loads(names)
+
+    fieldname = _RESUME_FIELD_BY_DOCTYPE[doctype]
+    buffer = io.BytesIO()
+    added = 0
+    skipped = []
+
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name in names:
+            file_url = frappe.db.get_value(doctype, name, fieldname)
+            if not file_url:
+                skipped.append(name)
+                continue
+
+            file_rows = frappe.get_all(
+                "File", filters={"file_url": file_url}, fields=["file_name", "is_private"], limit=1
+            )
+            if not file_rows:
+                skipped.append(name)
+                continue
+            file_row = file_rows[0]
+
+            file_path = frappe.get_site_path(
+                "private" if file_row.is_private else "public", "files", file_row.file_name
+            )
+            if not os.path.isfile(file_path):
+                # `is_private` can be stale vs. where the bytes actually
+                # live (same fallback used elsewhere in this codebase for
+                # attachment lookups) — check the other folder before
+                # silently dropping this candidate's CV from the zip.
+                alt_path = frappe.get_site_path(
+                    "public" if file_row.is_private else "private", "files", file_row.file_name
+                )
+                if os.path.isfile(alt_path):
+                    file_path = alt_path
+                else:
+                    skipped.append(name)
+                    continue
+
+            # Prefix with the record's own name so two candidates who both
+            # uploaded a file literally named "Resume.pdf" don't collide
+            # inside the zip.
+            zf.write(file_path, arcname=f"{name}_{file_row.file_name}")
+            added += 1
+
+    if not added:
+        frappe.throw("None of the selected records have a CV attached.")
+
+    return {
+        "filename": f"{frappe.scrub(doctype)}_cvs.zip",
+        "filecontent_base64": base64.b64encode(buffer.getvalue()).decode(),
+        "added": added,
+        "skipped": skipped,
+    }
 
 
 def _is_desk_user(user):
