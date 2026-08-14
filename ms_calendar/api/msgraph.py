@@ -660,9 +660,15 @@ def create_interview_event(event_title,
                 .replace("–", "")
     )
 
-    # New FRONTEND values:
-    is_round1 = "roundone" in round_clean
-    is_round2 = "roundtwo" in round_clean
+    # Matches both spelled-out ("Round One"/"Round Two") and numeric
+    # ("Round 1"/"Round 2", e.g. this doctype's own default value
+    # "Shortlist - Round 1") forms — checking only "roundone"/"roundtwo"
+    # missed every numeric round value entirely, silently falling through
+    # to the generic else-branch email/subject below (no role, no venue,
+    # no panel, no feedback link — just "Your interview is scheduled on
+    # ...") for what is actually the overwhelming majority of real records.
+    is_round1 = "roundone" in round_clean or "round1" in round_clean
+    is_round2 = "roundtwo" in round_clean or "round2" in round_clean
 
     form_key = "one" if is_round1 else "two"
 
@@ -1123,7 +1129,11 @@ def update_interview_event(
     mode_label = "Teams Meeting" if is_online == 1 else "In-Person"
 
     round_clean = str(Interview_round).strip().lower().replace(" ", "").replace("-", "").replace("–", "")
-    is_round2 = "roundtwo" in round_clean
+    # Matches both spelled-out ("Round Two") and numeric ("Round 2", e.g.
+    # this doctype's own default "Shortlist - Round 1") forms — see the
+    # matching comment in create_interview_event for why "roundtwo" alone
+    # missed almost every real record.
+    is_round2 = "roundtwo" in round_clean or "round2" in round_clean
 
     headers = _graph_headers()
     event_url = f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/events/{doc.event_id}"
@@ -1356,6 +1366,487 @@ def cancel_interview_event(name):
         )
 
     # Interviewers are Graph attendees on this event, and Graph's
+    # /events/{id}/cancel action above already sends them a native
+    # cancellation notice in the same meeting thread — a separate
+    # frappe.sendmail here would be a redundant second email.
+
+    doc.db_set("is_cancelled", 1, update_modified=False)
+    doc.db_set("event_id", "", update_modified=False)
+
+    frappe.msgprint("✅ Interview cancelled — candidate and interviewer(s) notified.")
+
+    return {"cancelled": True}
+
+
+# =========================================================================
+# "Interview Schedule" doctype — a separate, newer Scholarship interview
+# doctype from "Schedule interview" above (different field names/types:
+# start_time/end_time are Datetime here, not a separate Date + Time pair;
+# no cc list; Interview Round is fetched straight off Scholarship
+# Recruitment Form's own application_status Select rather than typed in
+# freely). Reuses _graph_headers/_attach_files_to_event/
+# _attendee_emails_for/_remove_event_from_attendee_calendars above — those
+# are all doctype-agnostic.
+# =========================================================================
+
+# application_status' real values include several that were never meant to
+# have an interview scheduled against them at all (New Applicant,
+# Application Reject, Test Process/Reject, Recruiter Reject, Reject -
+# Round 1/2, Document Collection, Offer) — only these three carry an actual
+# feedback form today. Anything else falls back to a generic email with no
+# feedback link rather than guessing at a URL that doesn't exist.
+_INTERVIEW_SCHEDULE_FEEDBACK_SLUGS = {
+    "round one": "one",
+    "round two": "two",
+    "recruiter round": "recruiter",
+}
+
+
+def _classify_interview_schedule_round(interview_round):
+    return _INTERVIEW_SCHEDULE_FEEDBACK_SLUGS.get(str(interview_round or "").strip().lower())
+
+
+def _interview_schedule_map_html(is_online, address, map_location):
+    """Same venue/map-link rendering used throughout this file — only
+    emits the Google Map Link line when there's an actual URL, never a
+    dead href="" just because the interview is in-person."""
+    if is_online != 0 or not (address or map_location):
+        return ""
+    html = ""
+    if address:
+        html += f'<p style="margin:6px 0;"><strong>Venue:</strong> {address}</p>'
+    if map_location:
+        html += (
+            f'<p style="margin:6px 0;"><strong>Google Map Link:</strong> '
+            f'<a href="{map_location}" target="_blank">Click here</a></p>'
+        )
+    return html
+
+
+@frappe.whitelist()
+def create_interview_schedule(
+    name,
+    start_datetime,
+    end_datetime,
+    interviewer_emails,
+    interviewee_email,
+    room_emails,
+    is_online,
+    Organizer_email,
+    Interview_round,
+    InterviewersName,
+    Applicants_name,
+    Applicants_Role,
+    application_id,
+    Map_location=None,
+    address=None,
+    commands_to_candidate=None,
+    commands_to_interviewer=None,
+    attachment_paths=None,
+    event_title=None,
+):
+    """
+    Creates the Outlook event for an "Interview Schedule" record.
+    start_datetime/end_datetime come straight from this doctype's own
+    Datetime fields — no separate interview_date + start_time to combine,
+    unlike "Schedule interview"/create_interview_event above.
+    """
+    import time
+    from datetime import datetime
+
+    try:
+        is_online = int(is_online)
+    except:
+        is_online = 0
+
+    Organizer_email = Organizer_email.strip()
+    Map_location = Map_location or ""
+    address = address or ""
+    commands_to_candidate = commands_to_candidate or ""
+    commands_to_interviewer = commands_to_interviewer or ""
+
+    start_dt = datetime.fromisoformat(start_datetime)
+    when_str = start_dt.strftime("%A, %d %b %Y at %I:%M %p")
+
+    round_slug = _classify_interview_schedule_round(Interview_round)
+    feedback_url = (
+        f"https://careers.frappe.cloud/feedback-form-{round_slug}/new"
+        f"?app_id={application_id}&applicant_name={Applicants_name}"
+        if round_slug
+        else ""
+    )
+    feedback_html = (
+        f'<p><b>Feedback form link:</b> <a href="{feedback_url}" target="_blank">Click here</a></p>'
+        if feedback_url
+        else ""
+    )
+
+    headers = _graph_headers()
+
+    interviewer_list = [i.strip() for i in (interviewer_emails or "").split(",") if i.strip()]
+    room_list = [r.strip() for r in (room_emails or "").split(",") if r.strip()]
+    attendees = (
+        [{"emailAddress": {"address": r}, "type": "resource"} for r in room_list]
+        + [{"emailAddress": {"address": i}, "type": "required"} for i in interviewer_list]
+    )
+
+    calendar_subject = event_title or f"Discussion with {Applicants_name} - ({Applicants_Role})"
+
+    create_url = f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/events"
+    draft_payload = {
+        "subject": calendar_subject,
+        "isOnlineMeeting": True if is_online == 1 else False,
+        "onlineMeetingProvider": "teamsForBusiness" if is_online == 1 else None,
+        "showAs": "busy",
+        "start": {"dateTime": start_datetime, "timeZone": "Asia/Kolkata"},
+        "end": {"dateTime": end_datetime, "timeZone": "Asia/Kolkata"},
+        "body": {"contentType": "HTML", "content": f"<p>Interview for {Applicants_name}</p>"},
+    }
+    res = requests.post(create_url, headers=headers, json=draft_payload)
+    res.raise_for_status()
+    event_id = res.json()["id"]
+    event_url = f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/events/{event_id}"
+
+    _attach_files_to_event(headers, Organizer_email, event_id, attachment_paths)
+
+    # Online-meeting join link — only relevant for virtual calls, and (as
+    # in create_interview_event above) not ready the instant the event is
+    # created, hence the short poll.
+    join_web_url = ""
+    if is_online == 1:
+        for _ in range(10):
+            ev = requests.get(event_url, headers=headers).json()
+            if ev.get("onlineMeeting"):
+                join_web_url = ev["onlineMeeting"].get("joinUrl", "")
+                break
+            time.sleep(1)
+
+    meeting_html = (
+        f'<p><b>Join Teams Meeting:</b> <a href="{join_web_url}" target="_blank">Join Now</a></p>'
+        if is_online == 1 and join_web_url
+        else "<p><b>Mode:</b> Offline Interview</p>"
+    )
+    map_html = _interview_schedule_map_html(is_online, address, Map_location)
+    note_to_candidate_html = (
+        f'<p><strong>For your information:</strong> {commands_to_candidate}</p>' if commands_to_candidate else ""
+    )
+    note_to_interviewer_html = (
+        f'<p><strong>For your information:</strong> {commands_to_interviewer}</p>' if commands_to_interviewer else ""
+    )
+
+    interviewer_body = f"""
+<p>Dear {InterviewersName},</p>
+<p>Blocking your calendar for the Scholarship interview.</p>
+<p>This will be for <b>{Applicants_Role}</b> role — <b>{Interview_round}</b>.</p>
+<p><b>When:</b> {when_str}</p>
+{meeting_html}
+{map_html}
+{note_to_interviewer_html}
+{feedback_html}
+<p>Regards,<br>People Function</p>
+"""
+
+    candidate_body = f"""
+<p>Dear {Applicants_name},</p>
+<p>Please find the schedule to your discussion.</p>
+<p><b>When:</b> {when_str}</p>
+{meeting_html}
+{map_html}
+<p><b>Panel:</b> {InterviewersName}</p>
+{note_to_candidate_html}
+<p>Please acknowledge this email as confirmation to the interview.</p>
+<p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+"""
+
+    requests.patch(
+        event_url,
+        headers=headers,
+        json={
+            "attendees": attendees,
+            "body": {"contentType": "HTML", "content": interviewer_body},
+            "showAs": "busy",
+        },
+    )
+
+    frappe.sendmail(
+        recipients=[interviewee_email],
+        sender=Organizer_email,
+        subject=f"Discussion With - {Applicants_name} ({Applicants_Role} Role), Azim Premji Scholarship",
+        message=candidate_body,
+        delayed=False,
+    )
+
+    frappe.msgprint("✅ Event created successfully. Outlook invite sent.")
+
+    if name:
+        frappe.db.set_value(
+            "Interview Schedule",
+            name,
+            {"event_id": event_id, "is_cancelled": 0},
+            update_modified=False,
+        )
+
+    return {"event_id": event_id, "join_url": join_web_url, "is_online": is_online}
+
+
+@frappe.whitelist()
+def update_interview_schedule(
+    name,
+    start_datetime,
+    end_datetime,
+    interviewer_emails,
+    interviewee_email,
+    room_emails,
+    is_online,
+    Organizer_email,
+    Interview_round,
+    InterviewersName,
+    Applicants_name,
+    Applicants_Role,
+    application_id,
+    Map_location=None,
+    address=None,
+    commands_to_candidate=None,
+    commands_to_interviewer=None,
+    attachment_paths=None,
+    event_title=None,
+):
+    """
+    Reschedules an already-created "Interview Schedule" event. Mirrors
+    update_interview_event's attach-before-notify ordering and 404
+    stale-event recovery — see its docstring above for the full reasoning.
+    """
+    from datetime import datetime
+
+    doc = frappe.get_doc("Interview Schedule", name)
+    if not doc.event_id:
+        frappe.throw(
+            "No Outlook event exists yet for this record — save it once with "
+            "Interviewer's Email, Candidate Email, Start Time and End Time "
+            "filled in to schedule it first."
+        )
+    if doc.is_cancelled:
+        frappe.throw(
+            "This interview was cancelled — it needs to be scheduled fresh, not rescheduled."
+        )
+
+    try:
+        is_online = int(is_online)
+    except:
+        is_online = 0
+
+    Organizer_email = Organizer_email.strip()
+    Map_location = Map_location or ""
+    address = address or ""
+    commands_to_candidate = commands_to_candidate or ""
+    commands_to_interviewer = commands_to_interviewer or ""
+
+    start_dt = datetime.fromisoformat(start_datetime)
+    when_str = start_dt.strftime("%A, %d %b %Y at %I:%M %p")
+
+    round_slug = _classify_interview_schedule_round(Interview_round)
+    feedback_url = (
+        f"https://careers.frappe.cloud/feedback-form-{round_slug}/new"
+        f"?app_id={application_id}&applicant_name={Applicants_name}"
+        if round_slug
+        else ""
+    )
+    feedback_html = (
+        f'<p><b>Feedback form link:</b> <a href="{feedback_url}" target="_blank">Click here</a></p>'
+        if feedback_url
+        else ""
+    )
+
+    headers = _graph_headers()
+    event_url = f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/events/{doc.event_id}"
+
+    interviewer_list = [i.strip() for i in (interviewer_emails or "").split(",") if i.strip()]
+    room_list = [r.strip() for r in (room_emails or "").split(",") if r.strip()]
+    attendees = (
+        [{"emailAddress": {"address": r}, "type": "resource"} for r in room_list]
+        + [{"emailAddress": {"address": i}, "type": "required"} for i in interviewer_list]
+    )
+
+    # Attach BEFORE the notifying PATCH — see update_interview_event above
+    # for why (a freshly-attached file only shows up in the "meeting
+    # updated" notice if it's already on the event by the time this PATCH
+    # fires).
+    _attach_files_to_event(headers, Organizer_email, doc.event_id, attachment_paths)
+
+    res = requests.patch(
+        event_url,
+        headers=headers,
+        json={
+            "start": {"dateTime": start_datetime, "timeZone": "Asia/Kolkata"},
+            "end": {"dateTime": end_datetime, "timeZone": "Asia/Kolkata"},
+            "attendees": attendees,
+            "showAs": "busy",
+        },
+    )
+    if res.status_code == 404:
+        frappe.log_error(
+            title="INTERVIEW_SCHEDULE_RESCHEDULE_STALE_EVENT",
+            message=(
+                f"Reschedule target Outlook event {doc.event_id} for {name} "
+                f"returned 404 (likely deleted directly in Outlook) — "
+                f"recreating a fresh event instead of failing the reschedule."
+            ),
+        )
+        return create_interview_schedule(
+            name=name,
+            start_datetime=start_datetime,
+            end_datetime=end_datetime,
+            interviewer_emails=interviewer_emails,
+            interviewee_email=interviewee_email,
+            room_emails=room_emails,
+            is_online=is_online,
+            Organizer_email=Organizer_email,
+            Interview_round=Interview_round,
+            InterviewersName=InterviewersName,
+            Applicants_name=Applicants_name,
+            Applicants_Role=Applicants_Role,
+            application_id=application_id,
+            Map_location=Map_location,
+            address=address,
+            commands_to_candidate=commands_to_candidate,
+            commands_to_interviewer=commands_to_interviewer,
+            attachment_paths=attachment_paths,
+            event_title=event_title,
+        )
+    res.raise_for_status()
+
+    join_web_url = ""
+    if is_online == 1:
+        ev = requests.get(event_url, headers=headers).json()
+        if ev.get("onlineMeeting"):
+            join_web_url = ev["onlineMeeting"].get("joinUrl", "")
+
+    meeting_html = (
+        f'<p><b>Join Teams Meeting:</b> <a href="{join_web_url}" target="_blank">Join Now</a></p>'
+        if is_online == 1 and join_web_url
+        else "<p><b>Mode:</b> Offline Interview</p>"
+    )
+    map_html = _interview_schedule_map_html(is_online, address, Map_location)
+    note_to_candidate_html = (
+        f'<p><strong>For your information:</strong> {commands_to_candidate}</p>' if commands_to_candidate else ""
+    )
+    note_to_interviewer_html = (
+        f'<p><strong>For your information:</strong> {commands_to_interviewer}</p>' if commands_to_interviewer else ""
+    )
+
+    interviewer_body = f"""
+<p>Dear {InterviewersName},</p>
+<p>The Scholarship interview below has been <strong>rescheduled</strong>:</p>
+<p><b>Applicant:</b> {Applicants_name} ({Applicants_Role}) — {Interview_round}</p>
+<p><b>New When:</b> {when_str}</p>
+{meeting_html}
+{map_html}
+{note_to_interviewer_html}
+{feedback_html}
+<p>Regards,<br>People Function</p>
+"""
+
+    candidate_body = f"""
+<p>Dear {Applicants_name},</p>
+<p>Your interview has been <strong>rescheduled</strong>:</p>
+<p><b>New When:</b> {when_str}</p>
+{meeting_html}
+{map_html}
+<p><b>Panel:</b> {InterviewersName}</p>
+{note_to_candidate_html}
+<p>Please acknowledge this email as confirmation to the interview.</p>
+<p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+"""
+
+    frappe.sendmail(
+        recipients=[interviewee_email],
+        sender=Organizer_email,
+        subject=f"Interview Rescheduled - {Applicants_name} ({Applicants_Role} Role), Azim Premji Scholarship",
+        message=candidate_body,
+        delayed=False,
+    )
+
+    frappe.msgprint("✅ Interview rescheduled — candidate and interviewer(s) notified.")
+
+    return {"event_id": doc.event_id, "rescheduled": True}
+
+
+@frappe.whitelist()
+def cancel_interview_schedule(name):
+    """
+    Cancels an already-scheduled "Interview Schedule" record. Mirrors
+    cancel_interview_event's pattern above — see its docstring for the full
+    reasoning (cancel via Graph, then actively remove it from each
+    interviewer/room's own calendar too, rather than leaving a "Canceled:
+    ..." placeholder for them to clear manually).
+    """
+    doc = frappe.get_doc("Interview Schedule", name)
+
+    if doc.is_cancelled:
+        frappe.throw("This interview is already cancelled.")
+
+    if doc.event_id and doc.organizer_email:
+        headers = _graph_headers()
+        event_url = (
+            f"https://graph.microsoft.com/v1.0/users/{doc.organizer_email}"
+            f"/events/{doc.event_id}"
+        )
+
+        ical_uid = None
+        try:
+            ev = requests.get(event_url, headers=headers, params={"$select": "iCalUId"})
+            if ev.status_code == 200:
+                ical_uid = ev.json().get("iCalUId")
+        except Exception:
+            frappe.log_error(
+                title="INTERVIEW_SCHEDULE_CANCEL_ICALUID",
+                message=frappe.get_traceback(),
+            )
+
+        res = requests.post(
+            f"{event_url}/cancel",
+            headers=headers,
+            json={"comment": "This interview has been cancelled."},
+        )
+        if res.status_code not in (202, 204, 404):
+            frappe.log_error(
+                title="INTERVIEW_SCHEDULE_CANCEL",
+                message=f"Graph cancel failed | status={res.status_code} | body={res.text[:800]}",
+            )
+
+        interviewer_emails_str = ", ".join(
+            row.interviewer_email for row in (doc.interviewer_email or []) if row.interviewer_email
+        )
+        _remove_event_from_attendee_calendars(
+            headers, ical_uid, _attendee_emails_for(interviewer_emails_str, doc.room_email)
+        )
+
+    # start_time is a Time field on this doctype (not Datetime) — Frappe
+    # represents that as a datetime.timedelta, which has no .strftime().
+    # date and time are formatted separately and combined instead.
+    from frappe.utils import formatdate, format_time
+
+    interview_date_str = formatdate(doc.interview_date, "EEEE, dd MMM yyyy") if doc.interview_date else ""
+    start_time_str = format_time(doc.start_time) if doc.start_time else ""
+    when_str = f"{interview_date_str} at {start_time_str}" if interview_date_str and start_time_str else ""
+
+    if doc.attendees:
+        candidate_body = f"""
+<p>Hi {doc.applicants_name or "there"},</p>
+<p>This is to inform you that your interview{f" scheduled on <strong>{when_str}</strong>" if when_str else ""}
+has been <strong>cancelled</strong>.</p>
+<p>We will reach out separately if the interview needs to be rescheduled.</p>
+<p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+"""
+        frappe.sendmail(
+            recipients=[doc.attendees],
+            sender=doc.organizer_email,
+            subject="Interview Cancelled - Azim Premji Foundation",
+            message=candidate_body,
+            delayed=False,
+        )
+
+    # Interviewers/rooms are Graph attendees on this event, and Graph's
     # /events/{id}/cancel action above already sends them a native
     # cancellation notice in the same meeting thread — a separate
     # frappe.sendmail here would be a redundant second email.

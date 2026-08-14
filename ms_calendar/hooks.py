@@ -68,6 +68,22 @@ doc_events = {
     "Philanthrophy Feedback Form": {
         "after_insert": "ms_calendar.api.feedback_merge.on_feedback_form_submitted"
     },
+    # Health - Common's 4 feedback-round doctypes -> Health Application
+    # Form's combined "All the Feedback Form PDF" field. on_update (not
+    # after_insert, unlike Philanthropy's single-doctype version above) so
+    # editing an already-saved round's feedback also rebuilds the PDF.
+    "Health Feedback Form one": {
+        "on_update": "ms_calendar.api.ms_health.on_health_feedback_form_submitted"
+    },
+    "Health FeedBack Form Two": {
+        "on_update": "ms_calendar.api.ms_health.on_health_feedback_form_submitted"
+    },
+    "Health Feedback Form Three": {
+        "on_update": "ms_calendar.api.ms_health.on_health_feedback_form_submitted"
+    },
+    "Health Center Visit Form": {
+        "on_update": "ms_calendar.api.ms_health.on_health_feedback_form_submitted"
+    },
     "Scholarship Recruitment Form": {
         "validate": "ms_calendar.api.resume_rename.on_scholarship_registration",
         "on_update": "ms_calendar.api.applicant_master_sync.sync_scholarship_registration_to_applicant_master",
@@ -126,6 +142,7 @@ fixtures = [
                     # have this fixture; a brand-new site needs the record
                     # itself to exist first.
                     "Philanthropy Interview Schedule",
+                    "Health Interview Schedule",
                     "Health Document Collection",
                     "Philanthrophy Document Collection",
                 ],
@@ -331,12 +348,25 @@ after_migrate = ["ms_calendar.api.sync_client_scripts.sync_custom_doctype_client
 scheduler_events = {
 	"daily": [
 		"ms_calendar.api.ms_philanthropy.send_interviewer_feedback_reminders",
-		"ms_calendar.api.ms_philanthropy.send_candidate_interview_reminders",
 		"ms_calendar.api.ms_field.send_field_interview_feedback_reminders",
+		"ms_calendar.api.ms_health.send_interviewer_feedback_reminders",
 	],
 	"cron": {
 		"*/5 * * * *": [
 			"ms_calendar.api.ms_field.send_field_interview_first_feedback_reminder",
+			# Moved off "daily" — that only checked once around midnight, so
+			# whether a candidate got a real day's notice or just a few
+			# hours depended entirely on what time their interview happened
+			# to be at (a noon interview only got ~12 hours' notice, sent
+			# while they were likely asleep). Checking every 5 minutes
+			# instead means this fires close to exactly 24 hours before
+			# the interview regardless of its time of day.
+			# candidate_reminder_sent still guards against re-sending.
+			"ms_calendar.api.ms_philanthropy.send_candidate_interview_reminders",
+			# Health's version registered straight on the 5-minute cron from
+			# the start, learning from the fix above — no reason to repeat
+			# the once-daily mistake here.
+			"ms_calendar.api.ms_health.send_candidate_interview_reminders",
 		],
 	},
 }

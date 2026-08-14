@@ -536,9 +536,17 @@ def get_org_rooms_and_availability(interview_date, start_time, end_time):
             )
             resp.raise_for_status()
         except requests.exceptions.HTTPError as _he:
+            # frappe.log_error()'s signature is (title, message, ...) in this
+            # Frappe version — title is capped at 140 chars. This used to
+            # pass the long dynamic error text as the positional (= title)
+            # argument, so it wasn't just skipped when it ran too long — it
+            # threw its OWN "Value too big" error, which then aborted this
+            # request before the friendly frappe.throw() below ever got a
+            # chance to run. The room-availability check just failed with a
+            # confusing framework error instead of the actual explanation.
             frappe.log_error(
-                f"getSchedule failed for context user {_context_user}: {_he}",
-                "Room Availability Error",
+                title="Room Availability Error",
+                message=f"getSchedule failed for context user {_context_user}: {_he}"[:2000],
             )
             frappe.throw(
                 f"Could not check room availability. The organiser account "
@@ -1190,8 +1198,8 @@ def create_interview_event(
             _f_fname, _f_bytes = _resolve_attachment_bytes(web_path)
             if len(_f_bytes) > 3 * 1024 * 1024:
                 frappe.log_error(
-                    f"File too large: {_f_fname}",
-                    "Interview Event File Error",
+                    title="Interview Event File Error",
+                    message=f"File too large: {_f_fname}",
                 )
                 continue
             final_files.append(
@@ -1199,8 +1207,8 @@ def create_interview_event(
             )
         except Exception as _fe:
             frappe.log_error(
-                f"Could not read attachment {web_path}: {_fe}",
-                "Interview Event File Error",
+                title="Interview Event File Error",
+                message=f"Could not read attachment {web_path}: {_fe}"[:2000],
             )
             continue
 
@@ -1216,8 +1224,8 @@ def create_interview_event(
             _frf_doctype = "Field Registration Form"
             if not frappe.db.exists(_frf_doctype, application_id):
                 frappe.log_error(
-                    f"Skipping auto-attach: {_frf_doctype} '{application_id}' not found",
-                    "Interview Auto-Attach Skip",
+                    title="Interview Auto-Attach Skip",
+                    message=f"Skipping auto-attach: {_frf_doctype} '{application_id}' not found",
                 )
                 srf = None
             else:
@@ -1323,8 +1331,8 @@ def create_interview_event(
                     _af_fname, _af_bytes = _resolve_attachment_bytes(web_path)
                     if len(_af_bytes) > 5 * 1024 * 1024:
                         frappe.log_error(
-                            f"Auto-attach file too large: {_af_fname}",
-                            "Interview Auto-Attach Error",
+                            title="Interview Auto-Attach Error",
+                            message=f"Auto-attach file too large: {_af_fname}",
                         )
                         continue
                     final_files.append(
@@ -1333,15 +1341,15 @@ def create_interview_event(
                     _already_added.add(_af_fname.lower())
                 except Exception as _afe:
                     frappe.log_error(
-                        f"Auto-attach failed for field={field} url={web_path}: {_afe}",
-                        "Interview Auto-Attach Error",
+                        title="Interview Auto-Attach Error",
+                        message=f"Auto-attach failed for field={field} url={web_path}: {_afe}"[:2000],
                     )
                     continue
 
         except Exception as e:
             frappe.log_error(
-                f"Auto-attach from SRF failed for {application_id}: {e}",
-                "Interview Auto-Attach Error",
+                title="Interview Auto-Attach Error",
+                message=f"Auto-attach from SRF failed for {application_id}: {e}"[:2000],
             )
 
     # ----------------------------------------
@@ -2135,8 +2143,8 @@ comments/recommendations for the calibration process and final selection decisio
 
         if not interviewee_email:
             frappe.log_error(
-                f"Candidate email (attendees) is empty for doc {doc_name}. Skipping candidate email.",
-                "Candidate Email Skipped",
+                title="Candidate Email Skipped",
+                message=f"Candidate email (attendees) is empty for doc {doc_name}. Skipping candidate email.",
             )
         elif _is_same_person:
             pass  # candidate is the interviewer/organizer — they already got the interviewer email
@@ -2283,7 +2291,8 @@ comments/recommendations for the calibration process and final selection decisio
             send_whatsapp(**_notify_kwargs)
     except Exception:
         frappe.log_error(
-            frappe.get_traceback(), "Interview Schedule SMS/WhatsApp Failed"
+            title="Interview Schedule SMS/WhatsApp Failed",
+            message=frappe.get_traceback(),
         )
 
     # ── Separate Outlook event for the hybrid interviewer group ─────────────
@@ -4120,8 +4129,8 @@ def notify_others_on_feedback_submission(
     )
     if not schedules:
         frappe.log_error(
-            f"No Field Interview Schedule found for application_id={application_id}",
-            "Feedback Notify: Schedule Not Found",
+            title="Feedback Notify: Schedule Not Found",
+            message=f"No Field Interview Schedule found for application_id={application_id}",
         )
         return {"status": "error", "message": "Field Interview Schedule not found"}
 
@@ -4188,8 +4197,8 @@ def send_leader_final_round_feedback_pdf(doc, method=None):
         filters["applicants_name"] = applicant_name
     else:
         frappe.log_error(
-            f"Leader Final Round Feedback Form {doc.name}: no applicant_id/applicant_name to match a schedule",
-            "Leader Feedback PDF: No Applicant Info",
+            title="Leader Feedback PDF: No Applicant Info",
+            message=f"Leader Final Round Feedback Form {doc.name}: no applicant_id/applicant_name to match a schedule",
         )
         return
 
@@ -4202,8 +4211,8 @@ def send_leader_final_round_feedback_pdf(doc, method=None):
     )
     if not schedules:
         frappe.log_error(
-            f"Leader Final Round Feedback Form {doc.name}: no matching Field Interview Schedule for {filters}",
-            "Leader Feedback PDF: Schedule Not Found",
+            title="Leader Feedback PDF: Schedule Not Found",
+            message=f"Leader Final Round Feedback Form {doc.name}: no matching Field Interview Schedule for {filters}",
         )
         return
 

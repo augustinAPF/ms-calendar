@@ -1548,6 +1548,12 @@ def send_candidate_interview_reminders():
         except Exception:
             continue
 
+        # Example: interview tomorrow 10:00 AM -> this becomes true (and the
+        # candidate gets emailed) starting today at 10:00 AM, the moment
+        # time_to_interview first drops to exactly 24h. Runs every 5
+        # minutes (see hooks.py's cron entry), so it fires within minutes
+        # of that mark rather than only once a day at whatever time the
+        # old "daily" job happened to run.
         time_to_interview = start_dt - now
         if time_to_interview <= timedelta(0) or time_to_interview > timedelta(days=1):
             continue
