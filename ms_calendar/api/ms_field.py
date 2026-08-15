@@ -797,10 +797,20 @@ def create_interview_event(
     # matching venue-gating condition further down and the hybrid-specific
     # email block near the end of this function.
     mode_is_online = (is_online == 1) or (display_mode.lower() in ("online", "hybrid"))
-    # Shown to interviewers/candidate in place of "Online" — Teams meetings are
-    # branded as "Video Conference" everywhere except the internal is_online
-    # checks above, which must keep comparing against the raw "online" value.
-    display_mode_label = "Video Conference" if display_mode.lower() == "online" else display_mode
+    # Shown to interviewers/candidate in place of the raw mode value —
+    # Teams meetings are branded as "Video Conference", and "Hybrid" is
+    # shown as plain "Face-to-Face" (nobody receiving the email needs to
+    # know it's specifically a hybrid setup; the on-site group is
+    # attending in person either way, and the hybrid group's own remote
+    # calendar invite/email already tells them how they're joining). The
+    # internal is_online/mode_is_online checks above must keep comparing
+    # against the raw "online"/"hybrid" values, not this display label.
+    if display_mode.lower() == "online":
+        display_mode_label = "Video Conference"
+    elif display_mode.lower() == "hybrid":
+        display_mode_label = "Face-to-Face"
+    else:
+        display_mode_label = display_mode
     candidate_phone = (candidate_phone or "").strip()
     # Fallback: fetch phone from application record if not passed from JS
     if not candidate_phone and application_id:
@@ -1211,19 +1221,16 @@ def create_interview_event(
         # to a CC on the interviewer's calendar invite.
         if c.strip().lower() != _org_email_lower:
             attendees.append({"emailAddress": {"address": c}, "type": "optional"})
-    # For "Hybrid" mode specifically, Hybrid Interviewer's Email IS added
-    # as a real attendee on this SAME shared event too (not a separate
-    # one) — so Outlook actually blocks their calendar and shows its own
-    # native "Join Microsoft Teams Meeting" button (Outlook adds that
-    # automatically for any attendee of an isOnlineMeeting event,
-    # regardless of what the body text says), on top of the separate
-    # online-styled email with the join link they also get further down.
-    # For every other mode, hybrid interviewers still get their OWN
-    # separate Outlook event further down instead, unchanged.
-    if display_mode.lower() == "hybrid":
-        for h in hybrid_interviewer_list:
-            if h.strip().lower() != _org_email_lower:
-                attendees.append({"emailAddress": {"address": h}, "type": "required"})
+    # Hybrid Interviewer's Email is deliberately NOT added as an attendee
+    # on this shared event, in "Hybrid" mode or otherwise — it was added
+    # for a while so Outlook would auto-block their calendar too, but
+    # since Graph shows every attendee the SAME body (labelled
+    # "Face-to-Face" for the on-site group), that meant this group got
+    # two separate notifications for one meeting: the shared invite
+    # (wrongly saying "Face-to-Face" for them) AND their own correctly-
+    # labelled "Video Conference" email further down. One notification,
+    # correctly labelled, beats two where one is wrong — so they now get
+    # only the latter.
     # NOTE: the candidate is deliberately NOT added as a calendar attendee.
     # Attendees get Microsoft's own auto-generated invite email, which uses
     # the interviewer-oriented body (feedback form link, meeting passcode,
@@ -1698,7 +1705,6 @@ comments/recommendations for the calibration process and final selection decisio
         om_res = requests.get(filter_url, headers=headers)
         if om_res.status_code == 200:
             values = om_res.json().get("value", [])
-            print("ONLINE MEETING DEBUG:", values)
 
             if values:
                 meeting = values[0]
@@ -1807,77 +1813,57 @@ comments/recommendations for the calibration process and final selection decisio
     # ----------------------------------------
     # FINAL EVENT BODY
     # ----------------------------------------
-    if is_calibration_arp:
-        final_body = calibration_arp_interviewer_template.format(
-            Applicants_name=Applicants_name,
-            InterviewersName=InterviewersName,
-            interview_date_str=interview_date_str,
-            feedback_html_block=feedback_html_block,
-            cc_row=cc_row,
-        )
-    elif is_round1:
-        final_body = round1_interviewer_template.format(
-            Applicants_name=Applicants_name,
-            Applicants_Role=Applicants_Role,
-            interview_date_str=interview_date_str,
-            display_mode=display_mode_label,
-            round_label=round_label,
-            interview_time_str=interview_time_str,
-            end_time_str=end_time_str,
-            InterviewersName=InterviewersName,
-            meeting_info=meeting_html,
-            phone_info=phone_info_html,
-            Map_html=interviewer_location_html,
-            feedback_html_block=feedback_html_block,
-            demo_feedback_html=demo_feedback_html,
-            Note_to_interviewer_html=note_to_interviewer_html,
-            cc_line=cc_line,
-        )
+    def _build_interviewer_body():
+        if is_calibration_arp:
+            return calibration_arp_interviewer_template.format(
+                Applicants_name=Applicants_name,
+                InterviewersName=InterviewersName,
+                interview_date_str=interview_date_str,
+                feedback_html_block=feedback_html_block,
+                cc_row=cc_row,
+            )
+        elif is_round1:
+            return round1_interviewer_template.format(
+                Applicants_name=Applicants_name,
+                Applicants_Role=Applicants_Role,
+                interview_date_str=interview_date_str,
+                display_mode=display_mode_label,
+                round_label=round_label,
+                interview_time_str=interview_time_str,
+                end_time_str=end_time_str,
+                InterviewersName=InterviewersName,
+                meeting_info=meeting_html,
+                phone_info=phone_info_html,
+                Map_html=interviewer_location_html,
+                feedback_html_block=feedback_html_block,
+                demo_feedback_html=demo_feedback_html,
+                Note_to_interviewer_html=note_to_interviewer_html,
+                cc_line=cc_line,
+            )
+        else:
+            # is_round2, and Recruiter Round / anything else not handled
+            # above, both reuse round2_interviewer_template.
+            return round2_interviewer_template.format(
+                Applicants_name=Applicants_name,
+                Applicants_Role=Applicants_Role,
+                total_exp=total_exp,
+                current_ctc=current_ctc,
+                expected_ctc=expected_ctc,
+                interview_date_str=interview_date_str,
+                display_mode=display_mode_label,
+                round_label=round_label,
+                interview_time_str=interview_time_str,
+                end_time_str=end_time_str,
+                InterviewersName=InterviewersName,
+                meeting_info=meeting_html,
+                phone_info=phone_info_html,
+                Map_html=interviewer_location_html,
+                feedback_html_block=feedback_html_block,
+                Note_to_interviewer_html=note_to_interviewer_html,
+                cc_line=cc_line,
+            )
 
-    elif is_round2:
-        final_body = round2_interviewer_template.format(
-            Applicants_name=Applicants_name,
-            Applicants_Role=Applicants_Role,
-            total_exp=total_exp,
-            current_ctc=current_ctc,
-            expected_ctc=expected_ctc,
-            interview_date_str=interview_date_str,
-            display_mode=display_mode_label,
-            round_label=round_label,
-            interview_time_str=interview_time_str,
-            end_time_str=end_time_str,
-            InterviewersName=InterviewersName,
-            meeting_info=meeting_html,
-            phone_info=phone_info_html,
-            Map_html=interviewer_location_html,
-            feedback_html_block=feedback_html_block,
-            Note_to_interviewer_html=note_to_interviewer_html,
-            cc_line=cc_line,
-        )
-
-    else:
-        # Recruiter Round (and any other rounds not handled above).
-        # Rebuild from the template now that meeting_html is available,
-        # so the Teams link appears in the calendar invite body.
-        final_body = round2_interviewer_template.format(
-            Applicants_name=Applicants_name,
-            Applicants_Role=Applicants_Role,
-            total_exp=total_exp,
-            current_ctc=current_ctc,
-            expected_ctc=expected_ctc,
-            interview_date_str=interview_date_str,
-            display_mode=display_mode_label,
-            round_label=round_label,
-            interview_time_str=interview_time_str,
-            end_time_str=end_time_str,
-            InterviewersName=InterviewersName,
-            meeting_info=meeting_html,
-            phone_info=phone_info_html,
-            Map_html=interviewer_location_html,
-            feedback_html_block=feedback_html_block,
-            Note_to_interviewer_html=note_to_interviewer_html,
-            cc_line=cc_line,
-        )
+    final_body = _build_interviewer_body()
 
     # ── Single PATCH — no retry. Retrying sendUpdates sends duplicate invites.
     # 120 s timeout is generous; if Graph times out, the fallback email below covers it.
@@ -2345,15 +2331,23 @@ comments/recommendations for the calibration process and final selection decisio
     # ── Separate Outlook event for the hybrid interviewer group ─────────────
     # Hybrid interviewers are NOT attendees on the main event above — Graph
     # can't show different content to different attendees on the same event,
-    # so they get their OWN event at the same date/time, with the correct
-    # hybrid mode (Teams link if Online, address if Face-to-Face) so their
-    # own calendar invite is accurate instead of showing the main mode.
+    # so they get their OWN real calendar invite (blocking both their own
+    # calendar AND the Organizer's, since the Organizer owns/attends this
+    # sub-event too) at the same date/time, with the correct hybrid mode
+    # (Teams link if Online, address if Face-to-Face) so their own invite
+    # is accurate instead of showing the main mode.
     #
-    # This only applies when the MAIN Interview Mode isn't itself "Hybrid" —
-    # when it is, there's just the one shared event (see the block right
-    # after this one instead), not a second separate event.
-    if hybrid_interviewer_list and display_mode.lower() != "hybrid":
-        _hybrid_mode = (interview_mode_hybrid or "").strip() or display_mode
+    # When the MAIN Interview Mode is itself "Hybrid", this group is BY
+    # DEFINITION the remote/online half of that hybrid setup — there's no
+    # separate interview_mode_hybrid field to read (Field Interview
+    # Schedule doesn't have one), so that case is resolved to "Online"
+    # directly rather than falling back to display_mode (which would
+    # otherwise resolve to the literal string "Hybrid" here too, and
+    # _hybrid_is_online below would then wrongly evaluate False).
+    if hybrid_interviewer_list:
+        _hybrid_mode = (interview_mode_hybrid or "").strip() or (
+            "Online" if display_mode.lower() == "hybrid" else display_mode
+        )
         _hybrid_is_online = _hybrid_mode.lower() == "online"
         _hybrid_mode_label = "Video Conference" if _hybrid_is_online else _hybrid_mode
         # If BOTH the main group and the hybrid group are joining Online,
@@ -2547,19 +2541,6 @@ comments/recommendations for the calibration process and final selection decisio
                     title="FIELD_INTERVIEW_HYBRID_EVENT_ID_SAVE_ERROR",
                     message=frappe.get_traceback(),
                 )
-
-    # "Hybrid" mode: ONE shared event, not a second one — Hybrid
-    # Interviewer's Email is added as a real attendee on it (see the
-    # attendees loop earlier in this function), so Outlook already sends
-    # them a genuine calendar invite/block from the organizer, with both
-    # the venue address and the Teams join link in the body (both
-    # interviewer_location_html and meeting_html are populated for
-    # "Hybrid" — see mode_is_online and the venue-gating condition
-    # earlier). A separate plain email used to be sent here too, but that
-    # meant hybrid interviewers got two different notifications for the
-    # same meeting from two different senders (the organizer's calendar
-    # invite + this app's own email) — confusing, and unnecessary now that
-    # the shared invite already reaches them with the join link included.
 
     frappe.msgprint("✅ Event created successfully. Outlook invite sent.")
 

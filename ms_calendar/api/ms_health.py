@@ -1,7 +1,7 @@
 import frappe
 import os, ast, base64, time, re, requests
 from datetime import datetime, timedelta
-from frappe.utils import get_url, get_url_to_form, formatdate, format_time, get_datetime
+from frappe.utils import formatdate, format_time, get_datetime
 from frappe.utils.file_manager import save_file
 from frappe.utils.pdf import get_pdf
 
@@ -20,6 +20,9 @@ _APPLICATION_RESUME_FIELD = {
 }
 _APPLICATION_FEEDBACK_PDF_FIELD = {
     "Health Registration Form": "feedback_form",
+}
+_APPLICATION_FORM_PDF_FIELD = {
+    "Health Registration Form": "registration_form",
 }
 
 
@@ -137,51 +140,30 @@ def _health_feedback_url(interview_round, application_id, applicants_name):
     return f"{base_url}?applicant_id={application_id}&applicant_name={applicants_name}"
 
 
-def _resume_link_html(candidate_cv_resume):
-    if not candidate_cv_resume:
-        return ""
-    return f'<p style="margin:6px 0;">Resume: <a href="{get_url(candidate_cv_resume)}" target="_blank">Click here</a></p>'
-
-
-def _application_form_link_html(application_id):
-    """No PDF/print format exists for the applicant doctype yet, so this
-    links straight to its Desk record — only reachable by someone with a
-    Frappe desk login, same limitation noted throughout this file for the
-    feedback-form links below. get_url_to_form() resolves the correct
-    route for whichever doctype application_id actually links to (see
-    _application_doctype()), instead of a hardcoded
-    "/app/health-application-form/..." route that would 404 on a site
-    where it's Health Registration Form instead."""
+def _document_attachment_paths(application_id):
+    """Real file URLs for the applicant's own Resume, Application form,
+    and combined Feedback PDF — passed to _attach_files_to_event() so
+    these are attached to the calendar invite as real files an
+    interviewer can open directly, instead of "Click here" links that
+    used to point at the same three documents. (The fourth Documents
+    line, "Feedback form to share your views", stays a link — it's a
+    live web form to fill in, not a document that exists as a file.)"""
     if not application_id:
-        return ""
-    url = get_url_to_form(_application_doctype(), application_id)
-    return f'<p style="margin:6px 0;">Application form: <a href="{url}" target="_blank">Click here</a></p>'
-
-
-def _earlier_feedback_links_html(application_id):
-    """Links straight to Health Registration Form's "Health Feedback Form"
-    field (feedback_form) — the single combined PDF
-    on_mbbs_feedback_form_submitted() (see the bottom of this file) keeps
-    rebuilt from every round filed so far, so a later-round panelist sees
-    every earlier panel's feedback in one click instead of separate
-    per-round links."""
-    if not application_id:
-        return (
-            '<p style="margin:6px 0;">Feedback from earlier discussions: None yet</p>'
-        )
-
+        return []
     doctype = _application_doctype()
-    feedback_field = _APPLICATION_FEEDBACK_PDF_FIELD.get(doctype)
-    file_url = frappe.db.get_value(doctype, application_id, feedback_field) if feedback_field else None
-    if not file_url:
-        return (
-            '<p style="margin:6px 0;">Feedback from earlier discussions: None yet</p>'
+    fields = [
+        f
+        for f in (
+            _APPLICATION_RESUME_FIELD.get(doctype),
+            _APPLICATION_FORM_PDF_FIELD.get(doctype),
+            _APPLICATION_FEEDBACK_PDF_FIELD.get(doctype),
         )
-
-    return (
-        f'<p style="margin:6px 0;">Feedback from earlier discussions: '
-        f'<a href="{get_url(file_url)}" target="_blank">Click here</a></p>'
-    )
+        if f
+    ]
+    if not fields:
+        return []
+    values = frappe.db.get_value(doctype, application_id, fields, as_dict=True) or {}
+    return [v for v in values.values() if v]
 
 
 def _new_feedback_link_html(interview_round, application_id, applicants_name):
@@ -347,6 +329,7 @@ def _attach_files_to_event(
     guards against.
     """
     attachment_files = []
+    large_files = []
     if attachment_paths:
         try:
             paths = ast.literal_eval(attachment_paths)
@@ -400,11 +383,18 @@ def _attach_files_to_event(
             )
             continue
 
+        # Graph's simple attachment method (a single POST with base64
+        # contentBytes) rejects anything over ~3MB — used to just skip
+        # these silently, which is exactly what was dropping the combined
+        # feedback PDF for real applicants whose "Health Feedback Form"
+        # field holds an older, larger merged document (5MB+) from before
+        # this program's own feedback-merge feature existed. Graph
+        # supports files up to 150MB via a separate chunked
+        # createUploadSession + PUT flow instead — used here for anything
+        # over the simple method's cap, so no attachment silently
+        # disappears just for being a few MB over.
         if os.path.getsize(resolved_path) > 3 * 1024 * 1024:
-            frappe.log_error(
-                title="HEALTH_INTERVIEW_ATTACH_TOO_LARGE",
-                message=f"{file_name!r} for event {event_id} exceeds Graph's 3MB simple-attachment limit — skipped.",
-            )
+            large_files.append((file_name, resolved_path))
             continue
 
         with open(resolved_path, "rb") as f:
@@ -454,6 +444,68 @@ def _attach_files_to_event(
                 title="HEALTH_INTERVIEW_ATTACH_ERROR",
                 message=f"Attaching {fname!r} to event {event_id}: {frappe.get_traceback()}",
             )
+
+    for fname, resolved_path in large_files:
+        if fname in existing_names:
+            continue
+        try:
+            _upload_large_attachment(headers, organizer_email, event_id, resolved_path, fname)
+        except Exception:
+            frappe.log_error(
+                title="HEALTH_INTERVIEW_ATTACH_LARGE_UPLOAD_ERROR",
+                message=f"Large-file upload for {fname!r} on event {event_id} failed: {frappe.get_traceback()}",
+            )
+
+
+def _upload_large_attachment(headers, organizer_email, event_id, file_path, file_name):
+    """Graph's createUploadSession + chunked PUT flow for attachments over
+    the ~3MB simple-attachment limit (up to 150MB total). Chunks must be a
+    multiple of 320 KiB except the final one — see
+    _attach_files_to_event's call site for why this exists at all."""
+    file_size = os.path.getsize(file_path)
+    session_url = (
+        f"https://graph.microsoft.com/v1.0/users/{organizer_email}"
+        f"/events/{event_id}/attachments/createUploadSession"
+    )
+    session_resp = requests.post(
+        session_url,
+        headers=headers,
+        json={
+            "AttachmentItem": {
+                "attachmentType": "file",
+                "name": file_name,
+                "size": file_size,
+            }
+        },
+        timeout=30,
+    )
+    session_resp.raise_for_status()
+    upload_url = session_resp.json()["uploadUrl"]
+
+    CHUNK_SIZE = 320 * 1024 * 10  # 3.2 MB — a multiple of Graph's required 320 KiB
+    # Deliberately NOT reusing `headers` here — Graph's own docs for this
+    # upload-session flow say not to send an Authorization header on these
+    # PUTs at all (the uploadUrl is already user-context authenticated on
+    # its own); carrying over the bearer token risked Graph rejecting the
+    # chunk upload outright.
+    with open(file_path, "rb") as f:
+        offset = 0
+        while offset < file_size:
+            chunk = f.read(CHUNK_SIZE)
+            chunk_len = len(chunk)
+            end = offset + chunk_len - 1
+            resp = requests.put(
+                upload_url,
+                headers={
+                    "Content-Length": str(chunk_len),
+                    "Content-Range": f"bytes {offset}-{end}/{file_size}",
+                },
+                data=chunk,
+                timeout=120,
+            )
+            if resp.status_code not in (200, 201, 202):
+                resp.raise_for_status()
+            offset += chunk_len
 
 
 @frappe.whitelist()
@@ -606,7 +658,7 @@ def create_interview_event(
                 join_passcode = m.get("passcode", "") or join_passcode
 
     # -------- ATTACH FILES --------
-    extra_paths = [application_pdf_url] if application_pdf_url else []
+    extra_paths = _document_attachment_paths(application_id)
     _attach_files_to_event(
         headers, Organizer_email, event_id, attachment_paths, extra_paths
     )
@@ -632,10 +684,8 @@ def create_interview_event(
     <p><strong>Mode:</strong> {mode_label}</p>
     {mode_link_html}
     {meeting_room_html}
-    <p><strong>Documents:</strong></p>
-    {_resume_link_html(application_pdf_url)}
-    {_application_form_link_html(application_id)}
-    {_earlier_feedback_links_html(application_id)}
+    <p><strong>Documents:</strong> Resume, Application form, and Feedback from earlier
+    discussions (if any) are attached to this invite.</p>
     {_new_feedback_link_html(interview_round, application_id, Applicants_name)}
     <p>Kindly reach out to us if you have any questions.</p>
     <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
@@ -783,7 +833,13 @@ def update_interview_event(
     # (PATCHing is what triggers Exchange's "meeting updated" notice, and a
     # freshly-attached file only shows up in it if it's already on the
     # event by the time this PATCH fires).
-    _attach_files_to_event(headers, Organizer_email, doc.event_id, attachment_paths)
+    _attach_files_to_event(
+        headers,
+        Organizer_email,
+        doc.event_id,
+        attachment_paths,
+        _document_attachment_paths(application_id),
+    )
 
     res = requests.patch(
         event_url,
@@ -871,10 +927,8 @@ def update_interview_event(
     <p><strong>Mode:</strong> {mode_label}</p>
     {mode_link_html}
     {meeting_room_html}
-    <p><strong>Documents:</strong></p>
-    {_resume_link_html(candidate_cv_resume)}
-    {_application_form_link_html(application_id)}
-    {_earlier_feedback_links_html(application_id)}
+    <p><strong>Documents:</strong> Resume, Application form, and Feedback from earlier
+    discussions (if any) are attached to this invite.</p>
     {_new_feedback_link_html(interview_round, application_id, Applicants_name)}
     <p>Kindly reach out to us if you have any questions.</p>
     <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
@@ -1058,18 +1112,38 @@ def cancel_interview_event(name):
     return {"cancelled": True}
 
 
-def send_interviewer_feedback_reminders():
-    """Runs every 5 minutes (see hooks.py's cron entry).
+# Round -> which of the four real feedback doctypes to check for a
+# submission, and which field on it holds the panelist name(s) — used by
+# send_interviewer_feedback_reminders below. This used to check
+# "Health Common Feedback Form Round 1"/"Round 2 3 4" (the orphaned
+# doctypes noted above, never actually written to since the real forms
+# are the four MBBS ones) and a "panelist_names" field that doesn't exist
+# on any of them — meaning it never found a real submission and kept
+# reminding interviewers forever, even after they'd already submitted
+# feedback through the real forms. Field names genuinely differ per
+# doctype ("panal_name" on Round One's own form is a typo baked into that
+# real doctype, not a mistake introduced here).
+ROUND_TO_FEEDBACK_DOCTYPE = {
+    "Round One": ("Health Feedback Form one", "panal_name"),
+    "Round Two": ("Health FeedBack Form Two", "panelist_name"),
+    "Round Three": ("Health Feedback Form Three", "panelist_name"),
+    "Visit": ("Health Center Visit Form", "panelist_name"),
+}
 
-    Starting 1 day after an interview's end time, sends a daily-equivalent
-    reminder to any interviewer who hasn't yet submitted a matching Health
-    feedback form — checking whichever of the two Health feedback doctypes
-    matches this record's interview_round (Round 1 vs Rounds 2/3/4). Stops
+
+def send_interviewer_feedback_reminders():
+    """Runs daily (see hooks.py's scheduler_events["daily"] entry).
+
+    Starting 1 day after an interview's end time, sends a reminder to any
+    interviewer who hasn't yet submitted a matching Health feedback form —
+    checking whichever of the four real MBBS feedback doctypes
+    (MBBS_FEEDBACK_ROUND_DOCTYPES) matches this record's interview_round,
+    the same round->doctype resolution _health_feedback_url uses. Stops
     re-checking a schedule (sets reminder_sent) once every interviewer has
     submitted, or once 7 days have passed since the interview ended,
     whichever comes first. Mirrors ms_philanthropy.py's version of this
     function; the only real difference is which feedback doctype to check,
-    since Health split that across two doctypes instead of one.
+    since Health split that across four doctypes instead of one.
     """
     now = frappe.utils.now_datetime()
 
@@ -1113,19 +1187,19 @@ def send_interviewer_feedback_reminders():
             frappe.db.commit()
             continue
 
-        feedback_doctype = (
-            "Health Common Feedback Form Round 1"
-            if "1" in str(s.interview_round or "").lower()
-            else "Health Common Feedback Form Round 2 3 4"
+        status = str(s.interview_round or "").strip()
+        round_name = ROUND_ALIASES.get(status, status)
+        feedback_doctype, panelist_field = ROUND_TO_FEEDBACK_DOCTYPE.get(
+            round_name, ROUND_TO_FEEDBACK_DOCTYPE["Round One"]
         )
         submitted_panelists = frappe.get_all(
             feedback_doctype,
             filters={"applicant_id": s.application_id},
-            pluck="panelist_names",
+            pluck=panelist_field,
         )
-        # panelist_names is one free-text field (can list multiple names),
-        # not a per-interviewer record — a submission counts as covering an
-        # interviewer if their address appears anywhere in it.
+        # The panelist-name field is one free-text field (can list multiple
+        # names), not a per-interviewer record — a submission counts as
+        # covering an interviewer if their address appears anywhere in it.
         submitted_blob = " ".join((p or "") for p in submitted_panelists).lower()
         pending_emails = [
             e for e in interviewer_emails if e.strip().lower() not in submitted_blob
