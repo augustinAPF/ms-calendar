@@ -406,13 +406,39 @@ def create_calendar_event(
 
 @frappe.whitelist()
 def get_org_rooms_and_availability(interview_date, start_time, end_time):
-    import frappe
-    import requests
-    import time
-    from frappe.utils import get_datetime
-    from datetime import datetime, timezone, timedelta
+    """
+    Lists every bookable room in the org and whether each is free for the
+    given slot — backs Field's "Select Meeting Rooms" dialog.
 
-    print("\n===================== DEBUG START =====================")
+    Two correctness fixes vs. the previous version, both of which meant a
+    room's badge here could disagree with what Outlook itself shows:
+
+    1. Timezone — this used to convert interview_date/start_time/end_time
+       to UTC using the APP SERVER's own OS timezone (via time.timezone/
+       time.altzone), not India time. On a server whose OS timezone isn't
+       set to IST, every slot got checked against the wrong UTC window —
+       e.g. a server running in UTC would check 5.5 hours off from the
+       actual interview time, happily reporting a genuinely-busy room as
+       "Available" (or vice versa) depending on what else was booked in
+       that shifted window. Every interview created through this app is
+       for India-based interviews, so this now hardcodes Asia/Kolkata via
+       zoneinfo, same fix already applied to ms_health.py/
+       ms_philanthropy.py's copies of this exact function.
+    2. Missing schedule data — a room Graph's getSchedule call didn't
+       return anything for (a failed/incomplete batch, a room with no
+       calendar permissions granted to the context user, etc.) used to
+       default to an empty busy list, i.e. reported as "Available" purely
+       because there was no data to say otherwise — the least safe
+       possible default. That room is now marked status_unknown and
+       is_available=False instead, matching ms_health.py's version, so a
+       Graph hiccup shows as "can't confirm this room's free" rather than
+       a false "Available".
+    """
+    import time
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    IST = ZoneInfo("Asia/Kolkata")
 
     creds = frappe.get_single("MS Graph Credentials")
     tenant = creds.tenant_id
@@ -445,43 +471,37 @@ def get_org_rooms_and_availability(interview_date, start_time, end_time):
         frappe.throw(f"Token request failed: {e}")
     headers = {"Authorization": f"Bearer {access_token}"}
 
-    print("DEBUG → Token OK")
-
+    # -------------------------
     # GET ALL ROOMS (PAGINATED)
     # -------------------------
     rooms = []
     url = "https://graph.microsoft.com/v1.0/places/microsoft.graph.room"
-    page = 1
+    try:
+        while url:
+            resp = requests.get(url, headers=headers, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            rooms.extend(data.get("value", []))
+            url = data.get("@odata.nextLink")
+    except requests.exceptions.RequestException as e:
+        frappe.log_error(
+            title="FIELD_INTERVIEW_ROOM_LIST_FAILED",
+            message=frappe.get_traceback(),
+        )
+        frappe.throw(
+            f"Could not fetch the room list from Microsoft Graph — try again in a moment. ({e})"
+        )
 
-    while url:
-        print(f"DEBUG → Fetching rooms PAGE {page}")
-        resp = requests.get(url, headers=headers)
-        resp.raise_for_status()
-        data = resp.json()
-
-        page_rooms = data.get("value", [])
-        print(f"DEBUG → PAGE {page} has {len(page_rooms)} rooms")
-        rooms.extend(page_rooms)
-
-        url = data.get("@odata.nextLink")
-        page += 1
-
-    print("DEBUG → TOTAL ROOMS FETCHED =", len(rooms))
-
-    # Extract emails
     room_emails = [r.get("emailAddress") for r in rooms if r.get("emailAddress")]
 
     # -------------------------
-    # TIME RANGE (UTC)
+    # TIME RANGE (UTC) — always interpreted as India time, see the
+    # docstring above for why this can't be the server's own OS timezone.
     # -------------------------
-    offset = -time.timezone if time.localtime().tm_isdst == 0 else -time.altzone
-    system_tz = timezone(timedelta(seconds=offset))
-
     start_local = get_datetime(f"{interview_date} {start_time}")
     end_local = get_datetime(f"{interview_date} {end_time}")
-
-    start_utc = start_local.replace(tzinfo=system_tz).astimezone(timezone.utc)
-    end_utc = end_local.replace(tzinfo=system_tz).astimezone(timezone.utc)
+    start_utc = start_local.replace(tzinfo=IST).astimezone(timezone.utc)
+    end_utc = end_local.replace(tzinfo=IST).astimezone(timezone.utc)
 
     # -------------------------
     # GET AVAILABILITY IN BATCHES
@@ -512,20 +532,15 @@ def get_org_rooms_and_availability(interview_date, start_time, end_time):
     )
 
     schedule_map = {}
+    availability_view_map = {}
 
     for i in range(0, len(room_emails), MAX_BATCH):
         batch = room_emails[i : i + MAX_BATCH]
         body = {
             "schedules": batch,
-            "startTime": {
-                "dateTime": start_utc.strftime("%Y-%m-%dT%H:%M:%S"),
-                "timeZone": "UTC",
-            },
-            "endTime": {
-                "dateTime": end_utc.strftime("%Y-%m-%dT%H:%M:%S"),
-                "timeZone": "UTC",
-            },
-            "availabilityViewInterval": 30,
+            "startTime": {"dateTime": start_utc.isoformat(), "timeZone": "UTC"},
+            "endTime": {"dateTime": end_utc.isoformat(), "timeZone": "UTC"},
+            "availabilityViewInterval": 5,
         }
 
         try:
@@ -533,6 +548,7 @@ def get_org_rooms_and_availability(interview_date, start_time, end_time):
                 schedule_url,
                 headers={**headers, "Content-Type": "application/json"},
                 json=body,
+                timeout=20,
             )
             resp.raise_for_status()
         except requests.exceptions.HTTPError as _he:
@@ -555,7 +571,9 @@ def get_org_rooms_and_availability(interview_date, start_time, end_time):
             )
 
         for item in resp.json().get("value", []):
-            schedule_map[item["scheduleId"].lower()] = item.get("scheduleItems", [])
+            key = item["scheduleId"].lower()
+            schedule_map[key] = item.get("scheduleItems", [])
+            availability_view_map[key] = item.get("availabilityView", "")
 
         time.sleep(0.1)
 
@@ -566,20 +584,39 @@ def get_org_rooms_and_availability(interview_date, start_time, end_time):
 
     for r in rooms:
         email = r.get("emailAddress")
-        busy = schedule_map.get(email.lower(), [])
+        if not email:
+            continue
+        key = email.lower()
 
+        if key not in schedule_map:
+            final.append(
+                {
+                    "name": r.get("displayName"),
+                    "email": email,
+                    "capacity": r.get("capacity"),
+                    "availability": [],
+                    "is_available": False,
+                    "status_unknown": True,
+                }
+            )
+            continue
+
+        busy = schedule_map[key]
         available = True
         for slot in busy:
-            s = datetime.fromisoformat(slot["start"]["dateTime"]).replace(
-                tzinfo=timezone.utc
-            )
-            e = datetime.fromisoformat(slot["end"]["dateTime"]).replace(
-                tzinfo=timezone.utc
-            )
-
+            s = datetime.fromisoformat(slot["start"]["dateTime"]).replace(tzinfo=timezone.utc)
+            e = datetime.fromisoformat(slot["end"]["dateTime"]).replace(tzinfo=timezone.utc)
             if not (e <= start_utc or s >= end_utc):
                 available = False
                 break
+
+        # Secondary check against availabilityView (a per-interval "0"=free
+        # ... "2"=busy string) as a backstop for cases where scheduleItems
+        # came back empty/incomplete but the room's actual free/busy state
+        # disagrees — same defensive check ms_health.py's version added.
+        view = availability_view_map.get(key, "")
+        if available and view and any(c != "0" for c in view):
+            available = False
 
         final.append(
             {
@@ -591,7 +628,6 @@ def get_org_rooms_and_availability(interview_date, start_time, end_time):
             }
         )
 
-    print("===================== DEBUG END =====================\n")
     return {"rooms": final}
 
 
@@ -756,7 +792,11 @@ def create_interview_event(
     display_mode = (interview_mode or "").strip() or (
         "Online" if is_online == 1 else "Face-to-Face"
     )
-    mode_is_online = (is_online == 1) or (display_mode.lower() == "online")
+    # "Hybrid" needs a Teams link too (both the venue AND a join link, for
+    # the on-site + remote interviewer groups respectively) — see the
+    # matching venue-gating condition further down and the hybrid-specific
+    # email block near the end of this function.
+    mode_is_online = (is_online == 1) or (display_mode.lower() in ("online", "hybrid"))
     # Shown to interviewers/candidate in place of "Online" — Teams meetings are
     # branded as "Video Conference" everywhere except the internal is_online
     # checks above, which must keep comparing against the raw "online" value.
@@ -1012,7 +1052,10 @@ def create_interview_event(
     # separate email — it is intentionally excluded from feedback_html_block
     # so that regular interviewers do not receive the demo link.
 
-    if display_mode.lower() == "face-to-face" and (address or Map_location):
+    # "Hybrid" also needs the venue shown (interviewer_location_html /
+    # map_html) alongside the Teams link from mode_is_online above — the
+    # on-site interviewer group needs the address, not just the link.
+    if display_mode.lower() in ("face-to-face", "hybrid") and (address or Map_location):
         from urllib.parse import quote as _qmap
 
         _search_text = (Map_location or address).strip()
@@ -1168,12 +1211,19 @@ def create_interview_event(
         # to a CC on the interviewer's calendar invite.
         if c.strip().lower() != _org_email_lower:
             attendees.append({"emailAddress": {"address": c}, "type": "optional"})
-    # Hybrid interviewers are deliberately NOT added to this event's
-    # attendees — Graph can't show different content to different attendees
-    # on the same event, so putting them here would show them the main
-    # display_mode (wrong for them if their own mode differs). They instead
-    # get their OWN separate Outlook event further down, with the correct
-    # hybrid mode/Teams link/address.
+    # For "Hybrid" mode specifically, Hybrid Interviewer's Email IS added
+    # as a real attendee on this SAME shared event too (not a separate
+    # one) — so Outlook actually blocks their calendar and shows its own
+    # native "Join Microsoft Teams Meeting" button (Outlook adds that
+    # automatically for any attendee of an isOnlineMeeting event,
+    # regardless of what the body text says), on top of the separate
+    # online-styled email with the join link they also get further down.
+    # For every other mode, hybrid interviewers still get their OWN
+    # separate Outlook event further down instead, unchanged.
+    if display_mode.lower() == "hybrid":
+        for h in hybrid_interviewer_list:
+            if h.strip().lower() != _org_email_lower:
+                attendees.append({"emailAddress": {"address": h}, "type": "required"})
     # NOTE: the candidate is deliberately NOT added as a calendar attendee.
     # Attendees get Microsoft's own auto-generated invite email, which uses
     # the interviewer-oriented body (feedback form link, meeting passcode,
@@ -1751,10 +1801,7 @@ comments/recommendations for the calibration process and final selection decisio
         )
         candidate_advice_html = (
             "<p>Kindly reach the venue <b>15 minutes prior</b> to the assigned time.</p>"
-            + travel_reimbursement_html +
-            "<p>If you are attending online, be in a suitable environment (quiet, well-lit, "
-            "with minimal disturbance) for the interview and kindly test your internet "
-            "connection, webcam, and microphone in advance.</p>"
+            + travel_reimbursement_html
         )
 
     # ----------------------------------------
@@ -2301,7 +2348,11 @@ comments/recommendations for the calibration process and final selection decisio
     # so they get their OWN event at the same date/time, with the correct
     # hybrid mode (Teams link if Online, address if Face-to-Face) so their
     # own calendar invite is accurate instead of showing the main mode.
-    if hybrid_interviewer_list:
+    #
+    # This only applies when the MAIN Interview Mode isn't itself "Hybrid" —
+    # when it is, there's just the one shared event (see the block right
+    # after this one instead), not a second separate event.
+    if hybrid_interviewer_list and display_mode.lower() != "hybrid":
         _hybrid_mode = (interview_mode_hybrid or "").strip() or display_mode
         _hybrid_is_online = _hybrid_mode.lower() == "online"
         _hybrid_mode_label = "Video Conference" if _hybrid_is_online else _hybrid_mode
@@ -2496,6 +2547,19 @@ comments/recommendations for the calibration process and final selection decisio
                     title="FIELD_INTERVIEW_HYBRID_EVENT_ID_SAVE_ERROR",
                     message=frappe.get_traceback(),
                 )
+
+    # "Hybrid" mode: ONE shared event, not a second one — Hybrid
+    # Interviewer's Email is added as a real attendee on it (see the
+    # attendees loop earlier in this function), so Outlook already sends
+    # them a genuine calendar invite/block from the organizer, with both
+    # the venue address and the Teams join link in the body (both
+    # interviewer_location_html and meeting_html are populated for
+    # "Hybrid" — see mode_is_online and the venue-gating condition
+    # earlier). A separate plain email used to be sent here too, but that
+    # meant hybrid interviewers got two different notifications for the
+    # same meeting from two different senders (the organizer's calendar
+    # invite + this app's own email) — confusing, and unnecessary now that
+    # the shared invite already reaches them with the join link included.
 
     frappe.msgprint("✅ Event created successfully. Outlook invite sent.")
 

@@ -1,9 +1,30 @@
 import frappe
 import os, ast, base64, time, re, requests
 from datetime import datetime, timedelta
-from frappe.utils import get_url, formatdate, format_time, get_datetime
+from frappe.utils import get_url, get_url_to_form, formatdate, format_time, get_datetime
 from frappe.utils.file_manager import save_file
 from frappe.utils.pdf import get_pdf
+
+# Health Interview Schedule's "Application ID" (application_id) Link always
+# points to Health Registration Form now — Health Application Form (this
+# program's own separate applicant doctype, built earlier this session) has
+# been dropped in favor of standardizing on Health Registration Form alone.
+#
+# Every function below that needs to read something off the applicant
+# record still resolves the target doctype from application_id's own field
+# metadata via _application_doctype() rather than hardcoding the doctype
+# name directly, so this file keeps working unchanged if that Link's
+# target ever needs repointing again in the future.
+_APPLICATION_RESUME_FIELD = {
+    "Health Registration Form": "resume",
+}
+_APPLICATION_FEEDBACK_PDF_FIELD = {
+    "Health Registration Form": "feedback_form",
+}
+
+
+def _application_doctype():
+    return frappe.get_meta("Health Interview Schedule").get_field("application_id").options
 
 
 def _graph_headers():
@@ -123,29 +144,39 @@ def _resume_link_html(candidate_cv_resume):
 
 
 def _application_form_link_html(application_id):
-    """No PDF/print format exists for Health Application Form yet, so this
+    """No PDF/print format exists for the applicant doctype yet, so this
     links straight to its Desk record — only reachable by someone with a
     Frappe desk login, same limitation noted throughout this file for the
-    feedback-form links below."""
+    feedback-form links below. get_url_to_form() resolves the correct
+    route for whichever doctype application_id actually links to (see
+    _application_doctype()), instead of a hardcoded
+    "/app/health-application-form/..." route that would 404 on a site
+    where it's Health Registration Form instead."""
     if not application_id:
         return ""
-    url = get_url(f"/app/health-application-form/{application_id}")
+    url = get_url_to_form(_application_doctype(), application_id)
     return f'<p style="margin:6px 0;">Application form: <a href="{url}" target="_blank">Click here</a></p>'
 
 
 def _earlier_feedback_links_html(application_id):
-    """Links straight to Health Application Form's "All the Feedback Form
-    PDF" field — the single combined PDF that
-    on_health_feedback_form_submitted() (see the bottom of this file)
-    keeps rebuilt from every round filed so far (Round 1/2/3 + Visit), so
-    a later-round panelist sees every earlier panel's feedback in one
-    click instead of separate per-round links."""
+    """Links straight to Health Registration Form's "Health Feedback Form"
+    field (feedback_form) — the single combined PDF
+    on_mbbs_feedback_form_submitted() (see the bottom of this file) keeps
+    rebuilt from every round filed so far, so a later-round panelist sees
+    every earlier panel's feedback in one click instead of separate
+    per-round links."""
     if not application_id:
-        return '<p style="margin:6px 0;">Feedback from earlier discussions: None yet</p>'
+        return (
+            '<p style="margin:6px 0;">Feedback from earlier discussions: None yet</p>'
+        )
 
-    file_url = frappe.db.get_value("Health Application Form", application_id, "all_the_feedback_form_pdf")
+    doctype = _application_doctype()
+    feedback_field = _APPLICATION_FEEDBACK_PDF_FIELD.get(doctype)
+    file_url = frappe.db.get_value(doctype, application_id, feedback_field) if feedback_field else None
     if not file_url:
-        return '<p style="margin:6px 0;">Feedback from earlier discussions: None yet</p>'
+        return (
+            '<p style="margin:6px 0;">Feedback from earlier discussions: None yet</p>'
+        )
 
     return (
         f'<p style="margin:6px 0;">Feedback from earlier discussions: '
@@ -169,11 +200,13 @@ def _mode_link_html(is_online, join_web_url, location_adress, map_location):
         )
     if location_adress or map_location:
         map_part = (
-            f' (<a href="{map_location}" target="_blank">Map</a>)' if map_location else ""
+            f' (<a href="{map_location}" target="_blank">Map</a>)'
+            if map_location
+            else ""
         )
         return (
             f'<p style="margin:6px 0;"><strong>MS Teams link / Venue address:</strong> '
-            f'{location_adress}{map_part}</p>'
+            f"{location_adress}{map_part}</p>"
         )
     return ""
 
@@ -262,21 +295,27 @@ def get_org_rooms_and_availability(interview_date, start_time, end_time):
         key = email.lower()
 
         if key not in schedule_map:
-            final.append({
-                "name": r.get("displayName"),
-                "email": email,
-                "capacity": r.get("capacity"),
-                "availability": [],
-                "is_available": False,
-                "status_unknown": True,
-            })
+            final.append(
+                {
+                    "name": r.get("displayName"),
+                    "email": email,
+                    "capacity": r.get("capacity"),
+                    "availability": [],
+                    "is_available": False,
+                    "status_unknown": True,
+                }
+            )
             continue
 
         busy = schedule_map[key]
         available = True
         for slot in busy:
-            s = datetime.fromisoformat(slot["start"]["dateTime"]).replace(tzinfo=timezone.utc)
-            e = datetime.fromisoformat(slot["end"]["dateTime"]).replace(tzinfo=timezone.utc)
+            s = datetime.fromisoformat(slot["start"]["dateTime"]).replace(
+                tzinfo=timezone.utc
+            )
+            e = datetime.fromisoformat(slot["end"]["dateTime"]).replace(
+                tzinfo=timezone.utc
+            )
             if not (e <= start_utc or s >= end_utc):
                 available = False
                 break
@@ -285,18 +324,22 @@ def get_org_rooms_and_availability(interview_date, start_time, end_time):
         if available and view and any(c != "0" for c in view):
             available = False
 
-        final.append({
-            "name": r.get("displayName"),
-            "email": email,
-            "capacity": r.get("capacity"),
-            "availability": busy,
-            "is_available": available,
-        })
+        final.append(
+            {
+                "name": r.get("displayName"),
+                "email": email,
+                "capacity": r.get("capacity"),
+                "availability": busy,
+                "is_available": available,
+            }
+        )
 
     return {"rooms": final}
 
 
-def _attach_files_to_event(headers, organizer_email, event_id, attachment_paths, extra_paths=None):
+def _attach_files_to_event(
+    headers, organizer_email, event_id, attachment_paths, extra_paths=None
+):
     """Resolve each url in `attachment_paths` to a real File record and POST
     it onto the given Graph event as an attachment. Mirrors
     ms_philanthropy.py's helper of the same name exactly — see its docstring
@@ -373,7 +416,9 @@ def _attach_files_to_event(headers, organizer_email, event_id, attachment_paths,
 
     existing_names = set()
     try:
-        existing = requests.get(attach_url, headers=headers, params={"$select": "name"}, timeout=30)
+        existing = requests.get(
+            attach_url, headers=headers, params={"$select": "name"}, timeout=30
+        )
         if existing.status_code == 200:
             existing_names = {a.get("name") for a in existing.json().get("value", [])}
     except Exception:
@@ -468,17 +513,21 @@ def create_interview_event(
     interview_round = None
     application_pdf_url = None
     if application_id:
+        _application_dt = _application_doctype()
+        _resume_field = _APPLICATION_RESUME_FIELD.get(_application_dt, "resume")
         _r = frappe.db.get_value(
-            "Health Application Form",
+            _application_dt,
             application_id,
-            ["application_status", "resume_upload"],
+            ["application_status", _resume_field],
             as_dict=True,
         )
         if _r:
             interview_round = _r.get("application_status")
-            application_pdf_url = _r.get("resume_upload")
+            application_pdf_url = _r.get(_resume_field)
 
-    feedback_url = _health_feedback_url(interview_round, application_id, Applicants_name)
+    feedback_url = _health_feedback_url(
+        interview_round, application_id, Applicants_name
+    )
 
     # -------- CREATE EVENT --------
     create_url = f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/events"
@@ -558,14 +607,18 @@ def create_interview_event(
 
     # -------- ATTACH FILES --------
     extra_paths = [application_pdf_url] if application_pdf_url else []
-    _attach_files_to_event(headers, Organizer_email, event_id, attachment_paths, extra_paths)
+    _attach_files_to_event(
+        headers, Organizer_email, event_id, attachment_paths, extra_paths
+    )
 
     meeting_room_html = (
         f'<p style="margin:6px 0;"><strong>Meeting room:</strong> {meeting_room}</p>'
         if meeting_room
         else ""
     )
-    mode_link_html = _mode_link_html(is_online, join_web_url, Location_adress, Map_location)
+    mode_link_html = _mode_link_html(
+        is_online, join_web_url, Location_adress, Map_location
+    )
 
     # Official templates (items 8 & 9) — see below for the "Documents"
     # section, which only item 8 (the panel email) carries.
@@ -714,7 +767,9 @@ def update_interview_event(
 
     event_url = f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/events/{doc.event_id}"
 
-    interviewer_list = [i.strip() for i in (interviewer_emails or "").split(",") if i.strip()]
+    interviewer_list = [
+        i.strip() for i in (interviewer_emails or "").split(",") if i.strip()
+    ]
     cc_list = [i.strip() for i in (cc_emails or "").split(",") if i.strip()]
     room_list = [r.strip() for r in (room_emails or "").split(",") if r.strip()]
     attendees = (
@@ -787,14 +842,22 @@ def update_interview_event(
         if meeting_room
         else ""
     )
-    mode_link_html = _mode_link_html(is_online, join_web_url, Location_adress, Map_location)
+    mode_link_html = _mode_link_html(
+        is_online, join_web_url, Location_adress, Map_location
+    )
 
-    interview_round = frappe.db.get_value(
-        "Health Application Form", application_id, "application_status"
-    ) if application_id else None
-    candidate_cv_resume = frappe.db.get_value(
-        "Health Application Form", application_id, "resume_upload"
-    ) if application_id else None
+    _application_dt = _application_doctype()
+    _resume_field = _APPLICATION_RESUME_FIELD.get(_application_dt, "resume")
+    interview_round = (
+        frappe.db.get_value(_application_dt, application_id, "application_status")
+        if application_id
+        else None
+    )
+    candidate_cv_resume = (
+        frappe.db.get_value(_application_dt, application_id, _resume_field)
+        if application_id
+        else None
+    )
 
     # Same official templates as create_interview_event, just noting the
     # reschedule up front rather than re-sending a generic "scheduled" line.
@@ -853,10 +916,10 @@ def update_interview_event(
 
 def _attendee_emails_for(doc):
     emails = set()
-    for row in (doc.interviewer_email or []):
+    for row in doc.interviewer_email or []:
         if row.interviewer_email:
             emails.add(row.interviewer_email.strip())
-    for row in (doc.interviewers_cc_email or []):
+    for row in doc.interviewers_cc_email or []:
         if row.interviewer_email:
             emails.add(row.interviewer_email.strip())
     for email in (doc.room_email or "").split(","):
@@ -953,9 +1016,13 @@ def cancel_interview_event(name):
                 message=f"Graph cancel failed | status={res.status_code} | body={res.text[:800]}",
             )
 
-        _remove_event_from_attendee_calendars(headers, ical_uid, _attendee_emails_for(doc))
+        _remove_event_from_attendee_calendars(
+            headers, ical_uid, _attendee_emails_for(doc)
+        )
 
-    interview_date = formatdate(doc.interview_date, "dd MMMM yyyy") if doc.interview_date else ""
+    interview_date = (
+        formatdate(doc.interview_date, "dd MMMM yyyy") if doc.interview_date else ""
+    )
     start_time = format_time(doc.start_time) if doc.start_time else ""
     end_time = format_time(doc.end_time) if doc.end_time else ""
     logo_html = _logo_html()
@@ -1074,7 +1141,9 @@ def send_interviewer_feedback_reminders():
             frappe.db.commit()
             continue
 
-        feedback_url = _health_feedback_url(s.interview_round, s.application_id, s.applicants_name)
+        feedback_url = _health_feedback_url(
+            s.interview_round, s.application_id, s.applicants_name
+        )
         reminder_body = f"""
         <p>Hi,</p>
         <p>This is a reminder that the interview with <b>{s.applicants_name}</b>
@@ -1176,7 +1245,7 @@ def send_candidate_interview_reminders():
         interview_time_fmt = format_time(s.start_time)
 
         link_html = (
-            f'<p>Please join using the link below:<br>'
+            f"<p>Please join using the link below:<br>"
             f'<a href="{link}" target="_blank">{link}</a></p>'
             if link
             else ""
@@ -1244,8 +1313,14 @@ MBBS_FEEDBACK_ROUND_DOCTYPES = [
 # rendering each round's own content to avoid repeating them under every
 # single round.
 _MBBS_FEEDBACK_HEADER_FIELDS = {
-    "applicant_id", "applicant_name", "application_status", "role",
-    "department", "phone", "email_address", "email",
+    "applicant_id",
+    "applicant_name",
+    "application_status",
+    "role",
+    "department",
+    "phone",
+    "email_address",
+    "email",
 }
 
 
@@ -1290,7 +1365,14 @@ def _build_mbbs_feedback_pdf(registration_name):
             html += f"<h3>{feedback_doctype}</h3>"
             html += f"<p><b>Status at the time:</b> {fb.application_status or ''}</p>"
             for f in meta.fields:
-                if f.fieldtype in ("Section Break", "Column Break", "Tab Break", "HTML", "Attach", "Link"):
+                if f.fieldtype in (
+                    "Section Break",
+                    "Column Break",
+                    "Tab Break",
+                    "HTML",
+                    "Attach",
+                    "Link",
+                ):
                     continue
                 if f.fieldname in _MBBS_FEEDBACK_HEADER_FIELDS:
                     continue
