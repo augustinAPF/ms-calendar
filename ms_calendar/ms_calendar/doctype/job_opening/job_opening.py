@@ -56,6 +56,7 @@ class JobOpening(WebsiteGenerator):
         "field":                    "field-registration-form",
         "grants":                   "philanthropy-registration-form",
         "scholarship":              "scholarship-recruitment-form",
+        "health":                   "health-registration-form",
     }
 
     def _auto_set_job_application_route(self):
