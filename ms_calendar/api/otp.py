@@ -84,8 +84,19 @@ def _normalize_mobile(phone):
 #     return {"success": True, "message": "Phone number verified successfully."}
 
 
+# Which mailbox/label the OTP email is sent from -- keyed by the calling
+# web form's doc_type, since enforce_otp_verification (and this cache) is
+# now shared across Field and Health Registration Form, but each has its
+# own recruiter inbox candidates already expect replies to land in.
+_OTP_SENDER_BY_FORM = {
+    "Field Registration Form": ("field.recruitment@azimpremjifoundation.org", "Field Registration Form"),
+    "Health Registration Form": ("health.fellowship@azimpremjifoundation.org", "Health Registration Form"),
+}
+_DEFAULT_OTP_SENDER = _OTP_SENDER_BY_FORM["Field Registration Form"]
+
+
 @frappe.whitelist(allow_guest=True)
-def send_email_otp(email):
+def send_email_otp(email, doctype=None):
     email = (email or "").strip().lower()
     if not email or "@" not in email:
         return {"success": False, "message": "Enter a valid email address."}
@@ -97,6 +108,8 @@ def send_email_otp(email):
             "message": "Please wait a moment before requesting another OTP.",
         }
 
+    sender, form_label = _OTP_SENDER_BY_FORM.get(doctype, _DEFAULT_OTP_SENDER)
+
     otp = str(random.randint(100000, 999999))
     cache_key = f"field_reg_email_otp_{email}"
     frappe.cache().set_value(cache_key, otp, expires_in_sec=_OTP_TTL)
@@ -106,11 +119,11 @@ def send_email_otp(email):
     try:
         frappe.sendmail(
             recipients=[email],
-            sender="field.recruitment@azimpremjifoundation.org",
-            subject="Your OTP - Field Registration Form",
+            sender=sender,
+            subject=f"Your OTP - {form_label}",
             message=(
                 '<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;color:#333;">'
-                "<p>Use the OTP below to verify your email address for the Field Registration Form.</p>"
+                f"<p>Use the OTP below to verify your email address for the {form_label}.</p>"
                 '<div style="background:#f4f4f4;border-radius:6px;text-align:center;padding:18px;margin:16px 0;">'
                 f'<span style="font-size:32px;font-weight:800;letter-spacing:10px;color:#1e6e66;">{otp}</span>'
                 "</div>"
@@ -161,7 +174,10 @@ def verify_email_otp(email, otp):
 
 
 def enforce_otp_verification(doc, method=None):
-    """`validate` hook for Field Registration Form (see hooks.py).
+    """`validate` hook for Field Registration Form and Health Registration Form
+    (see hooks.py) -- both share the same email_address/email_verified
+    (and phone_number/phone_verified) fieldnames, so this one function
+    covers both doctypes as-is.
 
     Client-side "verified" checkmarks are just UX — a guest could bypass
     them via devtools. This is the real backstop: a new Guest-submitted
