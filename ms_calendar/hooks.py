@@ -437,7 +437,7 @@ doc_events = {
         ],
         "validate": [
             "ms_calendar.api.resume_rename.on_field_registration",
-            "ms_calendar.api.ms_field.check_registration_duplicate_on_save",
+            # "ms_calendar.api.ms_field.check_registration_duplicate_on_save",
             "ms_calendar.api.otp.enforce_otp_verification",
         ],
     },

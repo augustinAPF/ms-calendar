@@ -5109,40 +5109,14 @@ def check_registration_duplicate_on_save(doc, method=None):
     Field Registration Form1, Health Registration Form and Phil
     Registration Form (see hooks.py).
 
-    Warns (does not block save) if the same person (matched on Name +
-    Date of Birth + Phone Number + Email, all four) already has an
-    application in any of the four registration forms. This is a
-    fallback for saves that don't go through the Desk form's live
-    client-side check (e.g. API inserts, data imports).
+    Intentionally a no-op popup-wise: the Desk form's "... Duplicate
+    Check" Client Script already shows this warning on refresh, so
+    this hook does not also call frappe.msgprint (that produced two
+    stacked popups — one from the client script, one from here — for
+    the same save). Kept as a hook point in case a hard, non-bypassable
+    server-side check is needed later.
     """
-    field_map = _REGISTRATION_DUPLICATE_FIELD_MAP.get(doc.doctype)
-    if not field_map:
-        return
-
-    target_name = _normalize_reg_name(doc.get(field_map["name"]))
-    target_dob = _normalize_reg_dob(doc.get(field_map["dob"]))
-    target_phone = _normalize_reg_phone(doc.get(field_map["phone"]))
-    target_email = _normalize_reg_email(doc.get(field_map["email"]))
-
-    if not (target_name and target_dob and target_phone and target_email):
-        return
-
-    match = _find_registration_duplicate(
-        target_name,
-        target_dob,
-        target_phone,
-        target_email,
-        exclude_doctype=doc.doctype,
-        exclude_name=doc.name,
-    )
-    if match:
-        frappe.msgprint(
-            f"An application with the same Name, Date of Birth, Phone Number and Email "
-            f"already exists ({match['doctype']} {match['name']}). "
-            f"They may already have an application submitted for this recruitment process.",
-            title="Possible Duplicate Application",
-            indicator="orange",
-        )
+    return
 
 
 # ── Bulk resume upload → auto-match to Field Registration Form ─────────
