@@ -344,6 +344,24 @@ def _drop_unresolvable_links(values):
             del values[fieldname]
 
 
+def _sanitize_scalar(value):
+    """Every Applicant Master field this syncs into (see FIELD_MAPPING_*
+    below) is a plain Data/Text/Select field, never a Table/Table
+    MultiSelect — so it can only ever legally hold a scalar. Some source
+    forms nonetheless hand back a Python list here (e.g. a checkbox-group
+    widget like "Languages Known" that submits its selections as an array
+    even though the underlying field is just a Data field storing a plain
+    string). Passed straight through, a single list-valued field fails
+    target.save() with "Value for X cannot be a list" and — because that
+    save is one atomic call — takes every OTHER correctly-mapped field on
+    this record down with it, not just the offending one. Flatten it to a
+    comma-joined string instead so the rest of the sync still goes through.
+    """
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value if v not in (None, ""))
+    return value
+
+
 def _sync_to_applicant_master(doc, field_mapping, source_label):
     """
     Shared by all four sync_<form>_to_applicant_master hooks below. Never
@@ -366,7 +384,8 @@ def _sync_to_applicant_master(doc, field_mapping, source_label):
 
     try:
         values = {
-            am_field: doc.get(src_field) for am_field, src_field in field_mapping.items()
+            am_field: _sanitize_scalar(doc.get(src_field))
+            for am_field, src_field in field_mapping.items()
         }
         _drop_unresolvable_links(values)
         # match_value itself is the authoritative Zwayam Id — set explicitly

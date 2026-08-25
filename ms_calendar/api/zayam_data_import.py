@@ -917,7 +917,32 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
                 except Exception as e:
                     # Roll back only this row (not the whole batch) so earlier
                     # successful, not-yet-committed rows in this run survive.
-                    frappe.db.rollback(save_point=savepoint)
+                    try:
+                        frappe.db.rollback(save_point=savepoint)
+                    except Exception:
+                        # The savepoint can be gone even though this row's own
+                        # try block is what failed — e.g. a doc_event/Server
+                        # Script fired off this row's insert (like
+                        # field_user_creation on after_insert) did its own
+                        # frappe.db.commit(), which releases every savepoint
+                        # opened earlier in the transaction, including this
+                        # one. Rolling back to a savepoint that no longer
+                        # exists raises OperationalError 1305, and if that's
+                        # allowed to escape here it aborts the whole import
+                        # (every row after this one gets skipped) instead of
+                        # just failing this one row. Fall back to a full
+                        # rollback + fresh transaction so the run continues.
+                        frappe.log_error(
+                            title="Zayam Data Import Savepoint Missing",
+                            message=(
+                                f"Savepoint '{savepoint}' was gone by the time row "
+                                f"{i} ({match_value}) failed — falling back to a "
+                                f"full rollback. Rows committed earlier in this "
+                                f"run are unaffected; anything staged for THIS "
+                                f"row since the last periodic commit is lost."
+                            ),
+                        )
+                        frappe.db.rollback()
                     frappe.log_error(
                         title="Zayam Data Import Error", message=f"{match_value}: {e}"
                     )

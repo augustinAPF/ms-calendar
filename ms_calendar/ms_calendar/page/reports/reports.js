@@ -252,10 +252,32 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		{ label: 'CV Level Shortlisted', key: 'cv_shortlist', bg: '#EAF4E2', bold: false },
 		{ label: 'CV Level Rejected', key: 'cv_regret', bg: '#FDEDEC', bold: false },
 		{ label: 'CV level Pending', key: 'cv_pending', bg: '#FFF9E6', bold: false },
+		// Catch-all for every application_status value that isn't one of the
+		// handful recognised above (there are ~90 possible status values on
+		// this field — Test Process, Recruiter Round, Offer, Joined, etc. —
+		// and only 7 are matched by name into the three rows above). Without
+		// this row those records were still counted in "Application
+		// Received" but silently dropped from the breakdown, so the three
+		// rows above never summed to the total. This row makes up the
+		// difference instead of guessing which of Shortlisted/Rejected/
+		// Pending each of those ~90 statuses "really" belongs in.
+		{ label: 'Other / In Process', key: 'other_process', bg: '#EDE7F6', bold: false },
 		{ label: 'Grand Total', key: 'app_received', bg: '#BDD7EE', bold: true, isGrand: true },
 	];
 
-	function mkRow() { return { app_received: 0, cv_shortlist: 0, cv_regret: 0, cv_pending: 0 }; }
+	function mkRow() {
+		return { app_received: 0, cv_shortlist: 0, cv_regret: 0, cv_pending: 0, other_process: 0 };
+	}
+
+	// Single source of truth for which application_status values fall into
+	// each named bucket — shared by the aggregator below and by the
+	// click-through drill-down dialog, so the count shown in a cell and the
+	// records listed when you click it can never disagree.
+	var AR_STATUS_KEYS = {
+		cv_shortlist: ['CV Shortlist', 'Shortlisted'],
+		cv_regret:    ['CV Reject', 'Rejected'],
+		cv_pending:   ['New Applicant', 'Applied', 'On Hold'],
+	};
 
 	function showAppsReceived() {
 		$('#rpt-main').html(`
@@ -427,15 +449,20 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			var status = (r.application_status || '').trim();
 			_arData[ml][state][col].app_received++;
 			_arData[ml]['__total'][col].app_received++;
-			if (['CV Shortlist', 'Shortlisted'].includes(status)) {
+			if (AR_STATUS_KEYS.cv_shortlist.includes(status)) {
 				_arData[ml][state][col].cv_shortlist++;
 				_arData[ml]['__total'][col].cv_shortlist++;
-			} else if (['CV Reject', 'Rejected'].includes(status)) {
+			} else if (AR_STATUS_KEYS.cv_regret.includes(status)) {
 				_arData[ml][state][col].cv_regret++;
 				_arData[ml]['__total'][col].cv_regret++;
-			} else if (['New Applicant', 'Applied', 'On Hold'].includes(status)) {
+			} else if (AR_STATUS_KEYS.cv_pending.includes(status)) {
 				_arData[ml][state][col].cv_pending++;
 				_arData[ml]['__total'][col].cv_pending++;
+			} else {
+				// Every other status (Test Process, Recruiter Round, Offer,
+				// Joined, Blocklisted, blank, ...) — see AR_ROW_DEFS above.
+				_arData[ml][state][col].other_process++;
+				_arData[ml]['__total'][col].other_process++;
 			}
 		});
 
@@ -559,12 +586,6 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			var rowkey = $(this).data('rowkey');
 			if (!ml) return;
 
-			var STATUS_KEYS = {
-				cv_shortlist: ['CV Shortlist', 'Shortlisted'],
-				cv_regret:    ['CV Reject', 'Rejected'],
-				cv_pending:   ['New Applicant', 'Applied', 'On Hold'],
-			};
-
 			var matched = _arAllRecs.filter(function (r) {
 				// month
 				var d = new Date(r.creation); var mi = d.getMonth(); var yr = d.getFullYear();
@@ -576,8 +597,15 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				// col (RP / ST)
 				if (getCol(r.role) !== col) return false;
 				// row key
-				if (rowkey !== 'app_received') {
-					var allowed = STATUS_KEYS[rowkey] || [];
+				if (rowkey === 'other_process') {
+					// Same "not any of the named buckets" test the aggregator
+					// uses — keeps the drill-down in sync with the count.
+					var status = (r.application_status || '').trim();
+					if (AR_STATUS_KEYS.cv_shortlist.includes(status)
+						|| AR_STATUS_KEYS.cv_regret.includes(status)
+						|| AR_STATUS_KEYS.cv_pending.includes(status)) return false;
+				} else if (rowkey !== 'app_received') {
+					var allowed = AR_STATUS_KEYS[rowkey] || [];
 					if (!allowed.includes((r.application_status || '').trim())) return false;
 				}
 				return true;

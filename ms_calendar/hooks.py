@@ -640,7 +640,13 @@ doctype_list_js = {
     "Scholarship Recruitment Form": "public/js/scholarship_recruitment_form_list.js",
 }
 app_include_js = [
-    "/assets/ms_calendar/js/frf_list.js",
+    # frf_list.js carries a manual "?v=" cache-buster: this file has no
+    # content hash in its URL (unlike webpack .bundle. assets, see
+    # bundled_asset() in frappe/utils/jinja_globals.py), so browsers were
+    # holding onto old copies for the full 12h Cache-Control max-age even
+    # across hard reloads. Bump the number any time this file changes and
+    # every browser is guaranteed a fresh fetch on next page load.
+    "/assets/ms_calendar/js/frf_list.js?v=3",
     "/assets/ms_calendar/js/phil_registration_form_list.js",
     "/assets/ms_calendar/js/scholarship_recruitment_form_list.js",
     "/assets/ms_calendar/js/pathways_redirect.js",

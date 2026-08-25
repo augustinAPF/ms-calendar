@@ -180,21 +180,23 @@ def test_result_api():
                 "proctor_comment": proctor_comment,
                 "updated_at": updated_at,
                 "created_at": created_at,
-                "section_wise_score": [
+                "section_wise_score": frappe.as_json([
                     {
                         "section_name": section.get("name"),
                         "score": section.get("score"),
                         "max_score": section.get("maxScore"),
                     }
                     for section in section_wise_score
-                ],
-                "descriptive_response": [
+                    if isinstance(section, dict)
+                ]),
+                "descriptive_response": frappe.as_json([
                     {
                         "question_text": resp.get("questionText"),
                         "candidate_response": resp.get("candidateResponse"),
                     }
                     for resp in descriptive_response
-                ],
+                    if isinstance(resp, dict)
+                ]),
             }
         )
         test_doc.insert(ignore_permissions=True, ignore_links=True)
@@ -941,6 +943,42 @@ def save_field_merittrac_tickets(
 # ---------------------------------------------------------------------------
 import frappe
 
+# MeritTrac's servers occasionally take longer than a single 30s window to
+# respond to get-landing-page-url / get-assessment-tickets (observed: a
+# ReadTimeout on initiate_merittrac_online_test during real usage, even
+# though the endpoint itself responds quickly to ordinary requests — i.e.
+# vendor-side slowness under real load, not a connectivity problem here).
+# A bare timeout crash gives the recruiter no idea whether the test was
+# actually created on MeritTrac's side, so both proxy calls now get a longer
+# timeout plus a couple of short retries before failing with a clear message.
+_MERITTRAC_TIMEOUT = 45
+_MERITTRAC_RETRIES = 2
+_MERITTRAC_RETRY_BACKOFF = 3
+
+
+def _merittrac_post_with_retry(url, headers, payload):
+    import time
+    import requests as _req
+
+    last_exc = None
+    for attempt in range(_MERITTRAC_RETRIES + 1):
+        try:
+            return _req.post(
+                url, headers=headers, json=payload, timeout=_MERITTRAC_TIMEOUT
+            )
+        except (_req.exceptions.ReadTimeout, _req.exceptions.ConnectionError) as exc:
+            last_exc = exc
+            frappe.log_error(
+                title="MERITTRAC_API_RETRY",
+                message=(
+                    f"Attempt {attempt + 1}/{_MERITTRAC_RETRIES + 1} failed "
+                    f"for {url}: {exc}"
+                ),
+            )
+            if attempt < _MERITTRAC_RETRIES:
+                time.sleep(_MERITTRAC_RETRY_BACKOFF * (attempt + 1))
+    raise last_exc
+
 
 @frappe.whitelist()
 def initiate_merittrac_online_test(
@@ -950,8 +988,8 @@ def initiate_merittrac_online_test(
     Proxy for MeritTrac API 1 — POST /hrms/get-landing-page-url.
     Runs server-side so credentials never leave the backend and CORS is not an issue.
     """
-    import requests as _req
     import json as _json
+    import requests as _req
 
     if isinstance(candidate_ids, str):
         candidate_ids = _json.loads(candidate_ids)
@@ -973,12 +1011,23 @@ def initiate_merittrac_online_test(
         "Content-Type": "application/json",
     }
 
-    resp = _req.post(
-        "https://www.talent-next.com/hrms/get-landing-page-url",
-        headers=headers,
-        json=payload,
-        timeout=30,
-    )
+    try:
+        resp = _merittrac_post_with_retry(
+            "https://www.talent-next.com/hrms/get-landing-page-url", headers, payload
+        )
+    except (_req.exceptions.ReadTimeout, _req.exceptions.ConnectionError) as exc:
+        frappe.log_error(
+            title="MERITTRAC_API_1_TIMEOUT",
+            message=f"Gave up after {_MERITTRAC_RETRIES + 1} attempts: {exc}",
+        )
+        frappe.throw(
+            "MeritTrac did not respond in time after multiple attempts. "
+            "This is usually a temporary issue on their end — please try "
+            "Initiate Test again in a minute. If it keeps failing, check "
+            "with MeritTrac support before retrying, since a test may "
+            "already have been created on their side.",
+            title="MeritTrac API 1 Timed Out",
+        )
 
     frappe.log_error(
         title="MERITTRAC_API_1",
@@ -1000,8 +1049,8 @@ def get_merittrac_tickets(candidate_ids, start_utc, end_utc):
     Proxy for MeritTrac API 2 — POST /hrms/get-assessment-tickets.
     Returns ticket data (attemptId, lpurl, candidate_id) for each candidate.
     """
-    import requests as _req
     import json as _json
+    import requests as _req
 
     if isinstance(candidate_ids, str):
         candidate_ids = _json.loads(candidate_ids)
@@ -1020,12 +1069,22 @@ def get_merittrac_tickets(candidate_ids, start_utc, end_utc):
         "Content-Type": "application/json",
     }
 
-    resp = _req.post(
-        "https://www.talent-next.com/hrms/get-assessment-tickets",
-        headers=headers,
-        json=payload,
-        timeout=30,
-    )
+    try:
+        resp = _merittrac_post_with_retry(
+            "https://www.talent-next.com/hrms/get-assessment-tickets",
+            headers,
+            payload,
+        )
+    except (_req.exceptions.ReadTimeout, _req.exceptions.ConnectionError) as exc:
+        frappe.log_error(
+            title="MERITTRAC_API_2_TIMEOUT",
+            message=f"Gave up after {_MERITTRAC_RETRIES + 1} attempts: {exc}",
+        )
+        frappe.throw(
+            "MeritTrac did not respond in time after multiple attempts while "
+            "fetching test tickets. Please try again in a minute.",
+            title="MeritTrac API 2 Timed Out",
+        )
 
     frappe.log_error(
         title="MERITTRAC_API_2",
@@ -1057,6 +1116,41 @@ _WRITTEN_SUBJECT_LEVEL_PREFIXES = [
 ]
 
 _ASSESSMENT_TOKEN_STOPWORDS = {"foundation", "azim", "premji", "set"}
+
+# Explicit overrides for (candidate role, written_subject) pairs where the
+# generic word-overlap scorer below is known to misfire — either because the
+# Field Meritrac Assessment label uses different wording than the picklist
+# ("Mathematics" vs "Maths"), a shared/reused SA number is stored under an
+# unrelated-looking label (the Social Science paper is filed under a
+# "History" assessment_set), or two live records still tie on score alone
+# (e.g. Upper Primary Hindi's Set 1/Set 2 both remaining active). Checked
+# before the generic scorer runs; verified against live Field Meritrac
+# Assessment data as of 2026-08-17.
+_WRITTEN_SUBJECT_OVERRIDES = {
+    ("School Teacher", "Primary Mathematics"): "SA08072",
+    ("School Teacher", "Upper Primary Maths"): "SA08073",
+    ("School Teacher", "Secondary/High School Maths"): "SA07733",
+    ("School Teacher", "Upper Primary Social Science"): "SA07746",
+    ("School Teacher", "Upper Primary Kannada"): "SA07730",
+    ("School Teacher", "Upper Primary Hindi"): "SA07744",
+    # "Upper Primary English" was losing the tie-break to "Primary English"
+    # (SA07690) because the UP record's label says "UP", not "Upper"/"Primary",
+    # so it doesn't even earn the level-word point the Primary record gets.
+    # Confirmed live via the Initiate Test dialog on 2026-08-18.
+    ("School Teacher", "Upper Primary English"): "SA07741",
+}
+
+# Subjects with more than one genuinely valid SA number, where the form has
+# no field to disambiguate (e.g. no language selector) — unlike
+# _WRITTEN_SUBJECT_OVERRIDES, we return all valid options as "ambiguous"
+# rather than picking one, since guessing wrong here would assign the wrong
+# paper outright. Discovered because the generic scorer was ignoring both
+# genuine ECE records (their DB label uses "ECE", which shares no word with
+# the picklist's "Early Childhood Education") and instead tying on an
+# unrelated record ("Special Education") by accident.
+_WRITTEN_SUBJECT_AMBIGUOUS_OVERRIDES = {
+    ("School Teacher", "Early Childhood Education"): ["SA07671", "SA07948"],  # Hindi / Kannada
+}
 
 # Field Role (candidate) -> Field Meritrac Assessment.role values it can match.
 # Ordered by preference (e.g. latest Associates batch first) for tie-breaking.
@@ -1121,6 +1215,37 @@ def suggest_meritrac_assessment(candidate_ids):
 
     roles = {r.role for r in rows if r.role}
     role = roles.pop() if len(roles) == 1 else None
+
+    override_name = _WRITTEN_SUBJECT_OVERRIDES.get((role, written_subject))
+    if override_name:
+        override_set = frappe.db.get_value(
+            "Field Meritrac Assessment", override_name, "assessment_set"
+        )
+        if override_set:
+            return {
+                "matched": True,
+                "assessment": override_name,
+                "assessment_set": override_set,
+                "ambiguous": False,
+                "alternatives": [],
+            }
+
+    ambiguous_names = _WRITTEN_SUBJECT_AMBIGUOUS_OVERRIDES.get((role, written_subject))
+    if ambiguous_names:
+        ambiguous_records = [
+            {"name": n, "assessment_set": frappe.db.get_value("Field Meritrac Assessment", n, "assessment_set")}
+            for n in ambiguous_names
+        ]
+        ambiguous_records = [r for r in ambiguous_records if r["assessment_set"]]
+        if ambiguous_records:
+            best = ambiguous_records[0]
+            return {
+                "matched": True,
+                "assessment": best["name"],
+                "assessment_set": best["assessment_set"],
+                "ambiguous": True,
+                "alternatives": ambiguous_records[1:],
+            }
 
     level, subject_text = _split_written_subject(written_subject)
     subject_tokens = _tokenize(subject_text)
