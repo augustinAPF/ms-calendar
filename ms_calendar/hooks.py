@@ -661,7 +661,11 @@ app_include_js = [
     "/assets/ms_calendar/js/frf_list.js?v=3",
     "/assets/ms_calendar/js/phil_registration_form_list.js",
     "/assets/ms_calendar/js/scholarship_recruitment_form_list.js",
-    "/assets/ms_calendar/js/pathways_redirect.js",
+    # "pathways_redirect.js" was never actually added to public/js/ (checked
+    # git history — no commit ever created it), so this line 404s on every
+    # single desk page load, for every user, since app_include_js is loaded
+    # app-wide. Removed rather than guessed-at: recreating it would mean
+    # inventing redirect behavior nobody's described.
 ]
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
