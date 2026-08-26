@@ -905,11 +905,17 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
                     if existing:
                         doc = frappe.get_doc(doctype, existing)
                         doc.update(row_values)
+                        # Tens of thousands of historical rows going through
+                        # here, not a fresh applicant action — skips the
+                        # SMS/WhatsApp send that would otherwise fire on
+                        # every row (see the matching check in sms_utils.py).
+                        doc.flags.in_zayam_import = True
                         doc.save(ignore_permissions=True)
                         _record_result(status, "updated", entry)
                         csv_writer.writerow([match_value, "Updated", ""] + row_cells)
                     else:
                         doc = frappe.get_doc({"doctype": doctype, **row_values})
+                        doc.flags.in_zayam_import = True
                         doc.insert(ignore_permissions=True)
                         existing_by_match_value[match_value] = doc.name
                         _record_result(status, "created", entry)

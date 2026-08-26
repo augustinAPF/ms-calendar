@@ -220,6 +220,15 @@ def send_whatsapp(
 
 def send_registration_form_after_insert(doc, method=None):
 	"""doc_events handler: send SMS/WhatsApp when a Field Registration Form is first inserted."""
+	if doc.flags.get("in_zayam_import"):
+		# Bulk Zayam import (ms_calendar.api.zayam_data_import) inserting/
+		# updating tens of thousands of historical rows in one run — not a
+		# fresh applicant to notify. Without this, every imported row fires
+		# a real, synchronous SMS + WhatsApp send (see send_sms/send_whatsapp
+		# below), which both floods applicants with messages about an old
+		# bulk data load, and is the single biggest reason a ~1 lakh row
+		# import is slow (up to a 10s network round trip per message, per row).
+		return
 	status = (doc.get("application_status") or "New Applicant").strip()
 	if status in INTERVIEW_ROUND_STATUSES:
 		return
@@ -240,6 +249,9 @@ def send_registration_form_after_insert(doc, method=None):
 
 def send_registration_form_on_update(doc, method=None):
 	"""doc_events handler: send SMS/WhatsApp when application_status changes on a Field Registration Form."""
+	if doc.flags.get("in_zayam_import"):
+		# See the matching check in send_registration_form_after_insert above.
+		return
 	if not doc.has_value_changed("application_status"):
 		return
 	status = (doc.get("application_status") or "").strip()
