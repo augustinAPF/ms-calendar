@@ -92,13 +92,16 @@ def _rename_resume(doc, resume_field, name_field, label="Resume", extra_id_field
         frappe.db.set_value(
             "File", file_doc.name, {"file_name": new_filename, "file_url": new_url}
         )
-        # doc.set() alone is NOT enough here: this runs from an on_update
-        # hook, which fires AFTER this save's own INSERT/UPDATE already
-        # committed. doc.set() only mutates this in-memory instance —
-        # discarded once the request ends — so the field's real DB value
-        # never actually followed the rename, leaving it pointing at a
-        # filename that stops existing the moment the physical file above
-        # gets renamed away from it. Write the column directly instead.
+        # This must run from an on_update/after_insert hook (this doc's own
+        # INSERT/UPDATE has already committed by then) so that writing the
+        # column directly here is the final word — nothing later in the same
+        # request overwrites it. Wiring this to `validate` instead is what
+        # caused the bug this replaces: `validate` fires BEFORE the doc's own
+        # save, so Frappe's trailing UPDATE at the end of that same save
+        # could clobber this db.set_value with the pre-rename value the
+        # in-memory doc still held, leaving the field pointing at a filename
+        # that no longer exists (the physical file was already renamed away
+        # from it) while the File list still showed the doc as attached.
         frappe.db.set_value(doc.doctype, doc.name, resume_field, new_url, update_modified=False)
         doc.set(resume_field, new_url)
 
