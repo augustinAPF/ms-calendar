@@ -186,15 +186,17 @@ def run_as_report():
 
 
 def fix_prefix_mismatches(dry_run=True):
-    """Repairs every `prefix_mismatch` record run() finds: the File doc's
-    is_private flag (and therefore the folder its own file_url points at)
-    disagrees with where the bytes actually sit on disk. Trusts physical
-    reality — the folder holding the real bytes — over the stale flag/url,
-    since the bytes are the one thing here that can't be wrong. Corrects
-    the File doc's is_private + file_url, and the owning doc's Attach
-    field, to both agree with that folder. Never touches the file on disk
-    itself — moving bytes risks a partial failure mid-move, whereas
-    flipping metadata is a single atomic, trivially reversible write.
+    """Repairs every `prefix_mismatch` record run() finds: the field's own
+    url (its /private/ vs /files/ prefix) disagrees with the folder the
+    bytes actually sit in on disk — _classify() already verified this by
+    testing the filesystem directly, not by trusting either row.is_private
+    or the url. Corrects the File doc's is_private + file_url, and the
+    owning doc's Attach field, to agree with the verified-correct folder
+    (always the opposite of whatever the url currently claims — that's the
+    only way _classify would have flagged this as prefix_mismatch at all).
+    Never touches the file on disk itself — moving bytes risks a partial
+    failure mid-move, whereas flipping metadata is a single atomic,
+    trivially reversible write.
 
     Only acts on `prefix_mismatch` (bytes exist, just filed under the
     other folder). Leaves `physical_file_missing`/`no_file_record`
@@ -232,7 +234,18 @@ def fix_prefix_mismatches(dry_run=True):
             continue
 
         row = file_rows[0]
-        actual_is_private = not bool(row.is_private)  # _classify only flags this when the OTHER folder is the real one
+        # _classify determined prefix_mismatch by testing the FILESYSTEM,
+        # not by trusting row.is_private (which can itself already be wrong
+        # — that's exactly how a record ends up in this category in the
+        # first place). The verified-correct folder is always the opposite
+        # of whatever this url's own /private/ prefix claims, since
+        # _classify only returns prefix_mismatch when the url-implied path
+        # was missing on disk AND the other folder had the file. Flipping
+        # row.is_private instead of url_says_private was the earlier bug
+        # here: it left the url completely unchanged whenever is_private
+        # already agreed with the (wrong) url, so the 404 never cleared.
+        url_says_private = "/private/" in url
+        actual_is_private = not url_says_private
         new_url = f"/private/files/{row.file_name}" if actual_is_private else f"/files/{row.file_name}"
 
         if not dry_run:
