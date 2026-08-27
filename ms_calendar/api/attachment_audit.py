@@ -186,17 +186,15 @@ def run_as_report():
 
 
 def fix_prefix_mismatches(dry_run=True):
-    """Repairs every `prefix_mismatch` record run() finds: the field's own
-    url (its /private/ vs /files/ prefix) disagrees with the folder the
-    bytes actually sit in on disk — _classify() already verified this by
-    testing the filesystem directly, not by trusting either row.is_private
-    or the url. Corrects the File doc's is_private + file_url, and the
-    owning doc's Attach field, to agree with the verified-correct folder
-    (always the opposite of whatever the url currently claims — that's the
-    only way _classify would have flagged this as prefix_mismatch at all).
-    Never touches the file on disk itself — moving bytes risks a partial
-    failure mid-move, whereas flipping metadata is a single atomic,
-    trivially reversible write.
+    """Repairs every `prefix_mismatch` record run() finds: the File doc's
+    is_private flag (and therefore the folder its own file_url points at)
+    disagrees with where the bytes actually sit on disk. Trusts physical
+    reality — the folder holding the real bytes — over the stale flag/url,
+    since the bytes are the one thing here that can't be wrong. Corrects
+    the File doc's is_private + file_url, and the owning doc's Attach
+    field, to both agree with that folder. Never touches the file on disk
+    itself — moving bytes risks a partial failure mid-move, whereas
+    flipping metadata is a single atomic, trivially reversible write.
 
     Only acts on `prefix_mismatch` (bytes exist, just filed under the
     other folder). Leaves `physical_file_missing`/`no_file_record`
