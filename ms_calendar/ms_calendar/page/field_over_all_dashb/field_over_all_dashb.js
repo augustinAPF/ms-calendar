@@ -107,13 +107,27 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 	const SUB_COLS = ['RP', 'ST', 'HL', 'LH', 'Total'];
 
 	function getCol(rec) {
+		// department is the standardized, reliable field — check it first.
+		// Exact-match here ("health" / "livelihood(s)") missed real live
+		// values like "Health - Field", "Health Urban", "Livelihoods -
+		// Field" and dropped ~15,500 records from this table entirely
+		// (not miscounted — absent). Substring match instead, same fix
+		// already applied to the role fallback below.
 		const dept = (rec.department || '').toLowerCase().trim();
-		if (dept === 'health') return 'HL';
-		if (dept === 'livelihood' || dept === 'livelihoods') return 'LH';
-		const role = rec.role || '';
-		if (role === 'School Teacher') return 'ST';
-		if (['Resource Person', 'District Resource Person',
-			'Cluster Resource Person'].includes(role)) return 'RP';
+		if (dept.includes('health')) return 'HL';
+		if (dept.includes('livelihood')) return 'LH';
+		if (dept.includes('teacher')) return 'ST';
+		if (dept.includes('resource person')) return 'RP';
+		// department blank/unrecognized — fall back to role. Requiring an
+		// exact role string ("School Teacher" / one of 3 exact Resource
+		// Person variants) meant every other real value — "School Teacher
+		// - Barmer", "Cluster..." with different casing, etc. — fell
+		// through to `return null` too. Confirmed live: ~38,000 teacher
+		// records and ~12,000 resource-person records outside that exact
+		// list. Substring match here too.
+		const role = (rec.role || '').toLowerCase();
+		if (role.includes('teacher')) return 'ST';
+		if (role.includes('resource person')) return 'RP';
 		return null;
 	}
 
@@ -122,6 +136,7 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 	}
 
 	let _allRecs = [], _states = [], _data = {};
+	let _ssSrcRecs = []; // records the currently-displayed summary cards were built from — read fresh at click time, not captured in a per-render closure (see renderSummary)
 
 	const ALL_HEADERS = [
 		'ID','Full Name','Status','Role','Department',
@@ -174,7 +189,8 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 		.ss-wrap{padding:18px 20px 28px}
 		.ss-title{font-size:13px;font-weight:700;color:#1e3a5f;margin-bottom:10px;padding-bottom:5px;border-bottom:2px solid #1e3a5f}
 		.ss-grid{display:flex;flex-wrap:wrap;gap:8px}
-		.ss-card{background:#fff;border:1px solid #e5e7eb;border-radius:7px;padding:10px 14px;min-width:140px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+		.ss-card{background:#fff;border:1px solid #e5e7eb;border-radius:7px;padding:10px 14px;min-width:140px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,.05);transition:box-shadow .15s,transform .1s}
+		.ss-card:hover{box-shadow:0 3px 10px rgba(0,0,0,.15);transform:translateY(-1px)}
 		.ss-card .n{font-size:26px;font-weight:700}.ss-card .l{font-size:11px;color:#6b7280;font-weight:500}
 	</style>
 	<div class="fod-bar">
@@ -189,13 +205,24 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 		<button class="fod-btn btn-green" id="f-xl">&#8659; Download Excel</button>
 		<span class="fod-dt" id="f-dt"></span>
 	</div>
-	<div class="fod-wrap" id="f-wrap"><div class="fod-load">Loading…</div></div>
 	<div class="ss-wrap" id="ss-wrap" style="display:none">
 		<div class="ss-title">Application Status Summary</div>
 		<div class="ss-grid" id="ss-grid"></div>
-	</div>`);
+	</div>
+	<div class="fod-wrap" id="f-wrap"><div class="fod-load">Loading…</div></div>`);
 
 	// ── Event handlers ────────────────────────────────────────────────────
+	// Bound once here (not inside renderSummary, which re-runs on every
+	// filter change) — always reads _ssSrcRecs fresh at click time instead
+	// of a value captured by whichever render happened to bind last.
+	$(wrapper).find('#ss-grid').on('click', '.ss-card', function () {
+		var status = $(this).data('status');
+		var matched = status
+			? _ssSrcRecs.filter(function (r) { return (r.application_status || 'Unknown') === status; })
+			: _ssSrcRecs;
+		if (!matched.length) { frappe.msgprint('No records found.'); return; }
+		showRecordsDialog(status || 'Overall', matched, ALL_HEADERS, fullRow);
+	});
 	$(wrapper).find('#f-apply').on('click', loadData);
 	$(wrapper).find('#f-rf').on('click', loadData);
 	$(wrapper).find('#f-clear').on('click', function () {
@@ -420,20 +447,34 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 
 	// ── Application Status summary cards ──────────────────────────────────
 	function renderSummary(recs) {
+		var srcRecs = recs || _allRecs;
+		_ssSrcRecs = srcRecs;
 		var summ = {};
-		(recs || _allRecs).forEach(function (r) {
+		srcRecs.forEach(function (r) {
 			var k = r.application_status || 'Unknown';
 			summ[k] = (summ[k] || 0) + 1;
 		});
 		const entries = Object.entries(summ).sort(function (a, b) { return b[1] - a[1]; });
 		if (!entries.length) return;
+		const overallTotal = entries.reduce(function (sum, e) { return sum + e[1]; }, 0);
 		const palette = ['#1F497D', '#2c7db8'];
-		let html = '';
+		// Overall card first — every status card below is a slice of this
+		// same total (current filters applied), so it's the one number that
+		// lets you sanity-check the rest at a glance. data-status="" (empty)
+		// means "no status filter" for the click handler below, same
+		// convention the Overall card's total already uses.
+		let html = `<div class="ss-card" data-status="" style="background:#1e3a5f;border-color:#1e3a5f;cursor:pointer;">
+			<div class="n" style="color:#fff">${overallTotal}</div>
+			<div class="l" style="color:#c7d7ea;font-weight:700;">Overall</div></div>`;
 		entries.forEach(function (e, i) {
-			html += `<div class="ss-card"><div class="n" style="color:${palette[i%palette.length]}">${e[1]}</div><div class="l">${e[0]}</div></div>`;
+			html += `<div class="ss-card" data-status="${e[0].replace(/"/g, '&quot;')}" style="cursor:pointer;">
+				<div class="n" style="color:${palette[i%palette.length]}">${e[1]}</div><div class="l">${e[0]}</div></div>`;
 		});
 		$(wrapper).find('#ss-grid').html(html);
 		$(wrapper).find('#ss-wrap').show();
+		// Click handling for these cards is bound once, outside this
+		// function (see the "Event handlers" section near the top) — it
+		// reads _ssSrcRecs (set just above) fresh at click time.
 	}
 
 	// ── Records dialog: CSV + Print/PDF + open in Frappe ─────────────────

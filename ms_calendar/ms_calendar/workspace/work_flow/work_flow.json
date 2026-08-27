@@ -1,0 +1,65 @@
+{
+ "app": "Ms Calendar",
+ "charts": [],
+ "content": "[{\"id\":\"WFheader01\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">Work Flow</span>\",\"col\":12}},{\"id\":\"WFshortcut1\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Health Registration Form\",\"col\":3}},{\"id\":\"WFshortcut2\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Scholarship Recruitment Form\",\"col\":3}},{\"id\":\"WFshortcut3\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Phil Registration Form\",\"col\":3}},{\"id\":\"WFshortcut4\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Field Registration Form\",\"col\":3}}]",
+ "creation": "2026-08-21 00:00:00.000000",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "form",
+ "idx": 4,
+ "indicator_color": "blue",
+ "is_hidden": 0,
+ "label": "Work Flow",
+ "link_type": "DocType",
+ "links": [],
+ "modified": "2026-08-21 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Ms Calendar",
+ "name": "Work Flow",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "Work Flow",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 24.0,
+ "shortcuts": [
+  {
+   "color": "Blue",
+   "doc_view": "List",
+   "label": "Health Registration Form",
+   "link_to": "Health Registration Form",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Green",
+   "doc_view": "List",
+   "label": "Scholarship Recruitment Form",
+   "link_to": "Scholarship Recruitment Form",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Orange",
+   "doc_view": "List",
+   "label": "Phil Registration Form",
+   "link_to": "Phil Registration Form",
+   "stats_filter": "[]",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Field Registration Form",
+   "link_to": "Field Registration Form",
+   "stats_filter": "[]",
+   "type": "DocType"
+  }
+ ],
+ "title": "Work Flow",
+ "type": "Workspace"
+}

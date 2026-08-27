@@ -8,7 +8,13 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 	// ── Shared constants ─────────────────────────────────────────────────
 	function getCol(role) {
 		var r = (role || '').trim().toLowerCase();
-		if (r === 'school teacher') return 'ST';
+		// Real role values are things like "School Teacher - Barmer",
+		// "Azim Premji School: School Teacher Education", etc. — an exact
+		// match against "school teacher" only ever caught the plain,
+		// unsuffixed value (159 records) and silently miscounted the other
+		// 38,000+ teacher variants as Resource Person. Substring match,
+		// same approach already used for health/livelihood below.
+		if (r.includes('teacher')) return 'ST';
 		if (r.includes('health') || r.includes('livelihood')) return null;
 		return 'RP';
 	}
@@ -19,6 +25,42 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			return (rec.location || '').trim();
 		}
 		return (rec.location || rec.native_state || '').trim();
+	}
+
+	// Monday-Sunday week containing (today + offsetWeeks*7 days) — offsetWeeks
+	// -1 gives last week, 0 gives the current week.
+	function getWeekBounds(offsetWeeks) {
+		var now = new Date();
+		var day = now.getDay(); // 0=Sun,1=Mon,...,6=Sat
+		var diffToMonday = (day === 0 ? -6 : 1 - day);
+		var monday = new Date(now);
+		monday.setDate(now.getDate() + diffToMonday + offsetWeeks * 7);
+		monday.setHours(0, 0, 0, 0);
+		var sunday = new Date(monday);
+		sunday.setDate(monday.getDate() + 6);
+		return { from: monday, to: sunday };
+	}
+	function fmtDate(d) {
+		return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+	}
+
+	// Coarse funnel bucketing for the ~90 distinct application_status values
+	// this doctype allows — same rationale as AR_ROW_DEFS's "Other / In
+	// Process" catch-all below: naming every status explicitly isn't
+	// maintainable, so anything not clearly Rejected/Offer-Joined/Shortlisted
+	// falls into "In Process" (interview rounds, tests, calibration, etc.)
+	// rather than being silently dropped or guessed into the wrong bucket.
+	var FUNNEL_STAGES = ['Applied / Pending', 'Shortlisted', 'In Process', 'Offer / Joined', 'Rejected / Dropped'];
+	function getFunnelStage(status) {
+		var s = (status || '').trim().toLowerCase();
+		if (!s || s === 'new applicant' || s === 'on hold' || s.includes('pending') || s.includes('document')
+			|| s.includes('correction')) return 'Applied / Pending';
+		if (s.includes('reject') || s.includes('blacklist') || s.includes('blocklist') || s.includes('not selected')
+			|| s.includes('no show') || s.includes('duplicated') || s.includes('not joined') || s.includes('revoked')
+			|| s.includes('declined') || s.includes('failed')) return 'Rejected / Dropped';
+		if (s.includes('offer') || s.includes('joined') || s.includes('boarding')) return 'Offer / Joined';
+		if (s.includes('shortlist') || s.includes('select')) return 'Shortlisted';
+		return 'In Process';
 	}
 
 
@@ -135,6 +177,14 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			key: 'offers', title: 'Offers', icon: '📋', color: '#4A2C0A', bg: '#FFF3E0', border: '#E65100',
 			desc: 'Offer pipeline — made, accepted, declined, joined', available: true
 		},
+		{
+			key: 'daily', title: 'Daily (Recruiters)', icon: '🗓️', color: '#0B5345', bg: '#E9F7EF', border: '#0E6655',
+			desc: 'New applications, status changes & pending actions — today', available: true
+		},
+		{
+			key: 'weekly', title: 'Weekly (Recruitment)', icon: '📅', color: '#7B241C', bg: '#FDEDEC', border: '#943126',
+			desc: 'Pipeline funnel, role/location breakdown & conversion — this week', available: true
+		},
 	];
 
 	// ── Render hub (card grid) ────────────────────────────────────────────
@@ -167,10 +217,17 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		if (key === 'apps_received') { showAppsReceived(); return; }
 		if (key === 'source') { showSource(); return; }
 		if (key === 'offers') { showOffers(); return; }
+		if (key === 'daily') { showDaily(); return; }
+		if (key === 'weekly') { showWeekly(); return; }
 	}
 
 	// ── Shared: show records dialog with CSV export + Frappe links ────────
-	function showRecordsDialog(title, records, headers, rowFn) {
+	// `doctype` defaults to Field Registration Form (every existing caller's
+	// records come from there) — the daily report also drills into Field
+	// Interview Schedule, so it's an optional 5th arg rather than a second
+	// near-duplicate function.
+	function showRecordsDialog(title, records, headers, rowFn, doctype) {
+		doctype = doctype || 'Field Registration Form';
 		function csvDownload() {
 			var lines = [headers.join(',')];
 			records.forEach(function(r) {
@@ -189,8 +246,8 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		var rows = records.map(function(r) {
 			var vals = rowFn(r);
 			var link = frappe.utils.get_url_to_form
-				? frappe.utils.get_url_to_form('Field Registration Form', r.name)
-				: '/app/field-registration-form/' + encodeURIComponent(r.name);
+				? frappe.utils.get_url_to_form(doctype, r.name)
+				: '/app/' + frappe.router.slug(doctype) + '/' + encodeURIComponent(r.name);
 			var cells = vals.map(function(v, i) {
 				if (i === 0) {
 					return '<td style="padding:4px 8px;white-space:nowrap;">'
@@ -1060,6 +1117,293 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 
 		$('#off-content').html(table1 + noteRow + trendTables);
 		$('#off-month').off('change').on('change', renderOffersPage);
+	}
+
+	// ── DAILY REPORT (Recruiters / Application Processing) ─────────────────
+	// Scoped to Field Registration Form + its Field Interview Schedule
+	// child records, same as every other report on this page.
+	var _dailyFieldRecs = [];
+	var _dailyInterviews = [];
+
+	function showDaily() {
+		$('#rpt-main').html(`
+			<div class="rpt-view-toolbar">
+				<button class="rpt-back" id="rpt-back">← Reports</button>
+				<span class="rpt-view-title">Daily — Recruiters &amp; Application Processing</span>
+				<span class="rpt-toolbar-label" id="daily-date-label"></span>
+				<button class="rpt-btn-refresh" id="daily-refresh">&#x21bb; Refresh</button>
+				<span class="rpt-info" id="daily-info"></span>
+			</div>
+			<div id="daily-content"><div class="rpt-loading">Loading…</div></div>
+		`);
+		$('#daily-date-label').text('Date: ' + frappe.datetime.get_today());
+		$('#rpt-back').on('click', showHub);
+		$('#daily-refresh').on('click', fetchDailyData);
+		fetchDailyData();
+	}
+
+	function fetchDailyData() {
+		$('#daily-content').html('<div class="rpt-loading">Loading…</div>');
+		var today = frappe.datetime.get_today();
+
+		frappe.call({
+			method: 'frappe.client.get_list',
+			args: {
+				doctype: 'Field Registration Form',
+				filters: [['modified', '>=', today + ' 00:00:00']],
+				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
+					'location', 'creation', 'modified'],
+				limit_page_length: 5000,
+				order_by: 'modified desc'
+			},
+			callback: function (r) {
+				_dailyFieldRecs = (r && r.message) ? r.message : [];
+				frappe.call({
+					method: 'frappe.client.get_list',
+					args: {
+						doctype: 'Field Interview Schedule',
+						filters: [['interview_date', '<=', today]],
+						fields: ['name', 'application_id', 'applicants_name', 'role', 'department',
+							'interview_date', 'interview_round', 'feedback_form'],
+						limit_page_length: 5000,
+						order_by: 'interview_date desc'
+					},
+					callback: function (r2) {
+						_dailyInterviews = (r2 && r2.message) ? r2.message : [];
+						renderDaily();
+					},
+					// Doctype may not exist / user may lack read access on some
+					// sites — the applications half of the report still stands
+					// on its own without interview data.
+					error: function () { _dailyInterviews = []; renderDaily(); }
+				});
+			},
+			error: function () {
+				$('#daily-content').html('<div class="rpt-loading">Failed to load. Please refresh.</div>');
+			}
+		});
+	}
+
+	function renderDaily() {
+		var today = frappe.datetime.get_today();
+
+		var newToday = _dailyFieldRecs.filter(function (r) {
+			return r.creation && r.creation.slice(0, 10) === today;
+		});
+		// "Changed" = touched today but not created today. There's no
+		// per-field change history available client-side (that lives in the
+		// Version doctype, one row per save with a diff blob) — the record's
+		// own modified/creation timestamps are the closest signal without a
+		// much heavier query, so this counts as an approximation, labelled
+		// as such in the drill-down title below.
+		var changedToday = _dailyFieldRecs.filter(function (r) {
+			return !(r.creation && r.creation.slice(0, 10) === today);
+		});
+		var interviewsToday = _dailyInterviews.filter(function (iv) { return iv.interview_date === today; });
+		var pendingFeedback = _dailyInterviews.filter(function (iv) { return iv.interview_date <= today && !iv.feedback_form; });
+
+		$('#daily-info').text('New: ' + newToday.length + ' | Changed: ' + changedToday.length
+			+ ' | Interviews today: ' + interviewsToday.length + ' | Feedback pending: ' + pendingFeedback.length);
+
+		function statCard(title, count, color, bg, recs, onOpen) {
+			var $c = $('<div class="rpt-card" style="cursor:' + (recs.length ? 'pointer' : 'default')
+				+ ';background:' + bg + ';border-color:' + color + ';">'
+				+ '<div class="rpt-card-title" style="color:' + color + ';font-size:26px;">' + count + '</div>'
+				+ '<div class="rpt-card-desc" style="font-size:12px;font-weight:600;color:#374151;">' + title + '</div>'
+				+ (recs.length ? '<span class="rpt-badge open">View list →</span>' : '')
+				+ '</div>');
+			if (recs.length) $c.on('click', onOpen);
+			return $c;
+		}
+
+		var $grid = $('<div class="rpt-grid" style="margin-bottom:22px;"></div>');
+		$grid.append(statCard('New Applications Today', newToday.length, '#0E6655', '#E9F7EF', newToday, function () {
+			showRecordsDialog('New Applications Today', newToday,
+				['ID', 'Full Name', 'Status', 'Role', 'Department', 'Location', 'Created'],
+				function (r) { return [r.name, r.full_name_aadhaar, r.application_status, r.role, r.department, r.location, r.creation]; });
+		}));
+		$grid.append(statCard('Status Changes Today (approx.)', changedToday.length, '#B7950B', '#FEF9E7', changedToday, function () {
+			showRecordsDialog('Status Changes Today — approx.: touched today, created earlier', changedToday,
+				['ID', 'Full Name', 'Current Status', 'Role', 'Department', 'Last Modified'],
+				function (r) { return [r.name, r.full_name_aadhaar, r.application_status, r.role, r.department, r.modified]; });
+		}));
+		$grid.append(statCard("Today's Interviews", interviewsToday.length, '#1F497D', '#EBF3FB', interviewsToday, function () {
+			showRecordsDialog("Today's Interviews", interviewsToday,
+				['ID', 'Applicant', 'Round', 'Role', 'Department', 'Interview Date'],
+				function (r) { return [r.name, r.applicants_name, r.interview_round, r.role, r.department, r.interview_date]; },
+				'Field Interview Schedule');
+		}));
+		$grid.append(statCard('Feedback Forms Pending', pendingFeedback.length, '#943126', '#FDEDEC', pendingFeedback, function () {
+			showRecordsDialog('Feedback Forms Pending — interview date reached, no feedback attached', pendingFeedback,
+				['ID', 'Applicant', 'Round', 'Role', 'Department', 'Interview Date'],
+				function (r) { return [r.name, r.applicants_name, r.interview_round, r.role, r.department, r.interview_date]; },
+				'Field Interview Schedule');
+		}));
+
+		var roleMap = {};
+		newToday.forEach(function (r) { var k = r.role || 'Unspecified'; roleMap[k] = (roleMap[k] || 0) + 1; });
+		var roleKeys = Object.keys(roleMap).sort();
+		var roleTbl = '';
+		if (roleKeys.length) {
+			var roleRows = roleKeys.map(function (k) {
+				return '<tr><td class="col-src">' + k + '</td><td class="col-num">' + roleMap[k] + '</td></tr>';
+			}).join('');
+			roleTbl = '<div style="font-weight:700;font-size:13px;color:#0E6655;margin:6px 0;">New Applications Today — by Role</div>'
+				+ '<div class="rpt-tbl-wrap" style="max-height:none;"><table class="rpt-tbl">'
+				+ '<thead><tr><th class="col-src" style="background:#1F497D;color:#fff;">Role</th>'
+				+ '<th style="background:#1F497D;color:#fff;">Count</th></tr></thead>'
+				+ '<tbody>' + roleRows + '</tbody></table></div>';
+		}
+
+		$('#daily-content').html('');
+		$('#daily-content').append($grid);
+		$('#daily-content').append(roleTbl);
+	}
+
+	// ── WEEKLY REPORT (Recruitment Reporting) ───────────────────────────────
+	var _weeklyThisRecs = [];
+	var _weeklyLastRecs = [];
+
+	function showWeekly() {
+		var thisWk = getWeekBounds(0);
+		$('#rpt-main').html(`
+			<div class="rpt-view-toolbar">
+				<button class="rpt-back" id="rpt-back">← Reports</button>
+				<span class="rpt-view-title">Weekly — Recruitment Reporting</span>
+				<span class="rpt-toolbar-label" id="weekly-range-label"></span>
+				<button class="rpt-btn-refresh" id="weekly-refresh">&#x21bb; Refresh</button>
+				<span class="rpt-info" id="weekly-info"></span>
+			</div>
+			<div id="weekly-content"><div class="rpt-loading">Loading…</div></div>
+		`);
+		$('#weekly-range-label').text('Week: ' + fmtDate(thisWk.from) + ' to ' + fmtDate(thisWk.to) + ' (Mon–Sun)');
+		$('#rpt-back').on('click', showHub);
+		$('#weekly-refresh').on('click', fetchWeeklyData);
+		fetchWeeklyData();
+	}
+
+	function fetchWeeklyData() {
+		$('#weekly-content').html('<div class="rpt-loading">Loading…</div>');
+		var thisWk = getWeekBounds(0);
+		var lastWk = getWeekBounds(-1);
+
+		frappe.call({
+			method: 'frappe.client.get_list',
+			args: {
+				doctype: 'Field Registration Form',
+				filters: [
+					['creation', '>=', fmtDate(lastWk.from) + ' 00:00:00'],
+					['creation', '<=', fmtDate(thisWk.to) + ' 23:59:59'],
+				],
+				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
+					'location', 'native_state', 'creation', 'modified'],
+				limit_page_length: 10000,
+				order_by: 'creation asc'
+			},
+			callback: function (r) {
+				var all = (r && r.message) ? r.message : [];
+				var thisFrom = fmtDate(thisWk.from), thisTo = fmtDate(thisWk.to) + ' 23:59:59';
+				var lastFrom = fmtDate(lastWk.from), lastTo = fmtDate(lastWk.to) + ' 23:59:59';
+				_weeklyThisRecs = all.filter(function (rec) { return rec.creation >= thisFrom && rec.creation <= thisTo; });
+				_weeklyLastRecs = all.filter(function (rec) { return rec.creation >= lastFrom && rec.creation <= lastTo; });
+				renderWeekly();
+			},
+			error: function () {
+				$('#weekly-content').html('<div class="rpt-loading">Failed to load. Please refresh.</div>');
+			}
+		});
+	}
+
+	function renderWeekly() {
+		// ── Funnel: this week vs last week ──
+		var thisFunnel = {}, lastFunnel = {};
+		FUNNEL_STAGES.forEach(function (s) { thisFunnel[s] = 0; lastFunnel[s] = 0; });
+		_weeklyThisRecs.forEach(function (r) { thisFunnel[getFunnelStage(r.application_status)]++; });
+		_weeklyLastRecs.forEach(function (r) { lastFunnel[getFunnelStage(r.application_status)]++; });
+
+		var funnelRows = FUNNEL_STAGES.map(function (s) {
+			var t = thisFunnel[s], l = lastFunnel[s], delta = t - l;
+			var deltaStr = delta > 0 ? ('+' + delta) : (delta < 0 ? String(delta) : '—');
+			var deltaColor = delta > 0 ? '#0E6655' : (delta < 0 ? '#943126' : '#6b7280');
+			return '<tr><td class="col-src">' + s + '</td>'
+				+ '<td class="col-num">' + t + '</td>'
+				+ '<td class="col-num">' + l + '</td>'
+				+ '<td class="col-num" style="color:' + deltaColor + ';font-weight:700;">' + deltaStr + '</td></tr>';
+		}).join('');
+		var totalDelta = _weeklyThisRecs.length - _weeklyLastRecs.length;
+		var funnelTbl = '<div style="font-weight:700;font-size:13px;color:#7B241C;margin:6px 0;">Pipeline Funnel — This Week vs Last Week</div>'
+			+ '<div class="rpt-tbl-wrap" style="max-height:none;margin-bottom:20px;"><table class="rpt-tbl">'
+			+ '<thead><tr><th class="col-src" style="background:#1F497D;color:#fff;">Stage</th>'
+			+ '<th style="background:#1F497D;color:#fff;">This Week</th><th style="background:#1F497D;color:#fff;">Last Week</th>'
+			+ '<th style="background:#1F497D;color:#fff;">Δ</th></tr></thead><tbody>' + funnelRows
+			+ '<tr style="font-weight:700;"><td class="col-src" style="background:#D9D9D9;">Total</td>'
+			+ '<td class="col-num" style="background:#D9D9D9;">' + _weeklyThisRecs.length + '</td>'
+			+ '<td class="col-num" style="background:#D9D9D9;">' + _weeklyLastRecs.length + '</td>'
+			+ '<td class="col-num" style="background:#D9D9D9;">' + (totalDelta > 0 ? '+' : '') + totalDelta + '</td></tr>'
+			+ '</tbody></table></div>';
+
+		// ── Role / location breakdown — this week ──
+		var rl = {}, locSet = {};
+		_weeklyThisRecs.forEach(function (r) {
+			var role = r.role || 'Unspecified';
+			var loc = getState(r) || 'Unspecified';
+			locSet[loc] = true;
+			rl[role] = rl[role] || {};
+			rl[role][loc] = (rl[role][loc] || 0) + 1;
+		});
+		var locs = Object.keys(locSet).sort();
+		var roles = Object.keys(rl).sort();
+		var rlTbl = '';
+		if (roles.length) {
+			var rlHead = '<th class="col-src" style="background:#1F497D;color:#fff;">Role</th>'
+				+ locs.map(function (l) { return '<th style="background:#1F497D;color:#fff;">' + l + '</th>'; }).join('')
+				+ '<th style="background:#2a5fa0;color:#fff;">Total</th>';
+			var rlBody = roles.map(function (role) {
+				var rowTotal = 0;
+				var cells = locs.map(function (l) {
+					var c = rl[role][l] || 0; rowTotal += c;
+					return '<td class="col-num">' + (c || '') + '</td>';
+				}).join('');
+				return '<tr><td class="col-src">' + role + '</td>' + cells
+					+ '<td class="col-num" style="background:#EEF4FB;font-weight:700;">' + rowTotal + '</td></tr>';
+			}).join('');
+			rlTbl = '<div style="font-weight:700;font-size:13px;color:#7B241C;margin:6px 0;">Role / Location Breakdown — This Week</div>'
+				+ '<div class="rpt-tbl-wrap" style="max-height:none;margin-bottom:20px;"><table class="rpt-tbl">'
+				+ '<thead><tr>' + rlHead + '</tr></thead><tbody>' + rlBody + '</tbody></table></div>';
+		}
+
+		// ── Conversion & turnaround — this week ──
+		var applied = _weeklyThisRecs.length;
+		var pastCvStage = _weeklyThisRecs.filter(function (r) {
+			var st = getFunnelStage(r.application_status);
+			return st === 'Shortlisted' || st === 'In Process' || st === 'Offer / Joined';
+		}).length;
+		var convRate = applied ? (pastCvStage / applied * 100).toFixed(1) + '%' : '—';
+
+		// Same touched-vs-created approximation as the daily report's
+		// "Status Changes" — average days between creation and last
+		// modification, for applications that have moved past the initial
+		// Applied/Pending bucket.
+		var moved = _weeklyThisRecs.filter(function (r) { return getFunnelStage(r.application_status) !== 'Applied / Pending'; });
+		var totalDays = 0, n = 0;
+		moved.forEach(function (r) {
+			if (!r.creation || !r.modified) return;
+			var days = (new Date(r.modified) - new Date(r.creation)) / 86400000;
+			if (days >= 0) { totalDays += days; n++; }
+		});
+		var avgTurnaround = n ? (totalDays / n).toFixed(1) + ' days' : '—';
+
+		var convCards = '<div class="rpt-grid" style="margin-bottom:20px;">'
+			+ '<div class="rpt-card" style="cursor:default;background:#EBF3FB;border-color:#1F497D;">'
+			+ '<div class="rpt-card-title" style="color:#1F497D;font-size:24px;">' + convRate + '</div>'
+			+ '<div class="rpt-card-desc" style="font-weight:600;">Conversion rate — moved past CV stage, this week</div></div>'
+			+ '<div class="rpt-card" style="cursor:default;background:#FDEDEC;border-color:#943126;">'
+			+ '<div class="rpt-card-title" style="color:#943126;font-size:24px;">' + avgTurnaround + '</div>'
+			+ '<div class="rpt-card-desc" style="font-weight:600;">Avg. turnaround (approx.) for applications that moved</div></div>'
+			+ '</div>';
+
+		$('#weekly-info').text('This week: ' + _weeklyThisRecs.length + ' applications | Last week: ' + _weeklyLastRecs.length);
+		$('#weekly-content').html(funnelTbl + rlTbl + convCards);
 	}
 
 	// ── Initial render ────────────────────────────────────────────────────
