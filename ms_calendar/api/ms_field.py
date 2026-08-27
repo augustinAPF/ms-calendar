@@ -3551,19 +3551,24 @@ SUB_COLS = ["RP", "ST", "HL", "LH", "Total"]
 
 
 def _fov_get_col(role, department):
+    # Mirrors the same fix applied to getCol() in field_over_all_dashb.js —
+    # exact-match here missed real values like "Health - Field",
+    # "Livelihoods - Field", "School Teacher - Barmer", etc. and dropped
+    # those records from the export entirely. Substring match instead,
+    # department checked first since it's the more reliable field.
     dept = (department or "").lower().strip()
-    if dept == "health":
+    if "health" in dept:
         return "HL"
-    if dept in ("livelihood", "livelihoods"):
+    if "livelihood" in dept:
         return "LH"
-    if role == "School Teacher":
+    if "teacher" in dept:
         return "ST"
-    if role in (
-        "Resource Person",
-        "District Resource Person",
-        "Cluster Resource Person",
-        "Associate Resource Person",
-    ):
+    if "resource person" in dept:
+        return "RP"
+    role = (role or "").lower()
+    if "teacher" in role:
+        return "ST"
+    if "resource person" in role:
         return "RP"
     return None
 
@@ -3582,34 +3587,32 @@ def download_field_overall_excel(from_date=None, to_date=None):
     if to_date:
         filters.append(["creation", "<=", to_date + " 23:59:59"])
 
-    try:
-        records = frappe.db.sql(
-            """
-            SELECT native_state, role, department, location, worklocation,
-                   application_status, creation
-            FROM `tabField Registration Form1`
-            WHERE docstatus != 2
-            {date_filters}
-            """.format(
-                date_filters=(
-                    ("AND creation >= %(fd)s" if from_date else "")
-                    + (" AND creation <= %(td)s" if to_date else "")
-                )
-            ),
-            {
-                "fd": from_date + " 00:00:00" if from_date else None,
-                "td": to_date + " 23:59:59" if to_date else None,
-            },
-            as_dict=True,
-        )
-    except Exception:
-        # fallback to Field Registration Form if Form1 doesn't exist
-        records = frappe.db.sql(
-            """SELECT native_state, role, department, location, worklocation,
-                      application_status, creation
-               FROM `tabField Registration Form` WHERE docstatus != 2""",
-            as_dict=True,
-        )
+    # NOTE: this used to query `tabField Registration Form1` — a leftover
+    # duplicate doctype with a single test record — instead of the real
+    # `tabField Registration Form` table (120,175 records on production).
+    # Because that table exists, the query never raised, so the except
+    # fallback below (which had the right table but silently dropped the
+    # from/to date filters) never ran either. Every export came back
+    # almost empty. Fixed to query the real table directly, with filters.
+    records = frappe.db.sql(
+        """
+        SELECT native_state, role, department, location, worklocation,
+               application_status, creation
+        FROM `tabField Registration Form`
+        WHERE docstatus != 2
+        {date_filters}
+        """.format(
+            date_filters=(
+                ("AND creation >= %(fd)s" if from_date else "")
+                + (" AND creation <= %(td)s" if to_date else "")
+            )
+        ),
+        {
+            "fd": from_date + " 00:00:00" if from_date else None,
+            "td": to_date + " 23:59:59" if to_date else None,
+        },
+        as_dict=True,
+    )
 
     april_1 = date_cls(date_cls.today().year, 4, 1)
 
@@ -3992,24 +3995,17 @@ def download_school_teacher_excel(from_date=None, to_date=None, schools=None):
         params.extend(_school_list)
 
     where_clause = " AND ".join(conditions)
-    table = "tabField Registration Form1"
-    try:
-        rows = frappe.db.sql(
-            "SELECT `written_subject`, `application_status` FROM `{0}` WHERE {1}".format(
-                table, where_clause
-            ),
-            params,
-            as_dict=True,
-        )
-    except Exception:
-        table = "tabField Registration Form"
-        rows = frappe.db.sql(
-            "SELECT `written_subject`, `application_status` FROM `{0}` WHERE {1}".format(
-                table, where_clause
-            ),
-            params,
-            as_dict=True,
-        )
+    # Same wrong-table bug as download_field_overall_excel above: this
+    # queried `tabField Registration Form1` (1 leftover test record) and
+    # only fell back to the real `tabField Registration Form` table if
+    # that query raised — which it never did, since the table exists.
+    rows = frappe.db.sql(
+        "SELECT `written_subject`, `application_status` FROM `tabField Registration Form` WHERE {0}".format(
+            where_clause
+        ),
+        params,
+        as_dict=True,
+    )
 
     # Collect unique subjects
     subj_seen = set()
