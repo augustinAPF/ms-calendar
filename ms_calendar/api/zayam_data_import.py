@@ -793,6 +793,20 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
 
     try:
         frappe.set_user(user)
+        # Frappe core's own throttle_user_creation() (frappe/core/doctype/
+        # user/user.py) throws "Throttled" once more than throttle_user_limit
+        # (default 60) User accounts are created within a 60s window — an
+        # anti-abuse guard against interactive signup spam. It already has a
+        # bypass for exactly this situation (frappe.flags.in_import), which
+        # Frappe's own core Data Import tool sets for this same reason, but
+        # this importer never did — so every row whose after_insert hook
+        # provisions a portal User for the new applicant started failing
+        # outright (not just slowly) the moment the batch crossed ~60 new
+        # rows in under a minute. Confirmed via a live 23,945-row Cloud run
+        # where every single row failed with "Throttled" once volume ramped
+        # up. Set for the whole job the same way frappe.set_user(user) above
+        # already is.
+        frappe.flags.in_import = True
         config = _build_config(doctype)
         match_field = config["match_field"]
         display_field = config["display_field"]
