@@ -183,3 +183,90 @@ def run_as_report():
     """
     frappe.only_for("System Manager")
     return run()
+
+
+def fix_prefix_mismatches(dry_run=True):
+    """Repairs every `prefix_mismatch` record run() finds: the field's own
+    url (its /private/ vs /files/ prefix) disagrees with the folder the
+    bytes actually sit in on disk — _classify() already verified this by
+    testing the filesystem directly, not by trusting either row.is_private
+    or the url. Corrects the File doc's is_private + file_url, and the
+    owning doc's Attach field, to agree with the verified-correct folder
+    (always the opposite of whatever the url currently claims — that's the
+    only way _classify would have flagged this as prefix_mismatch at all).
+    Never touches the file on disk itself — moving bytes risks a partial
+    failure mid-move, whereas flipping metadata is a single atomic,
+    trivially reversible write.
+
+    Only acts on `prefix_mismatch` (bytes exist, just filed under the
+    other folder). Leaves `physical_file_missing`/`no_file_record`
+    strictly alone — those need a real backup restore or re-upload, not a
+    metadata correction, and papering over them here would hide that.
+
+    dry_run=True (default) only reports what it would change. Pass False
+    to actually write the corrections.
+    """
+    report = run()
+    fixed, errors = [], []
+
+    for ex in report["broken_examples"]:
+        if ex["category"] != "prefix_mismatch":
+            continue
+
+        doctype, name, fieldname, url = ex["doctype"], ex["name"], ex["field"], ex["url"]
+        file_rows = frappe.get_all(
+            "File", filters={"file_url": url}, fields=["name", "file_name", "is_private"], limit=1
+        )
+        if not file_rows:
+            file_rows = frappe.get_all(
+                "File",
+                filters={
+                    "attached_to_doctype": doctype,
+                    "attached_to_name": name,
+                    "attached_to_field": fieldname,
+                },
+                fields=["name", "file_name", "is_private"],
+                order_by="creation desc",
+                limit=1,
+            )
+        if not file_rows:
+            errors.append({"doctype": doctype, "name": name, "field": fieldname, "error": "File record vanished between audit and fix"})
+            continue
+
+        row = file_rows[0]
+        # _classify determined prefix_mismatch by testing the FILESYSTEM,
+        # not by trusting row.is_private (which can itself already be wrong
+        # — that's exactly how a record ends up in this category in the
+        # first place). The verified-correct folder is always the opposite
+        # of whatever this url's own /private/ prefix claims, since
+        # _classify only returns prefix_mismatch when the url-implied path
+        # was missing on disk AND the other folder had the file. Flipping
+        # row.is_private instead of url_says_private was the earlier bug
+        # here: it left the url completely unchanged whenever is_private
+        # already agreed with the (wrong) url, so the 404 never cleared.
+        url_says_private = "/private/" in url
+        actual_is_private = not url_says_private
+        new_url = f"/private/files/{row.file_name}" if actual_is_private else f"/files/{row.file_name}"
+
+        if not dry_run:
+            frappe.db.set_value("File", row.name, {"is_private": 1 if actual_is_private else 0, "file_url": new_url})
+            frappe.db.set_value(doctype, name, fieldname, new_url, update_modified=False)
+
+        fixed.append({
+            "doctype": doctype, "name": name, "field": fieldname,
+            "file": row.name, "old_url": url, "new_url": new_url,
+            "old_is_private": row.is_private, "new_is_private": actual_is_private,
+        })
+
+    if not dry_run:
+        frappe.db.commit()
+
+    return {"dry_run": dry_run, "fixed_count": len(fixed), "fixed": fixed, "errors": errors}
+
+
+@frappe.whitelist()
+def fix_prefix_mismatches_as_report(dry_run=True):
+    frappe.only_for("System Manager")
+    if isinstance(dry_run, str):
+        dry_run = dry_run.lower() not in ("false", "0", "")
+    return fix_prefix_mismatches(dry_run=dry_run)
