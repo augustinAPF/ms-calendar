@@ -208,6 +208,7 @@ def _build_config(doctype):
     date_fields = set()
     datetime_fields = set()
     link_fields = {}
+    select_options = {}
     assignable_fields = []
     display_field = None
     resume_field = None
@@ -231,6 +232,18 @@ def _build_config(doctype):
 
         if df.fieldtype == "Link" and df.options and df.options != "DocType":
             link_fields[df.fieldname] = df.options
+
+        # A Select field's option list is fixed (unlike a Link, there's no
+        # "just create the new value" escape hatch) — a Zwayam export value
+        # not on that list fails the whole row's insert/update outright.
+        # Recording the valid set here lets the row loop below silently
+        # redirect anything unrecognised to "Others" (when the field offers
+        # one) instead of losing the row, same rationale as
+        # AR_ROW_DEFS's "Other / In Process" catch-all in reports.js.
+        if df.fieldtype == "Select" and df.options:
+            select_options[df.fieldname] = {
+                opt.strip() for opt in df.options.split("\n") if opt.strip()
+            }
 
         if (
             display_field is None
@@ -266,6 +279,7 @@ def _build_config(doctype):
         "datetime_fields": datetime_fields,
         "header_aliases": header_aliases,
         "link_fields": link_fields,
+        "select_options": select_options,
         "assignable_fields": assignable_fields,
     }
 
@@ -814,6 +828,7 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
         date_fields = config["date_fields"]
         datetime_fields = config["datetime_fields"]
         link_fields = config["link_fields"]
+        select_options = config["select_options"]
 
         file_doc = frappe.get_doc("File", {"file_url": file_url})
         sheet = _load_sheet(file_doc)
@@ -893,12 +908,31 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
                 csv_writer.writerow(["", "Skipped", "No Zayam Id"] + row_cells)
             else:
                 row_values.update(overrides)
+
+                # A Select field's option list is fixed — no "create it on
+                # the fly" escape hatch like a Link field has. A Zwayam
+                # export value not on that list (e.g. a source website the
+                # dropdown was never updated for) would otherwise fail the
+                # whole row. Redirect to "Others" when the field offers one;
+                # otherwise leave it as-is (still fails, but that's a rarer,
+                # genuinely-needs-a-look case — most of these forms do have
+                # an "Others" option, see AR_ROW_DEFS's own catch-all row in
+                # reports.js for the same idea applied to Application Status).
+                for fieldname, valid_options in select_options.items():
+                    value = row_values.get(fieldname)
+                    if value and value not in valid_options and "Others" in valid_options:
+                        row_values[fieldname] = "Others"
+
                 entry = {
                     "zayam_id": match_value,
                     "name": row_values.get(display_field),
                     "data": row_values,
                 }
                 savepoint = f"zayam_import_row_{i}"
+                # Link values created for THIS row, so a failure can undo
+                # them from link_known_values too — see the except block
+                # below for why that matters.
+                row_created_link_values = []
 
                 try:
                     frappe.db.savepoint(savepoint)
@@ -911,9 +945,7 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
                         if value and _ensure_link_value_exists(
                             target_doctype, value, link_known_values.get(target_doctype)
                         ):
-                            new_master_entries.setdefault(target_doctype, set()).add(
-                                value
-                            )
+                            row_created_link_values.append((target_doctype, value))
 
                     existing = existing_by_match_value.get(match_value)
                     if existing:
@@ -934,7 +966,31 @@ def _run_import_job(import_job_id, file_url, doctype, overrides, manual_mapping,
                         existing_by_match_value[match_value] = doc.name
                         _record_result(status, "created", entry)
                         csv_writer.writerow([match_value, "Created", ""] + row_cells)
+
+                    # Only counted as real once the row itself has actually
+                    # committed-worthy content (still inside this savepoint,
+                    # but past every point that could still throw) — a row
+                    # that fails after this never reaches here, so these
+                    # never get reported as new master entries for values
+                    # that didn't really end up persisted.
+                    for target_doctype, value in row_created_link_values:
+                        new_master_entries.setdefault(target_doctype, set()).add(value)
                 except Exception as e:
+                    # The savepoint rollback below undoes any Link records
+                    # _ensure_link_value_exists just created for this row —
+                    # but link_known_values (a plain Python set, kept in
+                    # memory for the whole job to avoid re-querying per row)
+                    # has no idea that happened. Without this, the NEXT row
+                    # referencing the same now-rolled-back value sees it in
+                    # the cache, skips recreating it, and fails for real
+                    # with "Could not find <Doctype>: <value>" — a genuinely
+                    # missing record that the cache insists already exists.
+                    # Confirmed live: an unrelated Select-field failure
+                    # later in the same row's own insert() was rolling back
+                    # an already-created Department, and every subsequent
+                    # row for that same Department failed the same way.
+                    for target_doctype, value in row_created_link_values:
+                        link_known_values.get(target_doctype, set()).discard(value)
                     # Roll back only this row (not the whole batch) so earlier
                     # successful, not-yet-committed rows in this run survive.
                     try:
