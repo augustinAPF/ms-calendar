@@ -3,10 +3,46 @@ import re
 import frappe
 
 
+# Strips anything not a word char/space/hyphen, then turns spaces into underscores.
 def _sanitize(text):
     return re.sub(r"[^\w\s-]", "", str(text or "")).strip().replace(" ", "_")
 
 
+def _resolve_available_filename(base_filename, ext, exclude_file_name, new_dir):
+    """
+    Returns a filename guaranteed not to collide with any OTHER File's
+    file_name (DB) or a real file already on disk, so a duplicate upload
+    never overwrites/replaces a file that's still in use.
+
+    base_filename is the full expected name INCLUDING ext, e.g.
+    "Nishanth_APFFRF-001_Resume.pdf". If that name is already taken by
+    some other File record (or unexpectedly already exists on disk) this
+    tries "..._Resume_01.pdf", "..._Resume_02.pdf", etc. until it finds a
+    free one. exclude_file_name lets the caller's own File record (which
+    may already be sitting at base_filename, e.g. a re-run) not count as
+    a collision against itself.
+    """
+    stem = base_filename[: -len(ext)] if ext and base_filename.endswith(ext) else base_filename
+
+    candidate = base_filename
+    suffix = 0
+    while True:
+        taken_in_db = frappe.db.exists(
+            "File", {"file_name": candidate, "name": ["!=", exclude_file_name]}
+        )
+        taken_on_disk = os.path.exists(os.path.join(new_dir, candidate))
+        if not taken_in_db and not taken_on_disk:
+            return candidate
+        suffix += 1
+        candidate = f"{stem}_{suffix:02d}{ext}"
+
+
+# Core rename engine: finds the File attached to `resume_field` on `doc`,
+# renames it (on disk + File.file_name/file_url) to
+# "<candidate_name>[_<extra_id>]_<doc.name>_<label><ext>", and points
+# `doc[resume_field]` at the new URL. Every on_*_registration/on_*_document_
+# collection function below is just this, called with that doctype's
+# specific field names.
 def _rename_resume(doc, resume_field, name_field, label="Resume", extra_id_field=None):
     resume_url = doc.get(resume_field)
     candidate_name = (doc.get(name_field) or "").strip()
@@ -36,7 +72,7 @@ def _rename_resume(doc, resume_field, name_field, label="Resume", extra_id_field
         "File", filters={"file_url": resume_url}, fields=["name", "file_name"], limit=1
     )
     if not file_docs:
-        file_docs = frappe.get_all(
+        fallback_docs = frappe.get_all(
             "File",
             filters={
                 "attached_to_doctype": doc.doctype,
@@ -45,8 +81,27 @@ def _rename_resume(doc, resume_field, name_field, label="Resume", extra_id_field
             },
             fields=["name", "file_name"],
             order_by="creation desc",
-            limit=1,
         )
+        # More than one File claims this exact doc/field with no url match
+        # to disambiguate which one is actually live — picking "most
+        # recent" here would be a guess, and guessing wrong renames the
+        # wrong physical file while writing the right-looking URL into the
+        # DB, which is exactly how a File ends up 404ing despite the
+        # database looking correct. Abort instead of guessing; the
+        # existing resume_upload/File.file_url stay untouched and the
+        # currently-live file (whichever it is) remains accessible.
+        if len(fallback_docs) > 1:
+            frappe.log_error(
+                title="Resume Rename Ambiguous",
+                message=(
+                    f"{doc.doctype} '{doc.name}' field '{resume_field}': resume_url "
+                    f"'{resume_url}' did not match any File.file_url, and {len(fallback_docs)} "
+                    f"File records are attached to this doc/field with no way to tell which "
+                    f"is live: {[d['name'] for d in fallback_docs]}. Skipping rename."
+                ),
+            )
+            return
+        file_docs = fallback_docs
     if not file_docs:
         return
 
@@ -56,8 +111,15 @@ def _rename_resume(doc, resume_field, name_field, label="Resume", extra_id_field
 
     try:
         old_path = file_doc.get_full_path()
-        new_filename = expected_filename
         new_dir = os.path.dirname(old_path)
+        # If expected_filename is already taken by a DIFFERENT File (e.g.
+        # this candidate's earlier resume, still attached and still
+        # wanted), don't overwrite/replace it — fall back to a
+        # Name_ID_Resume_01.pdf, _02.pdf, ... suffix so both files are
+        # kept and stay individually accessible.
+        new_filename = _resolve_available_filename(
+            expected_filename, ext, exclude_file_name=file_doc.name, new_dir=new_dir
+        )
         new_path = os.path.join(new_dir, new_filename)
 
         if os.path.exists(old_path):
@@ -67,6 +129,23 @@ def _rename_resume(doc, resume_field, name_field, label="Resume", extra_id_field
             # has a real file on disk — nothing to actually rename, and
             # writing metadata that points at a filename that doesn't
             # exist would recreate the exact bug this guards against.
+            return
+
+        # Verify the rename actually left a real file at new_path before
+        # writing anything to the DB — belt-and-braces alongside the
+        # exists()/rename() above, in case of a filesystem edge case
+        # (e.g. a symlink or permissions quirk) where rename() returns
+        # without raising but the destination still isn't a real file.
+        if not os.path.exists(new_path):
+            frappe.log_error(
+                title="Resume Rename Verification Failed",
+                message=(
+                    f"{doc.doctype} '{doc.name}' field '{resume_field}': renamed "
+                    f"'{old_path}' -> '{new_path}' but the destination does not exist "
+                    f"afterwards. Skipping DB update to avoid pointing resume_upload "
+                    f"at a missing file."
+                ),
+            )
             return
 
         # Sniff "/private/" from file_doc.file_url — NOT from `resume_url`
@@ -105,20 +184,12 @@ def _rename_resume(doc, resume_field, name_field, label="Resume", extra_id_field
         frappe.db.set_value(doc.doctype, doc.name, resume_field, new_url, update_modified=False)
         doc.set(resume_field, new_url)
 
-        # Clean up any other File record still claiming this exact
-        # field/doc — a leftover from an earlier interrupted rename that
-        # would otherwise sit around forever pointing at nothing.
-        for stale_name in frappe.get_all(
-            "File",
-            filters={
-                "attached_to_doctype": doc.doctype,
-                "attached_to_name": doc.name,
-                "attached_to_field": resume_field,
-                "name": ["!=", file_doc.name],
-            },
-            pluck="name",
-        ):
-            frappe.delete_doc("File", stale_name, ignore_permissions=True, force=True)
+        # Any OTHER File record still attached to this exact doc/field is
+        # left alone, deliberately — it's a file the candidate actually
+        # uploaded (a duplicate/earlier submission), not proven-safe-to-
+        # delete debris. Auto-deleting it risks removing a file someone
+        # still needs; the _resolve_available_filename() call above already
+        # keeps this rename from colliding with/overwriting it on disk.
 
     except Exception as e:
         frappe.log_error(
@@ -127,18 +198,22 @@ def _rename_resume(doc, resume_field, name_field, label="Resume", extra_id_field
         )
 
 
+# Renames Phil Registration Form's cv_attach using its name1 field. Hooked to on_update.
 def on_phil_registration(doc, method):
     _rename_resume(doc, "cv_attach", "name1")
 
 
+# Renames Field Registration Form's resume_upload using its full_name_aadhaar field. Hooked to on_update.
 def on_field_registration(doc, method):
     _rename_resume(doc, "resume_upload", "full_name_aadhaar")
 
 
+# Renames Health Registration Form's resume using its full_name field. Hooked to on_update.
 def on_health_registration(doc, method):
     _rename_resume(doc, "resume", "full_name")
 
 
+# Renames Scholarship Recruitment Form's resume__cv using its full_name_as_per_aadhar field. Hooked to on_update.
 def on_scholarship_registration(doc, method):
     _rename_resume(doc, "resume__cv", "full_name_as_per_aadhar")
 
@@ -159,6 +234,8 @@ _PHIL_DOC_COLLECTION_ATTACH_FIELDS = [
 ]
 
 
+# Renames every attach field listed in _PHIL_DOC_COLLECTION_ATTACH_FIELDS
+# on a Philanthrophy Document Collection record. Hooked to on_update.
 def on_philanthropy_document_collection(doc, method=None):
     for fieldname, label in _PHIL_DOC_COLLECTION_ATTACH_FIELDS:
         _rename_resume(doc, fieldname, "applicant_name", label=label, extra_id_field="applicant_id")
@@ -178,6 +255,8 @@ _HEALTH_DOC_COLLECTION_ATTACH_FIELDS = [
 ]
 
 
+# Renames every attach field listed in _HEALTH_DOC_COLLECTION_ATTACH_FIELDS
+# on a Health Document Collection record. Hooked to on_update.
 def on_health_document_collection(doc, method=None):
     for fieldname, label in _HEALTH_DOC_COLLECTION_ATTACH_FIELDS:
         _rename_resume(doc, fieldname, "applicant_name", label=label, extra_id_field="applicant_id")
