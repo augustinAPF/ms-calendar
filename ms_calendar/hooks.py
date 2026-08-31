@@ -650,6 +650,7 @@ doctype_list_js = {
     "Field Registration Form": "public/js/frf_list.js",
     "Phil Registration Form": "public/js/phil_registration_form_list.js",
     "Scholarship Recruitment Form": "public/js/scholarship_recruitment_form_list.js",
+    "Applicant Master": "public/js/applicant_master_list.js",
 }
 app_include_js = [
     # frf_list.js carries a manual "?v=" cache-buster: this file has no
@@ -661,6 +662,7 @@ app_include_js = [
     "/assets/ms_calendar/js/frf_list.js?v=3",
     "/assets/ms_calendar/js/phil_registration_form_list.js",
     "/assets/ms_calendar/js/scholarship_recruitment_form_list.js",
+    "/assets/ms_calendar/js/applicant_master_list.js?v=1",
     # "pathways_redirect.js" was never actually added to public/js/ (checked
     # git history — no commit ever created it), so this line 404s on every
     # single desk page load, for every user, since app_include_js is loaded

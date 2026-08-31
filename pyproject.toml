@@ -16,6 +16,15 @@ dependencies = [
 requires = ["flit_core >=3.4,<4"]
 build-backend = "flit_core.buildapi"
 
+# Required by Frappe Cloud's "Add App" validation — without this table it
+# can't tell which Frappe Framework versions this app is compatible with
+# and refuses to add it ("Could not find a compatible Frappe version in
+# pyproject.toml ... ensure '[tool.bench.frappe-dependencies]' is defined").
+# Pinned to 15.x to match the "Prod - Pathways V-15" bench this is deployed
+# to (see the commented "frappe~=15.0.0" note above, in [project.dependencies]).
+[tool.bench.frappe-dependencies]
+frappe = ">=15.0.0,<16.0.0"
+
 # These dependencies are only installed when developer mode is enabled
 [tool.bench.dev-dependencies]
 # package_name = "~=1.1.0"

@@ -140,74 +140,130 @@ def test_result_api():
             }
 
         # ------------------------------------------------------------
-        # 5️⃣ Registration form doctype
+        # 5️⃣ Route to the right result + registration doctypes by
+        # candidate ID prefix
         # ------------------------------------------------------------
+        # This webhook is shared across programs — MeritTrac sends results
+        # for both Field candidates (APFFRF-...) and Scholarship candidates
+        # (APSRF-...) to the same URL. Each program stores its registration
+        # data under a different doctype/fieldnames, and "Field MeritTrac
+        # Test Result" has a fuller schema (proctoring images, section-wise/
+        # descriptive breakdown) than "MeritTrac Test Result" (Scholarship),
+        # which doesn't have those fields at all.
+        #
         # NOTE: "Field Registration Form1" is a stale, orphaned leftover
         # doctype (not used by the Desk UI, the Zwayam importer, or anything
         # else) that happens to coexist with the real "Field Registration
         # Form" on this site. Detecting via existence-of-Form1 is wrong —
         # both can and do exist at the same time — so this is hardcoded to
         # the doctype every other part of the app actually uses.
-        _frf_doctype = "Field Registration Form"
-
-        # Look up applicant name
-        _applicant_name = (
-            frappe.db.get_value(_frf_doctype, candidate_id, "full_name_aadhaar") or ""
-        )
-
-        # ------------------------------------------------------------
-        # 6️⃣ INSERT Field MeritTrac Test Result
-        # ------------------------------------------------------------
-        test_doc = frappe.get_doc(
-            {
-                "doctype": "Field MeritTrac Test Result",
-                "applicant_id": candidate_id,
-                "applicant_name": _applicant_name,
-                "score_percentile": percentage,
-                "overall_percentage_score": percentage,
-                "attempt_id": attempt_id,
-                "assessment_id": assessment_id,
-                "attempt_status": attempt_status,
-                "score_report": report_url,
-                "tn_report": report_url,
-                "total_score": score,
-                "max_score": max_score,
-                "total_questions": total_questions,
-                "total_attempted": total_attempted,
-                "user_img_key": user_img_key,
-                "id_img_key": id_img_key,
-                "credit_score": credit_score,
-                "proctor_comment": proctor_comment,
-                "updated_at": updated_at,
-                "created_at": created_at,
-                "section_wise_score": frappe.as_json([
-                    {
-                        "section_name": section.get("name"),
-                        "score": section.get("score"),
-                        "max_score": section.get("maxScore"),
-                    }
-                    for section in section_wise_score
-                    if isinstance(section, dict)
-                ]),
-                "descriptive_response": frappe.as_json([
-                    {
-                        "question_text": resp.get("questionText"),
-                        "candidate_response": resp.get("candidateResponse"),
-                    }
-                    for resp in descriptive_response
-                    if isinstance(resp, dict)
-                ]),
+        if "APFFRF" in candidate_id:
+            result_doctype = "Field MeritTrac Test Result"
+            reg_doctype = "Field Registration Form"
+            name_field, email_field, sender_field = (
+                "full_name_aadhaar",
+                "email_address",
+                "field_mail",
+            )
+        elif "APSRF" in candidate_id:
+            result_doctype = "MeritTrac Test Result"
+            reg_doctype = "Scholarship Recruitment Form"
+            name_field, email_field, sender_field = (
+                "full_name_as_per_aadhar",
+                "email",
+                "srt_mail",
+            )
+        else:
+            frappe.local.response.http_status_code = 400
+            return {
+                "status": "error",
+                "http_status": 400,
+                "message": f"Unknown candidate ID prefix: {candidate_id}",
             }
+
+        _applicant_name = (
+            frappe.db.get_value(reg_doctype, candidate_id, name_field) or ""
         )
+
+        # ------------------------------------------------------------
+        # 6️⃣ INSERT test result
+        # ------------------------------------------------------------
+        if result_doctype == "Field MeritTrac Test Result":
+            test_doc = frappe.get_doc(
+                {
+                    "doctype": result_doctype,
+                    "applicant_id": candidate_id,
+                    "applicant_name": _applicant_name,
+                    "score_percentile": percentage,
+                    "overall_percentage_score": percentage,
+                    "attempt_id": attempt_id,
+                    "assessment_id": assessment_id,
+                    "attempt_status": attempt_status,
+                    "score_report": report_url,
+                    "tn_report": report_url,
+                    "total_score": score,
+                    "max_score": max_score,
+                    "total_questions": total_questions,
+                    "total_attempted": total_attempted,
+                    "user_img_key": user_img_key,
+                    "id_img_key": id_img_key,
+                    "credit_score": credit_score,
+                    "proctor_comment": proctor_comment,
+                    "updated_at": updated_at,
+                    "created_at": created_at,
+                    "section_wise_score": frappe.as_json([
+                        {
+                            "section_name": section.get("name"),
+                            "score": section.get("score"),
+                            "max_score": section.get("maxScore"),
+                        }
+                        for section in section_wise_score
+                        if isinstance(section, dict)
+                    ]),
+                    "descriptive_response": frappe.as_json([
+                        {
+                            "question_text": resp.get("questionText"),
+                            "candidate_response": resp.get("candidateResponse"),
+                        }
+                        for resp in descriptive_response
+                        if isinstance(resp, dict)
+                    ]),
+                }
+            )
+        else:
+            # "MeritTrac Test Result" (Scholarship) — no proctoring or
+            # section-wise/descriptive fields on this doctype.
+            test_doc = frappe.get_doc(
+                {
+                    "doctype": result_doctype,
+                    "applicant_id": candidate_id,
+                    "applicant_name": _applicant_name,
+                    "score_percentile": percentage,
+                    "attempt_id": attempt_id,
+                    "assessment_id": assessment_id,
+                    "attempt_status": attempt_status,
+                    "score_report": report_url,
+                    "total_score": score,
+                    "max_score": max_score,
+                    "total_questions": total_questions,
+                    "total_attempted": total_attempted,
+                    "updated_at": updated_at,
+                    "created_at": created_at,
+                }
+            )
         test_doc.insert(ignore_permissions=True, ignore_links=True)
 
         # ------------------------------------------------------------
-        # 7️⃣ UPDATE Field Registration Form
+        # 7️⃣ UPDATE the source registration form + notify candidate
         # ------------------------------------------------------------
+        # reg_doctype / name_field / email_field / sender_field were
+        # already picked in step 5️⃣ above, based on the same candidate ID
+        # prefix — reused here so both programs get the same status-update
+        # + email treatment, just pointed at the right doctype/fields.
         srf = frappe.db.get_value(
-            _frf_doctype,
+            reg_doctype,
             {"name": candidate_id},
-            ["name", "full_name_aadhaar", "email_address", "field_mail"],
+            ["name", name_field, email_field, sender_field],
             as_dict=True,
         )
 
@@ -228,15 +284,15 @@ def test_result_api():
         status = "Round One" if passed else "Test Reject"
 
         srf_name = srf.get("name")
-        srf_doc = frappe.get_doc(_frf_doctype, srf_name)
+        srf_doc = frappe.get_doc(reg_doctype, srf_name)
         srf_doc.application_status = status
         srf_doc.save(ignore_permissions=True)
 
-        applicant_name = srf.get("full_name_aadhaar") or "Applicant"
-        applicant_email = srf.get("email_address")
+        applicant_name = srf.get(name_field) or "Applicant"
+        applicant_email = srf.get(email_field)
         SenderEmail = (
-            srf.get("field_mail")
-            if srf.get("field_mail")
+            srf.get(sender_field)
+            if srf.get(sender_field)
             else "tech4socialsector@azimpremjifoundation.org"
         )
 
@@ -284,7 +340,7 @@ def test_result_api():
                         subject=f"Azim Premji Scholarship – Your Application, {applicant_name}",
                         message=fail_email_html,
                         delayed=False,
-                        reference_doctype=_frf_doctype,
+                        reference_doctype=reg_doctype,
                         reference_name=candidate_id,
                     )
             except Exception as mail_exc:
@@ -1150,6 +1206,11 @@ _WRITTEN_SUBJECT_OVERRIDES = {
 # unrelated record ("Special Education") by accident.
 _WRITTEN_SUBJECT_AMBIGUOUS_OVERRIDES = {
     ("School Teacher", "Early Childhood Education"): ["SA07671", "SA07948"],  # Hindi / Kannada
+    # Was falling through to "no_token_overlap" — "EVS" doesn't appear in
+    # either assessment_set's text, so the generic scorer found nothing at
+    # all. Shares the same Hindi/Kannada Set 2 pair as "Primary All
+    # subjects" per the 2026-08-31 subject-mapping sheet.
+    ("School Teacher", "Primary EVS"): ["SA07692", "SA07694"],  # Hindi / Kannada
 }
 
 # Field Role (candidate) -> Field Meritrac Assessment.role values it can match.

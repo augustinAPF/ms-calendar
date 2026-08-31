@@ -17,17 +17,31 @@ Applicant Master's descriptions but no longer exist on that form at all,
 so they're intentionally left unmapped rather than guessed at; same
 pattern shows up for Phil and Scholarship below).
 
-All four forms have a live "zayam_id" field, which is always the match key
+All four forms have a live "zayam_id" field, which is the primary match key
 into Applicant Master's "zwayam_id" field — forced explicitly in each
 mapping below rather than only relying on the description text, since
 Health Registration Form's own field description doesn't mention "Health:"
 for that field at all even though the field itself exists.
 
+Zayam Id is normally assigned by a recruiter after the fact (it isn't even
+present on the public web forms candidates fill in), so a brand new
+submission has no Zayam Id yet. Rather than skip the sync entirely until
+then, an unmatched submission falls back to matching by email address
+against any other Applicant Master row that's likewise still unmatched
+(zwayam_id == "", the explicit sentinel this sync writes for exactly this
+case — never NULL, which is what pre-existing/unrelated Applicant Master
+rows use, so this fallback can never collide with legacy data). That keeps
+re-saving the same source form before a Zayam Id exists updating the same
+row instead of piling up duplicates, and once a Zayam Id is later assigned,
+the next save "upgrades" that same fallback-matched row in place rather
+than leaving it behind as an orphan.
+
 Whenever any of these four forms is saved, its sync_<form>_to_applicant_
 master hook copies every mapped field's current value into the matching
-Applicant Master record (matched by Zwayam Id), creating one if none
-exists yet. A save on the source form is never blocked by a sync problem —
-failures are logged to Error Log instead of raised.
+Applicant Master record (matched by Zwayam Id, or by the email fallback
+above), creating one if none exists yet. A save on the source form is
+never blocked by a sync problem — failures are logged to Error Log
+instead of raised.
 """
 
 import frappe
@@ -371,7 +385,16 @@ def _sync_to_applicant_master(doc, field_mapping, source_label):
     form.
     """
     match_value = doc.get(_MATCH_FIELD_SOURCE)
-    if not match_value:
+
+    # No Zayam Id yet — fall back to this record's own email address as a
+    # match key (see module docstring). Only computed when needed: once a
+    # Zayam Id exists it's still consulted below to upgrade a prior
+    # fallback-matched row instead of leaving it as a duplicate orphan.
+    email_src_field = field_mapping.get("email_address")
+    fallback_email = doc.get(email_src_field) if email_src_field else None
+
+    if not match_value and not fallback_email:
+        # Nothing at all to key this record off of.
         return
 
     # Snapshot the message log so that if something below still fails
@@ -388,13 +411,27 @@ def _sync_to_applicant_master(doc, field_mapping, source_label):
             for am_field, src_field in field_mapping.items()
         }
         _drop_unresolvable_links(values)
-        # match_value itself is the authoritative Zwayam Id — set explicitly
-        # rather than relying solely on the mapping table above.
-        values[_MATCH_FIELD_TARGET] = match_value
 
-        existing = frappe.db.get_value(
-            "Applicant Master", {_MATCH_FIELD_TARGET: match_value}
-        )
+        if match_value:
+            # match_value itself is the authoritative Zwayam Id — set
+            # explicitly rather than relying solely on the mapping table.
+            values[_MATCH_FIELD_TARGET] = match_value
+            existing = frappe.db.get_value(
+                "Applicant Master", {_MATCH_FIELD_TARGET: match_value}
+            )
+            if not existing and fallback_email:
+                existing = frappe.db.get_value(
+                    "Applicant Master",
+                    {"email_address": fallback_email, _MATCH_FIELD_TARGET: ""},
+                )
+        else:
+            # Sentinel, not NULL — see module docstring on why that's safe.
+            values[_MATCH_FIELD_TARGET] = ""
+            existing = frappe.db.get_value(
+                "Applicant Master",
+                {"email_address": fallback_email, _MATCH_FIELD_TARGET: ""},
+            )
+
         if existing:
             target = frappe.get_doc("Applicant Master", existing)
             target.update(values)
@@ -428,3 +465,97 @@ def sync_phil_registration_to_applicant_master(doc, method=None):
 def sync_scholarship_registration_to_applicant_master(doc, method=None):
     """doc_events hook: on_update of Scholarship Recruitment Form."""
     _sync_to_applicant_master(doc, FIELD_MAPPING_SCHOLARSHIP, "Scholarship Recruitment Form")
+
+
+# ---------------------------------------------------------------------------
+# ON-DEMAND BULK BACKFILL — "Fetch All Data" button on the Applicant Master
+# list (see applicant_master_list.js). The on_update hooks above only ever
+# sync a form's own record as it's saved; this walks every existing record
+# of one chosen form and runs the same sync against each of them, for
+# candidates who registered before this sync existed (or whose Applicant
+# Master row needs rebuilding for any other reason). Safe to re-run any
+# time — every sync call is match-and-upsert, never a blind insert.
+# ---------------------------------------------------------------------------
+
+_SOURCE_DOCTYPE_SYNC_FN = {
+    "Field Registration Form": sync_field_registration_to_applicant_master,
+    "Health Registration Form": sync_health_registration_to_applicant_master,
+    "Phil Registration Form": sync_phil_registration_to_applicant_master,
+    "Scholarship Recruitment Form": sync_scholarship_registration_to_applicant_master,
+}
+
+
+@frappe.whitelist()
+def fetch_all_from_form(source_doctype):
+    """Whitelisted entry point for the "Fetch All Data" button. Queues the
+    actual work (run_backfill) on a background worker instead of running it
+    inline — a form with 1000+ records takes long enough that doing this
+    synchronously inside the HTTP request would hit the request timeout."""
+    if source_doctype not in _SOURCE_DOCTYPE_SYNC_FN:
+        frappe.throw(f"'{source_doctype}' is not one of the four registration forms.")
+
+    frappe.enqueue(
+        "ms_calendar.api.applicant_master_sync.run_backfill",
+        queue="long",
+        timeout=3600,
+        job_name=f"applicant_master_backfill::{source_doctype}",
+        source_doctype=source_doctype,
+        requesting_user=frappe.session.user,
+    )
+    return {"queued": True}
+
+
+def run_backfill(source_doctype, requesting_user=None):
+    """The actual backfill, run on a background worker (see
+    fetch_all_from_form above). Publishes progress + a final realtime event
+    so the browser that clicked the button can show a progress bar and a
+    finish summary without polling."""
+    sync_fn = _SOURCE_DOCTYPE_SYNC_FN[source_doctype]
+    names = frappe.get_all(source_doctype, pluck="name", order_by="creation asc")
+    total = len(names)
+    ok = 0
+    errors = []
+
+    for i, name in enumerate(names, start=1):
+        try:
+            doc = frappe.get_doc(source_doctype, name)
+            sync_fn(doc)
+            ok += 1
+        except Exception:
+            errors.append(f"{name}: {frappe.get_traceback()}")
+            frappe.log_error(
+                title="Applicant Master Backfill Error",
+                message=f"{source_doctype} {name}: {frappe.get_traceback()}",
+            )
+
+        if i % 20 == 0 or i == total:
+            # frappe.publish_progress() has no `user` param in this version
+            # (it just uses frappe.session.user, which a background worker
+            # may not have set to the button-clicker) — publish the same
+            # "progress" event it would, but targeted explicitly.
+            frappe.publish_realtime(
+                "progress",
+                {
+                    "percent": (i / total * 100) if total else 100,
+                    "title": f"Fetching {source_doctype} data",
+                    "description": f"{i} / {total} processed",
+                },
+                user=requesting_user,
+            )
+        if i % 100 == 0:
+            frappe.db.commit()
+
+    frappe.db.commit()
+
+    frappe.publish_realtime(
+        "applicant_master_backfill_done",
+        {
+            "source_doctype": source_doctype,
+            "total": total,
+            "ok": ok,
+            "error_count": len(errors),
+            # first few only — the rest are in Error Log (see log_error above)
+            "errors": errors[:10],
+        },
+        user=requesting_user,
+    )
