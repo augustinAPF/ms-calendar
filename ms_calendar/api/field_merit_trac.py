@@ -1271,30 +1271,46 @@ def pull_pending_merittrac_results():
                 "proctor_comment": row.get("proctorComment"),
                 "updated_at": fix_dt(row.get("updatedAt")),
                 "created_at": fix_dt(row.get("createdAt")),
-                "section_wise_score": frappe.as_json(
-                    [
-                        {
-                            "section_name": s.get("name"),
-                            "score": s.get("score"),
-                            "max_score": s.get("maxScore"),
-                        }
-                        for s in (row.get("sectionWiseScore") or [])
-                        if isinstance(s, dict)
-                    ]
-                ),
-                "descriptive_response": frappe.as_json(
-                    [
-                        {
-                            "question_text": r.get("questionText"),
-                            "candidate_response": r.get("candidateResponse"),
-                        }
-                        for r in (row.get("descriptiveResponse") or [])
-                        if isinstance(r, dict)
-                    ]
-                ),
+                # Proper child tables (Field MeritTrac Section Score /
+                # Field MeritTrac Descriptive Response) — replaced the old
+                # section_wise_score/descriptive_response Long Text JSON
+                # blob fields on 2026-09-01, per a request for the
+                # descriptive Q&A to render as separate, readable rows
+                # instead of raw JSON text on the form. Those two Long
+                # Text fields are left in the doctype (unused going
+                # forward) rather than deleted, since 5 earlier records'
+                # data was migrated out of them but nothing needs them
+                # removed.
+                "section_wise_scores": [
+                    {
+                        "section_name": s.get("name"),
+                        "score": s.get("score"),
+                        "max_score": s.get("maxScore"),
+                    }
+                    for s in (row.get("sectionWiseScore") or [])
+                    if isinstance(s, dict)
+                ],
+                "descriptive_responses": [
+                    {
+                        "question_text": r.get("questionText"),
+                        "candidate_response": r.get("candidateResponse"),
+                    }
+                    for r in (row.get("descriptiveResponse") or [])
+                    if isinstance(r, dict)
+                ],
             }
         )
-        result_doc.insert(ignore_permissions=True, ignore_links=True)
+        try:
+            result_doc.insert(ignore_permissions=True, ignore_links=True)
+        except frappe.DuplicateEntryError:
+            # attempt_id is a unique field — this only fires if another
+            # run (the scheduled poll and the finish-page trigger can
+            # legitimately overlap) already inserted this exact attempt
+            # between our dedup check above and this insert. Not an
+            # error, just lost a race; move on to the next row.
+            frappe.db.rollback()
+            already_have.add(attempt_id)
+            continue
         already_have.add(attempt_id)
         inserted += 1
 
