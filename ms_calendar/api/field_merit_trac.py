@@ -2,6 +2,7 @@ import frappe
 import hmac
 import json
 from frappe.utils import get_datetime, nowdate, add_days
+from frappe.rate_limiter import rate_limit
 from datetime import datetime, timedelta
 
 
@@ -1302,7 +1303,7 @@ def pull_pending_merittrac_results():
 
 
 @frappe.whitelist(allow_guest=True)
-@frappe.rate_limit(limit=1, seconds=15, ip_based=False)
+@rate_limit(limit=1, seconds=15, ip_based=False)
 def trigger_merittrac_results_pull_on_finish():
     """
     Fired by a tiny script on the "Thank You for Attending the Test" page
