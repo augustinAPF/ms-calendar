@@ -803,6 +803,17 @@ scheduler_events = {
 			# the once-daily mistake here.
 			"ms_calendar.api.ms_health.send_candidate_interview_reminders",
 		],
+		# MeritTrac's Field-program integration is pull-only (see the long
+		# comment on pull_pending_merittrac_results itself) — nothing calls
+		# our push webhook for Field candidates, so this has to go fetch
+		# results instead. Every minute per 2026-08-31 request (fast
+		# turnaround needed for a same-day demo) — idempotent (dedupes by
+		# attempt_id), so safe to run this often; dial back to something
+		# like */15 or */30 once that urgency passes, to go easier on a
+		# third-party API.
+		"* * * * *": [
+			"ms_calendar.api.field_merit_trac.pull_pending_merittrac_results",
+		],
 	},
 }
 

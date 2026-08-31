@@ -1157,6 +1157,179 @@ def get_merittrac_tickets(candidate_ids, start_utc, end_utc):
 
 
 # ---------------------------------------------------------------------------
+# Pull pending Field MeritTrac results
+# ---------------------------------------------------------------------------
+# MeritTrac's integration for the Field program is pull-only — there is no
+# push webhook that MeritTrac actually calls for Field candidates.
+# (Confirmed 2026-08-31: "Field MeritTrac Test Result" had 0 records despite
+# tests going back to Aug 14, while this same account's Scholarship results
+# DO arrive automatically via a separate push webhook — that's a different
+# program's integration, not this one.) MeritTrac's own API docs
+# (talent-next.com/hrms/api-docs) show the real integration point:
+# POST /hrms/get-candidates-results. This scheduled job calls that for
+# every candidate who was ever sent an online test, and records any newly
+# SUBMITTED attempt. Safe to run repeatedly — skips any attempt_id already
+# recorded, so nothing gets duplicated across runs.
+#
+# Also live on the cloud site right now as a "Scheduler Event" Server
+# Script ("Pull Pending Field MeritTrac Results", cron * * * * * — every
+# minute, per a 2026-08-31 request for fast same-day-demo turnaround; dial
+# back once that urgency passes) —
+# created there directly since deploying this .py file isn't possible from
+# here (no SSH/git access to that server). Keep both in sync if this
+# changes; the Server Script is the one actually running in production
+# until an app deploy picks this file up instead.
+def pull_pending_merittrac_results():
+    import requests as _req
+
+    candidate_ids = frappe.get_all(
+        "Field Meritrac Test URL", pluck="applicant_id", distinct=True
+    )
+    if not candidate_ids:
+        return {"checked": 0, "inserted": 0}
+
+    already_have = set(
+        frappe.get_all("Field MeritTrac Test Result", pluck="attempt_id")
+    )
+
+    cred = frappe.get_doc("MeritTrac Credentials")
+    headers = {
+        "partnerid": cred.merittrac_partner_id,
+        "secretkey": cred.merittrac_secret_key,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        resp = _merittrac_post_with_retry(
+            "https://www.talent-next.com/hrms/get-candidates-results",
+            headers,
+            {"candidateIds": candidate_ids},
+        )
+    except (_req.exceptions.ReadTimeout, _req.exceptions.ConnectionError) as exc:
+        frappe.log_error(
+            title="MERITTRAC_RESULTS_PULL_TIMEOUT",
+            message=f"Gave up after {_MERITTRAC_RETRIES + 1} attempts: {exc}",
+        )
+        return {"checked": len(candidate_ids), "inserted": 0, "error": "timeout"}
+
+    if not resp.ok:
+        frappe.log_error(
+            title="MERITTRAC_RESULTS_PULL_ERROR",
+            message=f"status={resp.status_code} body={resp.text[:800]}",
+        )
+        return {
+            "checked": len(candidate_ids),
+            "inserted": 0,
+            "error": f"http_{resp.status_code}",
+        }
+
+    rows = (resp.json() or {}).get("data") or []
+
+    def fix_dt(iso):
+        if not iso:
+            return None
+        return iso.replace("T", " ").split(".")[0]
+
+    inserted = 0
+    for row in rows:
+        if not isinstance(row, dict) or row.get("attempt_status") != "SUBMITTED":
+            continue
+
+        attempt_id = row.get("attemptId")
+        if not attempt_id or attempt_id in already_have:
+            continue
+
+        candidate_id = row.get("candidateId")
+        applicant_name = (
+            frappe.db.get_value(
+                "Field Registration Form", candidate_id, "full_name_aadhaar"
+            )
+            or ""
+        )
+        percentage = row.get("overAllPercentageScore")
+
+        result_doc = frappe.get_doc(
+            {
+                "doctype": "Field MeritTrac Test Result",
+                "applicant_id": candidate_id,
+                "applicant_name": applicant_name,
+                "score_percentile": percentage,
+                "overall_percentage_score": percentage,
+                "attempt_id": attempt_id,
+                "assessment_id": row.get("assessmentId"),
+                "attempt_status": row.get("attempt_status"),
+                "score_report": row.get("TnReport"),
+                "tn_report": row.get("TnReport"),
+                "total_score": row.get("score"),
+                "max_score": row.get("maxScore"),
+                "total_questions": row.get("totalQuestion"),
+                "total_attempted": row.get("totalAttempted"),
+                "user_img_key": row.get("userImgKey"),
+                "id_img_key": row.get("idImgKey"),
+                "credit_score": row.get("creditScore"),
+                "proctor_comment": row.get("proctorComment"),
+                "updated_at": fix_dt(row.get("updatedAt")),
+                "created_at": fix_dt(row.get("createdAt")),
+                "section_wise_score": frappe.as_json(
+                    [
+                        {
+                            "section_name": s.get("name"),
+                            "score": s.get("score"),
+                            "max_score": s.get("maxScore"),
+                        }
+                        for s in (row.get("sectionWiseScore") or [])
+                        if isinstance(s, dict)
+                    ]
+                ),
+                "descriptive_response": frappe.as_json(
+                    [
+                        {
+                            "question_text": r.get("questionText"),
+                            "candidate_response": r.get("candidateResponse"),
+                        }
+                        for r in (row.get("descriptiveResponse") or [])
+                        if isinstance(r, dict)
+                    ]
+                ),
+            }
+        )
+        result_doc.insert(ignore_permissions=True, ignore_links=True)
+        already_have.add(attempt_id)
+        inserted += 1
+
+    frappe.db.commit()
+    return {"checked": len(candidate_ids), "fetched": len(rows), "inserted": inserted}
+
+
+@frappe.whitelist(allow_guest=True)
+@frappe.rate_limit(limit=1, seconds=15, ip_based=False)
+def trigger_merittrac_results_pull_on_finish():
+    """
+    Fired by a tiny script on the "Thank You for Attending the Test" page
+    (Web Page "test-completed-field", route assessment-finished-field) the
+    moment a candidate lands there right after submitting — gets the
+    result recorded far faster than waiting for the next scheduled poll,
+    without needing MeritTrac to actually push (see the long comment on
+    pull_pending_merittrac_results above — that has still never happened
+    for the Field program).
+
+    Public/guest page hits this, so it's rate-limited globally (not per
+    IP — many different candidates finishing around the same time should
+    still only trigger one pull, not one each) rather than trusting every
+    visitor to be well-behaved. Runs the pull in the background so a
+    slow/failed MeritTrac call never blocks or errors the candidate's
+    page — the fetch() that calls this is fire-and-forget from the page's
+    side regardless.
+    """
+    frappe.enqueue(
+        "ms_calendar.api.field_merit_trac.pull_pending_merittrac_results",
+        queue="short",
+        job_name="merittrac_results_pull_on_finish",
+    )
+    return {"queued": True}
+
+
+# ---------------------------------------------------------------------------
 # Auto-suggest the Field Meritrac Assessment matching a candidate's subject
 # ---------------------------------------------------------------------------
 
