@@ -1384,6 +1384,11 @@ _WRITTEN_SUBJECT_OVERRIDES = {
     # so it doesn't even earn the level-word point the Primary record gets.
     # Confirmed live via the Initiate Test dialog on 2026-08-18.
     ("School Teacher", "Upper Primary English"): "SA07741",
+    # No dedicated Sanskrit paper exists — SA08071 is actually labeled
+    # "UP_Hindi Set 1", a deliberate stand-in reuse, not a mismatch.
+    # Confirmed live via the Initiate Test dialog on 2026-09-01 (manually
+    # picked SA08071 for an unmatched "Upper Primary Sanskrit" candidate).
+    ("School Teacher", "Upper Primary Sanskrit"): "SA08071",
 }
 
 # Subjects with more than one genuinely valid SA number, where the form has
