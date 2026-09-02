@@ -20,6 +20,7 @@
   "unit",
   "department",
   "designation",
+  "school",
   "theme",
   "geo",
   "column_break_dxpv",
@@ -108,6 +109,13 @@
    "fieldtype": "Link",
    "label": "Designation",
    "options": "Recruitment Designation"
+  },
+  {
+   "description": "Determines which Subjects are offered to candidates on the Job Application Webform for this opening.",
+   "fieldname": "school",
+   "fieldtype": "Link",
+   "label": "School",
+   "options": "School"
   },
   {
    "fieldname": "theme",

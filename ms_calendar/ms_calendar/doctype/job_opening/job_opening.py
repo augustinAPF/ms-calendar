@@ -30,6 +30,7 @@ class JobOpening(WebsiteGenerator):
         lower_range: DF.Currency
         posted_on: DF.Datetime | None
         publish: DF.Check
+        school: DF.Link | None
         publish_applications_received: DF.Check
         publish_salary_range: DF.Check
         route: DF.Data | None
@@ -78,6 +79,8 @@ class JobOpening(WebsiteGenerator):
             params["geo"] = self.geo
         if getattr(self, "job_code", None):
             params["job_code"] = self.job_code
+        if getattr(self, "school", None):
+            params["school"] = self.school
         if getattr(self, "preferred_location", None) and self.location and "/" in self.location:
             options = [part.strip() for part in self.location.split("/") if part.strip()]
             if options:
