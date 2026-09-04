@@ -7,7 +7,8 @@
  "engine": "InnoDB",
  "field_order": [
   "school_name",
-  "subjects"
+  "subjects",
+  "test_locations"
  ],
  "fields": [
   {
@@ -23,11 +24,17 @@
    "fieldtype": "Table",
    "label": "Subjects",
    "options": "School Subject"
+  },
+  {
+   "fieldname": "test_locations",
+   "fieldtype": "Table",
+   "label": "Test Locations",
+   "options": "School Test Location"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-02 00:00:00.000000",
+ "modified": "2026-09-04 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Ms Calendar",
  "name": "School",
