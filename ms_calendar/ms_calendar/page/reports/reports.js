@@ -44,6 +44,24 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 	}
 
+	// Monday of the Mon–Sun week containing `d` — used by the School
+	// Teacher week-wise report to bucket records, same Monday-start
+	// convention as getWeekBounds() above.
+	function stwMondayOf(d) {
+		var day = d.getDay();
+		var diff = (day === 0 ? -6 : 1 - day);
+		var m = new Date(d);
+		m.setDate(d.getDate() + diff);
+		m.setHours(0, 0, 0, 0);
+		return m;
+	}
+	function stwWeekLabel(mondayDate) {
+		var sunday = new Date(mondayDate);
+		sunday.setDate(mondayDate.getDate() + 6);
+		var f = function (d) { return String(d.getDate()).padStart(2, '0') + ' ' + d.toLocaleString('en', { month: 'short' }); };
+		return f(mondayDate) + ' – ' + f(sunday);
+	}
+
 	// Coarse funnel bucketing for the ~90 distinct application_status values
 	// this doctype allows — same rationale as AR_ROW_DEFS's "Other / In
 	// Process" catch-all below: naming every status explicitly isn't
@@ -139,6 +157,12 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		.ar-month-item { display:flex; align-items:center; gap:6px; padding:4px 10px;
 			font-size:12px; color:#374151; cursor:pointer; border-radius:4px; }
 		.ar-month-item:hover { background:#f3f4f6; }
+		/* ── Records drill-down dialog: full screen ── */
+		.rec-dlg-fullscreen { width:96vw !important; max-width:96vw !important;
+			height:92vh; margin:4vh auto !important; }
+		.rec-dlg-fullscreen .modal-content { height:92vh; display:flex; flex-direction:column; }
+		.rec-dlg-fullscreen .modal-body { flex:1 1 auto; overflow:auto; }
+		.rec-dlg-fullscreen .modal-header,.rec-dlg-fullscreen .modal-footer { flex:0 0 auto; }
 		.ar-month-item input { cursor:pointer; accent-color:#1F497D; }
 	</style>
 	<div class="rpt-wrap" id="rpt-main"></div>`);
@@ -185,6 +209,14 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			key: 'weekly', title: 'Weekly (Recruitment)', icon: '📅', color: '#7B241C', bg: '#FDEDEC', border: '#943126',
 			desc: 'Pipeline funnel, role/location breakdown & conversion — this week', available: true
 		},
+		{
+			key: 'st_weekly', title: 'School Teacher — Week wise', icon: '🏫', color: '#6D4C00', bg: '#FFF3D6', border: '#F5A623',
+			desc: 'Week-by-week (Mon–Sun) application breakdown for School Teacher, by stage', available: true
+		},
+		{
+			key: 'st_district', title: 'School Teacher — District Funnel', icon: '📌', color: '#7D4F00', bg: '#FFF8E1', border: '#F5A623',
+			desc: 'District-wise full funnel — CV, Test, Recruiter/Subject/Demo/Leader Rounds', available: true
+		},
 	];
 
 	// ── Render hub (card grid) ────────────────────────────────────────────
@@ -219,6 +251,8 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		if (key === 'offers') { showOffers(); return; }
 		if (key === 'daily') { showDaily(); return; }
 		if (key === 'weekly') { showWeekly(); return; }
+		if (key === 'st_weekly') { showSTWeekly(); return; }
+		if (key === 'st_district') { showSTDistrictFunnel(); return; }
 	}
 
 	// ── Shared: show records dialog with CSV export + Frappe links ────────
@@ -273,9 +307,17 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			+ '<button id="rec-print-btn" style="padding:5px 14px;background:#1e40af;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;">🖨 Print / PDF</button>'
 			+ '<span style="font-size:11px;color:#6b7280;">Click ID to open in Frappe</span>'
 			+ '</div>'
-			+ '<div style="overflow:auto;max-height:420px;">' + tbl + '</div>';
+			+ '<div style="overflow:auto;">' + tbl + '</div>';
 
-		var d = frappe.msgprint({ title: title + ' (' + records.length + ')', wide: true, message: html });
+		// Full-screen dialog (not frappe.msgprint, which caps at "wide" —
+		// the drill-down tables can run 15-20+ columns and need real room).
+		var d = new frappe.ui.Dialog({
+			title: title + ' (' + records.length + ')',
+			size: 'extra-large'
+		});
+		d.$body.html(html);
+		d.$wrapper.find('.modal-dialog').addClass('rec-dlg-fullscreen');
+		d.show();
 
 		// Bind buttons after dialog renders
 		setTimeout(function() {
@@ -1404,6 +1446,438 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 
 		$('#weekly-info').text('This week: ' + _weeklyThisRecs.length + ' applications | Last week: ' + _weeklyLastRecs.length);
 		$('#weekly-content').html(funnelTbl + rlTbl + convCards);
+	}
+
+	// ── SCHOOL TEACHER — WEEK WISE REPORT ───────────────────────────────────
+	// Applications Received's month-wise idea, narrowed to one role (School
+	// Teacher, matched the same substring way getCol() does everywhere else
+	// on this page) and re-bucketed by Mon–Sun week instead of financial-year
+	// month — a dedicated, self-contained report rather than a parameterised
+	// variant of showAppsReceived(), same "each report owns its own state"
+	// pattern the rest of this file already follows.
+	var _stwAllRecs = [];
+	var _stwData = {};   // { weekLabel: { app_received, cv_shortlist, cv_regret, cv_pending, other_process, __sortKey } }
+	var _stwWeeks = [];  // week labels, oldest → newest
+
+	function showSTWeekly() {
+		$('#rpt-main').html(`
+			<div class="rpt-view-toolbar">
+				<button class="rpt-back" id="rpt-back">← Reports</button>
+				<span class="rpt-view-title">School Teacher — Week wise</span>
+				<span class="rpt-toolbar-label">From:</span>
+				<input type="date" class="rpt-toolbar-date" id="stw-from" />
+				<span class="rpt-toolbar-label">To:</span>
+				<input type="date" class="rpt-toolbar-date" id="stw-to" />
+				<select class="rpt-toolbar-date" id="stw-state" style="min-width:120px;"><option value="">All States</option></select>
+				<button class="rpt-btn-refresh" id="stw-refresh">&#x21bb; Refresh</button>
+				<span class="rpt-info" id="stw-info"></span>
+			</div>
+			<div class="rpt-tbl-wrap" id="stw-tbl-wrap"><div class="rpt-loading">Loading…</div></div>
+		`);
+
+		// Default: last 8 weeks — a week-wise view is for recent activity,
+		// not a full financial year (that'd be ~52 rows, same table other
+		// reports avoid by grouping into months/quarters instead).
+		(function () {
+			var to = new Date();
+			var from = new Date(to);
+			from.setDate(from.getDate() - 7 * 7);
+			$('#stw-from').val(fmtDate(from));
+			$('#stw-to').val(fmtDate(to));
+		})();
+
+		$('#rpt-back').on('click', showHub);
+		$('#stw-refresh').on('click', fetchSTWeeklyData);
+		$('#stw-state').on('change', renderSTWeeklyBody);
+		fetchSTWeeklyData();
+	}
+
+	function fetchSTWeeklyData() {
+		$('#stw-tbl-wrap').html('<div class="rpt-loading">Loading…</div>');
+		var from = $('#stw-from').val() || '';
+		var to = $('#stw-to').val() || '';
+		var filters = [];
+		if (from) filters.push(['creation', '>=', from + ' 00:00:00']);
+		if (to) filters.push(['creation', '<=', to + ' 23:59:59']);
+
+		frappe.call({
+			method: 'frappe.client.get_list',
+			args: {
+				doctype: 'Field Registration Form',
+				filters: filters,
+				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
+					'location', 'worklocation', 'native_state', 'native_district', 'creation'],
+				limit_page_length: 10000,
+				order_by: 'creation asc'
+			},
+			callback: function (r) {
+				var all = (r && r.message) ? r.message : [];
+				// School Teacher only — getCol() already handles the
+				// region-suffixed variants ("School Teacher - Barmer" etc.)
+				// the same way every other report on this page does.
+				_stwAllRecs = all.filter(function (rec) { return getCol(rec.role) === 'ST'; });
+				$('#stw-info').text('School Teacher records: ' + _stwAllRecs.length + ' | Date: ' + frappe.datetime.now_date());
+
+				var stSet = {};
+				_stwAllRecs.forEach(function (rec) { var st = getState(rec); if (st) stSet[st] = true; });
+				var $st = $('#stw-state').empty().append('<option value="">All States</option>');
+				Object.keys(stSet).sort().forEach(function (v) { $st.append('<option value="' + v + '">' + v + '</option>'); });
+
+				renderSTWeeklyBody();
+			},
+			error: function () {
+				$('#stw-tbl-wrap').html('<div class="rpt-loading">Failed to load. Please refresh.</div>');
+			}
+		});
+	}
+
+	function renderSTWeeklyBody() {
+		var selState = $('#stw-state').val() || '';
+		var recs = selState
+			? _stwAllRecs.filter(function (r) { return getState(r) === selState; })
+			: _stwAllRecs;
+
+		_stwData = {};
+		recs.forEach(function (r) {
+			if (!r.creation) return;
+			var monday = stwMondayOf(new Date(r.creation));
+			var wl = stwWeekLabel(monday);
+			if (!_stwData[wl]) {
+				_stwData[wl] = mkRow();
+				_stwData[wl].__sortKey = monday.getTime();
+			}
+			var status = (r.application_status || '').trim();
+			_stwData[wl].app_received++;
+			// Same three named buckets + catch-all as Applications
+			// Received's AR_STATUS_KEYS/AR_ROW_DEFS — kept in sync with
+			// that single source of truth rather than re-listing statuses.
+			if (AR_STATUS_KEYS.cv_shortlist.includes(status)) _stwData[wl].cv_shortlist++;
+			else if (AR_STATUS_KEYS.cv_regret.includes(status)) _stwData[wl].cv_regret++;
+			else if (AR_STATUS_KEYS.cv_pending.includes(status)) _stwData[wl].cv_pending++;
+			else _stwData[wl].other_process++;
+		});
+		_stwWeeks = Object.keys(_stwData).sort(function (a, b) { return _stwData[a].__sortKey - _stwData[b].__sortKey; });
+
+		if (!_stwWeeks.length) {
+			$('#stw-tbl-wrap').html('<div class="rpt-loading">No School Teacher applications in this range.</div>');
+			return;
+		}
+
+		var thead = '<thead><tr>'
+			+ '<th class="col-month" style="background:#1F497D;color:#fff;">Week (Mon–Sun)</th>'
+			+ '<th style="background:#DDEEFF;">Applications Received</th>'
+			+ '<th style="background:#EAF4E2;">CV Shortlisted</th>'
+			+ '<th style="background:#FDEDEC;">CV Rejected</th>'
+			+ '<th style="background:#FFF9E6;">CV Pending</th>'
+			+ '<th style="background:#EDE7F6;">Other / In Process</th>'
+			+ '</tr></thead>';
+
+		var tbody = '<tbody>';
+		var grand = mkRow();
+		_stwWeeks.forEach(function (wl) {
+			var d = _stwData[wl];
+			grand.app_received += d.app_received;
+			grand.cv_shortlist += d.cv_shortlist;
+			grand.cv_regret += d.cv_regret;
+			grand.cv_pending += d.cv_pending;
+			grand.other_process += d.other_process;
+			tbody += '<tr>'
+				+ '<td class="col-month" style="background:#FFF9C4;color:#5D4037;">' + wl + '</td>'
+				+ '<td class="col-num stw-cell" data-week="' + wl + '" data-rowkey="app_received" style="cursor:pointer;">' + (d.app_received || '') + '</td>'
+				+ '<td class="col-num stw-cell" data-week="' + wl + '" data-rowkey="cv_shortlist" style="cursor:pointer;">' + (d.cv_shortlist || '') + '</td>'
+				+ '<td class="col-num stw-cell" data-week="' + wl + '" data-rowkey="cv_regret" style="cursor:pointer;">' + (d.cv_regret || '') + '</td>'
+				+ '<td class="col-num stw-cell" data-week="' + wl + '" data-rowkey="cv_pending" style="cursor:pointer;">' + (d.cv_pending || '') + '</td>'
+				+ '<td class="col-num stw-cell" data-week="' + wl + '" data-rowkey="other_process" style="cursor:pointer;">' + (d.other_process || '') + '</td>'
+				+ '</tr>';
+		});
+		tbody += '<tr class="row-grand">'
+			+ '<td class="col-month">Grand Total</td>'
+			+ '<td class="col-num">' + (grand.app_received || '') + '</td>'
+			+ '<td class="col-num">' + (grand.cv_shortlist || '') + '</td>'
+			+ '<td class="col-num">' + (grand.cv_regret || '') + '</td>'
+			+ '<td class="col-num">' + (grand.cv_pending || '') + '</td>'
+			+ '<td class="col-num">' + (grand.other_process || '') + '</td>'
+			+ '</tr>';
+		tbody += '</tbody>';
+
+		$('#stw-tbl-wrap').html('<table class="rpt-tbl">' + thead + tbody + '</table>');
+
+		// Click a cell → drill down to the matching records, same
+		// click-through pattern (and shared showRecordsDialog) as every
+		// other report's table on this page.
+		$('#stw-tbl-wrap').off('click.stwCell').on('click.stwCell', '.stw-cell', function () {
+			var wl = $(this).data('week');
+			var rowkey = $(this).data('rowkey');
+			var selStateNow = $('#stw-state').val() || '';
+			var baseRecs = selStateNow ? _stwAllRecs.filter(function (r) { return getState(r) === selStateNow; }) : _stwAllRecs;
+
+			var matched = baseRecs.filter(function (r) {
+				if (!r.creation) return false;
+				if (stwWeekLabel(stwMondayOf(new Date(r.creation))) !== wl) return false;
+				if (rowkey === 'app_received') return true;
+				if (rowkey === 'other_process') {
+					var status = (r.application_status || '').trim();
+					return !(AR_STATUS_KEYS.cv_shortlist.includes(status)
+						|| AR_STATUS_KEYS.cv_regret.includes(status)
+						|| AR_STATUS_KEYS.cv_pending.includes(status));
+				}
+				var allowed = AR_STATUS_KEYS[rowkey] || [];
+				return allowed.includes((r.application_status || '').trim());
+			});
+
+			if (!matched.length) { frappe.msgprint('No records found.'); return; }
+
+			var title = 'School Teacher | Week ' + wl + ' | '
+				+ (rowkey === 'app_received' ? 'All Applications' : rowkey.replace('_', ' ')) + ' (' + matched.length + ')';
+
+			showRecordsDialog(title, matched,
+				['ID', 'Full Name', 'Status', 'Role', 'Department', 'State', 'District', 'Date'],
+				function (r) {
+					return [r.name, r.full_name_aadhaar, r.application_status, r.role, r.department,
+						getState(r), r.native_district, r.creation ? r.creation.split(' ')[0] : ''];
+				});
+		});
+	}
+
+	// ── SCHOOL TEACHER — DISTRICT FUNNEL REPORT ─────────────────────────────
+	// Recreates the recruiter's own manually-maintained "School wise
+	// candidate" tracker (Excel — one row per district/"school", one
+	// column per funnel stage) as a live report, School Teacher only.
+	//
+	// application_status on Field Registration Form is a genuinely messy,
+	// evolved picklist (~85 options, confirmed 2026-09-04 by reading the
+	// live field definition) — it carries TWO overlapping naming eras for
+	// the same stages at once, e.g. plain "Recruiter Round"/"Recruiter
+	// Reject" alongside the newer "Recruiter Round-Interview Scheduled/
+	// Rejected", and "Round One"/"Round 1 Reject" alongside "Subject
+	// Round-Interview Scheduled/Rejected". A first pass at this report
+	// wrongly borrowed round-name strings ("Subject Round", "Demo Round",
+	// "Leader Round-1"/"-2") from a DIFFERENT doctype's field entirely
+	// (Field Interview Schedule.interview_round) — those strings don't
+	// exist on THIS field at all, so those columns silently matched zero
+	// records. Every column below now lists every real spelling variant
+	// that means the same stage, taken directly from this field's actual
+	// option list, so a candidate showing under any of them still counts.
+	//
+	// Column -> status mapping, confirmed/corrected by the recruiter
+	// 2026-09-04:
+	//   "Admit Card Sent"  counts "Test Process" (there's also a literal
+	//     "Admit Card Sent" option, unused in practice — included too).
+	//   "Assessment Pass"  counts "Test Select" (+ "Assessment Passed").
+	//   "Assessment Fail"  counts "Test Reject" (+ "Assessment Failed").
+	//   "Functional Round" is this app's "Subject Round" for School
+	//     Teacher — the picklist's "Functional Round-Interview
+	//     Scheduled/Selected/Rejected" values are folded into the Subject
+	//     Round columns here, not a separate Demo Round bucket.
+	// Two more mappings are judgment calls, NOT yet confirmed — flag if
+	// either is wrong:
+	//   Demo Round folds in both "Subject/Classroom Demo Round-Interview
+	//     …" and "Principal/Demo Round-Interview …" (two more real
+	//     variants that both say "Demo"), plus the bare "Demo Round-
+	//     Interview Rejected" and "Demo & Leader Round-Interview
+	//     Rejected" options.
+	//   "Pending with CBT (offer released)" counts "Pending With CBT" +
+	//     "CBT Assigned" + "Offer" + "Offer Sent" — the closest real
+	//     statuses to that label.
+	// The sheet's own "Leader Round 3" column (skipping "Round 2") is
+	// NOT an assumption — "Leader Round 1/2/3-Interview …" are all three
+	// real, distinct options; the recruiter's sheet genuinely just
+	// doesn't track Round 2.
+	var STF_COLS = [
+		{ label: 'No. of Applications', key: 'applications', statuses: null },
+		{ label: 'CV Shortlisted', key: 'cv_shortlisted', statuses: ['CV Shortlist', 'Shortlisted'] },
+		{ label: 'CV Screening Pending', key: 'cv_pending', statuses: ['New Applicant', 'Pending', 'Correction Pending', 'PI Edited'] },
+		{ label: 'CV Rejected', key: 'cv_rejected', statuses: ['CV Reject', 'Rejected', 'Not Selected', 'Duplicated', 'Blacklisted', 'Blocklisted'] },
+		{ label: 'On Hold', key: 'on_hold', statuses: ['On Hold'] },
+		{ label: 'Admit Card Sent', key: 'admit_card_sent', statuses: ['Test Process', 'Admit Card Sent'] },
+		{ label: 'Assessment Pass', key: 'assessment_pass', statuses: ['Test Select', 'Assessment Passed'] },
+		{ label: 'Assessment Fail', key: 'assessment_fail', statuses: ['Test Reject', 'Assessment Failed'] },
+		{ label: 'Recruiter Round Scheduled', key: 'rr_sched', statuses: ['Recruiter Round', 'Recruiter Round-Interview Scheduled'] },
+		{ label: 'Recruiter Round Selected', key: 'rr_sel', statuses: ['Recruiter Round Select', 'Recruiter Round-Interview Selected'] },
+		{ label: 'Recruiter Round Rejected', key: 'rr_rej', statuses: ['Recruiter Reject', 'Recruiter Round-Interview Rejected'] },
+		{ label: 'Subject Round Interview Scheduled', key: 'sr_sched', statuses: ['Round One', 'Subject Round-Interview Scheduled', 'Functional Round-Interview Scheduled', 'Functional Round-Interviewed'] },
+		{ label: 'Subject Round Interview Selected', key: 'sr_sel', statuses: ['Round One Select', 'Functional Round-Interview Selected'] },
+		{ label: 'Subject Round Interview Rejected', key: 'sr_rej', statuses: ['Round 1 Reject', 'Subject Round-Interview Rejected', 'Functional Round-Interview Rejected'] },
+		{ label: 'Demo Round Scheduled', key: 'dr_sched', statuses: ['Round Two', 'Subject/Classroom Demo Round-Interview Scheduled', 'Principal/Demo Round-Interview Scheduled'] },
+		{ label: 'Demo Round Selected', key: 'dr_sel', statuses: ['Round Two Select', 'Subject/Classroom Demo Round-Interview Selected', 'Principal/Demo Round-Interview Selected'] },
+		{ label: 'Demo Round Rejected', key: 'dr_rej', statuses: ['Round 2 Reject', 'Subject/Classroom Demo Round-Interview Rejected', 'Principal/Demo Round-Interview Rejected', 'Demo Round-Interview Rejected', 'Demo & Leader Round-Interview Rejected'] },
+		{ label: 'Leader Round 1 Interview Scheduled', key: 'lr1_sched', statuses: ['Leader Round 1-Interview Scheduled', 'Leader Round 1-Interviewed'] },
+		{ label: 'Leader Round 1 Interview Selected', key: 'lr1_sel', statuses: ['Leader Round 1-Interview Selected', 'Leader Round-Interview Selected'] },
+		{ label: 'Leader Round 1 Interview Rejected', key: 'lr1_rej', statuses: ['Leader Round 1-Interview Rejected'] },
+		{ label: 'Leader Round 3 Interview Scheduled', key: 'lr3_sched', statuses: ['Round Three', 'Leader Round 3-Interview Scheduled', 'Leader Round 3-Interviewed'] },
+		{ label: 'Leader Round 3 Interview Selected', key: 'lr3_sel', statuses: ['Round Three Select', 'Leader Round 3-Interview Selected'] },
+		{ label: 'Leader Round 3 Interview Rejected', key: 'lr3_rej', statuses: ['Round 3 Reject', 'Leader Round 3-Interview Rejected'] },
+		{ label: 'Pending with CBT (Offer Released)', key: 'pending_cbt', statuses: ['Pending With CBT', 'CBT Assigned', 'Offer', 'Offer Sent'] },
+	];
+
+	var _stfAllRecs = [];
+	var _stfDistricts = [];
+
+	function showSTDistrictFunnel() {
+		$('#rpt-main').html(`
+			<div class="rpt-view-toolbar">
+				<button class="rpt-back" id="rpt-back">← Reports</button>
+				<span class="rpt-view-title">School Teacher — District Funnel</span>
+				<span class="rpt-toolbar-label">From:</span>
+				<input type="date" class="rpt-toolbar-date" id="stf-from" />
+				<span class="rpt-toolbar-label">To:</span>
+				<input type="date" class="rpt-toolbar-date" id="stf-to" />
+				<button class="rpt-btn-refresh" id="stf-refresh">&#x21bb; Refresh</button>
+				<button class="rpt-btn-dl" id="stf-download">⬇ Download Excel</button>
+				<span class="rpt-info" id="stf-info"></span>
+			</div>
+			<div class="rpt-tbl-wrap" id="stf-tbl-wrap"><div class="rpt-loading">Loading…</div></div>
+		`);
+
+		(function () {
+			var t = new Date();
+			var yr = t.getMonth() >= 3 ? t.getFullYear() : t.getFullYear() - 1;
+			$('#stf-from').val(yr + '-04-01');
+			$('#stf-to').val(t.toISOString().slice(0, 10));
+		})();
+
+		$('#rpt-back').on('click', showHub);
+		$('#stf-refresh').on('click', fetchSTDistrictData);
+		// Real .xlsx with the same header/row colours as the on-screen
+		// table — the CSV export used elsewhere on this page has no
+		// concept of colour, so this is a server-rendered file instead
+		// (ms_calendar.api.reports.download_st_district_funnel), built
+		// with the exact same From/To filter currently on screen.
+		$('#stf-download').on('click', function () {
+			var from = $('#stf-from').val() || '';
+			var to = $('#stf-to').val() || '';
+			var url = '/api/method/ms_calendar.api.reports.download_st_district_funnel'
+				+ '?from_date=' + encodeURIComponent(from) + '&to_date=' + encodeURIComponent(to);
+			window.open(url, '_blank');
+		});
+		fetchSTDistrictData();
+	}
+
+	function fetchSTDistrictData() {
+		$('#stf-tbl-wrap').html('<div class="rpt-loading">Loading…</div>');
+		var from = $('#stf-from').val() || '';
+		var to = $('#stf-to').val() || '';
+		var filters = [];
+		if (from) filters.push(['creation', '>=', from + ' 00:00:00']);
+		if (to) filters.push(['creation', '<=', to + ' 23:59:59']);
+
+		frappe.call({
+			method: 'frappe.client.get_list',
+			args: {
+				doctype: 'Field Registration Form',
+				filters: filters,
+				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
+					'location', 'native_state', 'native_district', 'creation'],
+				limit_page_length: 10000,
+				order_by: 'creation asc'
+			},
+			callback: function (r) {
+				var all = (r && r.message) ? r.message : [];
+				// School Teacher only — same getCol() substring match every
+				// other report on this page uses for region-suffixed roles.
+				_stfAllRecs = all.filter(function (rec) { return getCol(rec.role) === 'ST'; });
+				$('#stf-info').text('School Teacher records: ' + _stfAllRecs.length + ' | Date: ' + frappe.datetime.now_date());
+				renderSTDistrictBody();
+			},
+			error: function () {
+				$('#stf-tbl-wrap').html('<div class="rpt-loading">Failed to load. Please refresh.</div>');
+			}
+		});
+	}
+
+	function renderSTDistrictBody() {
+		// "School" in the tracker sheet is derived from the candidate's own
+		// Role field, not native_district/location (confirmed 2026-09-04) —
+		// those were sometimes blank or held a full "City, State, India"
+		// address instead of a clean place name. Role is a Link to
+		// "Recruitment Designation", and its value on Field Registration
+		// Form is already that record's own display text (e.g. "School
+		// Teacher - Barmer", "School Teacher - Khargone, Madhya Pradesh")
+		// — Frappe Link fields store the linked doc's `name`, and here
+		// name == label, so no extra lookup query is needed. Takes
+		// everything after the LAST " - " as the school; a handful of
+		// designations (e.g. "Recruitment Drive in Chittorgarh for School
+		// Teacher Rajasthan") don't fit that "<Role> - <School>" shape at
+		// all — those fall back to the whole role text as-is rather than
+		// guessing at an unfamiliar format and risking a wrong bucket.
+		function districtOf(r) {
+			var role = (r.role || '').trim();
+			if (!role) return 'Unspecified';
+			var dashIdx = role.lastIndexOf(' - ');
+			if (dashIdx >= 0) return role.slice(dashIdx + 3).trim() || 'Unspecified';
+			return role;
+		}
+
+		var distSet = {};
+		_stfAllRecs.forEach(function (r) { distSet[districtOf(r)] = true; });
+		_stfDistricts = Object.keys(distSet).sort();
+
+		if (!_stfDistricts.length) {
+			$('#stf-tbl-wrap').html('<div class="rpt-loading">No School Teacher applications in this range.</div>');
+			return;
+		}
+
+		var thead = '<thead><tr><th class="col-src" style="background:#1F497D;color:#fff;z-index:25;top:0;">School</th>';
+		STF_COLS.forEach(function (c) {
+			thead += '<th style="background:#F5A623;color:#3B2C00;">' + c.label + '</th>';
+		});
+		thead += '</tr></thead>';
+
+		function districtRecs(d) {
+			return _stfAllRecs.filter(function (r) { return districtOf(r) === d; });
+		}
+		function colCount(recs, col) {
+			if (!col.statuses) return recs.length;
+			return recs.filter(function (r) { return col.statuses.includes((r.application_status || '').trim()); }).length;
+		}
+
+		var tbody = '<tbody>';
+		var grand = {};
+		STF_COLS.forEach(function (c) { grand[c.key] = 0; });
+
+		_stfDistricts.forEach(function (d) {
+			var recs = districtRecs(d);
+			tbody += '<tr><td class="col-src" style="background:#FFF3D6;font-weight:600;">' + d + '</td>';
+			STF_COLS.forEach(function (c) {
+				var cnt = colCount(recs, c);
+				grand[c.key] += cnt;
+				tbody += '<td class="col-num stf-cell" data-district="' + d + '" data-colkey="' + c.key + '" style="cursor:pointer;">' + (cnt || '') + '</td>';
+			});
+			tbody += '</tr>';
+		});
+
+		tbody += '<tr class="row-grand"><td class="col-src">Total</td>';
+		STF_COLS.forEach(function (c) {
+			tbody += '<td class="col-num">' + (grand[c.key] || '') + '</td>';
+		});
+		tbody += '</tr></tbody>';
+
+		$('#stf-tbl-wrap').html('<table class="rpt-tbl">' + thead + tbody + '</table>');
+
+		// Click a cell → drill down to the matching records, same
+		// click-through + shared showRecordsDialog every other report on
+		// this page uses.
+		$('#stf-tbl-wrap').off('click.stfCell').on('click.stfCell', '.stf-cell', function () {
+			var d = $(this).data('district');
+			var colkey = $(this).data('colkey');
+			var col = STF_COLS.filter(function (c) { return c.key === colkey; })[0];
+			if (!col) return;
+
+			var recs = districtRecs(d);
+			var matched = col.statuses
+				? recs.filter(function (r) { return col.statuses.includes((r.application_status || '').trim()); })
+				: recs;
+
+			if (!matched.length) { frappe.msgprint('No records found.'); return; }
+
+			var title = d + ' | ' + col.label + ' (' + matched.length + ')';
+			showRecordsDialog(title, matched,
+				['ID', 'Full Name', 'Status', 'Role', 'Department', 'School', 'Date'],
+				function (r) {
+					return [r.name, r.full_name_aadhaar, r.application_status, r.role, r.department,
+						districtOf(r), r.creation ? r.creation.split(' ')[0] : ''];
+				});
+		});
 	}
 
 	// ── Initial render ────────────────────────────────────────────────────
