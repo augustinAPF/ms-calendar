@@ -27,6 +27,25 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		return (rec.location || rec.native_state || '').trim();
 	}
 
+	// Fields needed for the Applications Received / Source reports' summary
+	// table, dropdown population, and getState()/getCol() classification —
+	// i.e. everything EXCEPT the ~22 drill-down-only detail fields (email,
+	// phone, education, reject reason, etc.), which are fetched separately,
+	// only for the specific cell a recruiter actually clicks into. See the
+	// fetchArData()/fetchSrcData() comments for why this split exists.
+	var AR_LEAN_FIELDS = ['name', 'application_status', 'role', 'department',
+		'location', 'worklocation', 'native_state', 'native_district', 'creation'];
+	// The full field list, fetched on-demand for just the matched IDs of one
+	// clicked cell — same columns the drill-down dialog has always shown.
+	var AR_FULL_FIELDS = ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
+		'location', 'worklocation', 'native_state', 'native_district', 'opportunity',
+		'email_address', 'phone_number', 'alternate_no', 'gender', 'dob', 'age',
+		'highest_education', 'teaching_degrees', 'teaching_year', 'teachingexp_month',
+		'health_expyear', 'health_expmonth', 'languages_known', 'written_subject',
+		'test_location', 'apf_associated', 'former_employee',
+		'reasons_for_shortlist', 'reasons_for_reject', 'hold_reason', 'blocklist_reason',
+		'creation'];
+
 	// Monday-Sunday week containing (today + offsetWeeks*7 days) — offsetWeeks
 	// -1 gives last week, 0 gives the current week.
 	function getWeekBounds(offsetWeeks) {
@@ -480,15 +499,24 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			args: {
 				doctype: 'Field Registration Form',
 				filters: filters,
-				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
-					'location', 'worklocation', 'native_state', 'native_district', 'opportunity',
-					'email_address', 'phone_number', 'alternate_no', 'gender', 'dob', 'age',
-					'highest_education', 'teaching_degrees', 'teaching_year', 'teachingexp_month',
-					'health_expyear', 'health_expmonth', 'languages_known', 'written_subject',
-					'test_location', 'apf_associated', 'former_employee',
-					'reasons_for_shortlist', 'reasons_for_reject', 'hold_reason', 'blocklist_reason',
-					'creation'],
-				limit_page_length: 10000,
+				// Lean field list — only what aggregateArData()/getState()/
+				// getCol() actually need for the summary table and the
+				// state/district dropdowns. The other ~22 detail fields (email,
+				// phone, education, reject reason, etc.) are drill-down-only —
+				// fetched on demand per cell instead (see the click handler
+				// below), not for every one of 126k+ rows up front. Measured
+				// 2026-09-04 against live cloud data: full field list was 98MB /
+				// 7.1s for this report's default date range; this lean list is
+				// 27MB / 3.0s for the exact same rows — the report still counts
+				// and shows every record correctly, it just isn't dragging 22
+				// unused fields along for each one.
+				fields: AR_LEAN_FIELDS,
+				// No cap — same 10000+"creation asc" bug as the District Funnel
+				// report (confirmed 2026-09-04: 126k+ records in a typical date
+				// range, with two known bulk-import days accounting for ~97k of
+				// them), and no status/role pre-filter applies here since this
+				// report covers every application regardless of role.
+				limit_page_length: 0,
 				order_by: 'creation asc'
 			},
 			callback: function (r) {
@@ -716,25 +744,45 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				+ ' | ' + (rowkey === 'app_received' ? 'All Applications' : rowkey.replace('_', ' '))
 				+ ' (' + matched.length + ')';
 
-			showRecordsDialog(title, matched,
-				['ID','Full Name','Status','Role','Department',
-				 'Work State','Work Location','Native State','Native District','Source',
-				 'Email','Phone','Alt Phone','Gender','DOB','Age',
-				 'Education','Teaching Degree','Teaching Exp(Yr)','Teaching Exp(Mo)',
-				 'Health Exp(Yr)','Health Exp(Mo)','Languages','Written Subject',
-				 'Test Location','APF Associated','Former Employee',
-				 'Shortlist Reason','Reject Reason','Hold Reason','Blocklist Reason','Date'],
-				function(r) {
-					return [r.name, r.full_name_aadhaar, r.application_status, r.role, r.department,
-						r.location, r.worklocation, r.native_state, r.native_district, r.opportunity,
-						r.email_address, r.phone_number, r.alternate_no, r.gender, r.dob, r.age,
-						r.highest_education, r.teaching_degrees, r.teaching_year, r.teachingexp_month,
-						r.health_expyear, r.health_expmonth, r.languages_known, r.written_subject,
-						r.test_location, r.apf_associated, r.former_employee,
-						r.reasons_for_shortlist, r.reasons_for_reject, r.hold_reason, r.blocklist_reason,
-						r.creation ? r.creation.split(' ')[0] : ''];
-				});
-
+			// matched came from the lean fetch (AR_LEAN_FIELDS) — it has enough
+			// to filter correctly but not the detail columns the dialog shows.
+			// Fetch those now, scoped to just this cell's IDs (usually dozens
+			// to a few hundred), instead of every one of 126k+ rows carrying
+			// full detail on every page load.
+			frappe.show_alert({ message: 'Loading details…', indicator: 'blue' });
+			frappe.call({
+				method: 'frappe.client.get_list',
+				args: {
+					doctype: 'Field Registration Form',
+					filters: [['name', 'in', matched.map(function (r) { return r.name; })]],
+					fields: AR_FULL_FIELDS,
+					limit_page_length: 0
+				},
+				callback: function (r2) {
+					var full = (r2 && r2.message) ? r2.message : [];
+					showRecordsDialog(title, full,
+						['ID','Full Name','Status','Role','Department',
+						 'Work State','Work Location','Native State','Native District','Source',
+						 'Email','Phone','Alt Phone','Gender','DOB','Age',
+						 'Education','Teaching Degree','Teaching Exp(Yr)','Teaching Exp(Mo)',
+						 'Health Exp(Yr)','Health Exp(Mo)','Languages','Written Subject',
+						 'Test Location','APF Associated','Former Employee',
+						 'Shortlist Reason','Reject Reason','Hold Reason','Blocklist Reason','Date'],
+						function(r) {
+							return [r.name, r.full_name_aadhaar, r.application_status, r.role, r.department,
+								r.location, r.worklocation, r.native_state, r.native_district, r.opportunity,
+								r.email_address, r.phone_number, r.alternate_no, r.gender, r.dob, r.age,
+								r.highest_education, r.teaching_degrees, r.teaching_year, r.teachingexp_month,
+								r.health_expyear, r.health_expmonth, r.languages_known, r.written_subject,
+								r.test_location, r.apf_associated, r.former_employee,
+								r.reasons_for_shortlist, r.reasons_for_reject, r.hold_reason, r.blocklist_reason,
+								r.creation ? r.creation.split(' ')[0] : ''];
+						});
+				},
+				error: function () {
+					frappe.msgprint('Failed to load record details. Please try again.');
+				}
+			});
 		});
 	}
 
@@ -807,7 +855,8 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				filters: filters,
 				fields: ['name', 'role', 'department', 'opportunity',
 					'location', 'worklocation', 'native_state', 'native_district', 'creation'],
-				limit_page_length: 10000,
+				// No cap — same reasoning as Applications Received above.
+				limit_page_length: 0,
 				order_by: 'creation asc'
 			},
 			callback: function (r) {
@@ -991,7 +1040,11 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				filters: filters,
 				fields: ['name', 'role', 'department', 'location', 'worklocation',
 					'native_state', 'application_status', 'creation'],
-				limit_page_length: 10000,
+				// Already pre-filtered to offer-related statuses (~1,200 records
+				// currently, confirmed 2026-09-04) so this was never actually
+				// hitting the cap — uncapped anyway for the same future-proofing
+				// as the other reports on this page.
+				limit_page_length: 0,
 				order_by: 'creation asc'
 			},
 			callback: function (r) {
@@ -1195,7 +1248,10 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				filters: [['modified', '>=', today + ' 00:00:00']],
 				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
 					'location', 'creation', 'modified'],
-				limit_page_length: 5000,
+				// "modified today" is naturally small (163 records as of
+				// 2026-09-04) so this cap was never actually hit — uncapped
+				// anyway for the same future-proofing as the other reports here.
+				limit_page_length: 0,
 				order_by: 'modified desc'
 			},
 			callback: function (r) {
@@ -1207,7 +1263,10 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 						filters: [['interview_date', '<=', today]],
 						fields: ['name', 'application_id', 'applicants_name', 'role', 'department',
 							'interview_date', 'interview_round', 'feedback_form'],
-						limit_page_length: 5000,
+						// Field Interview Schedule's whole doctype is only 148
+						// records total (2026-09-04) — nowhere near this cap,
+						// uncapped anyway for consistency.
+						limit_page_length: 0,
 						order_by: 'interview_date desc'
 					},
 					callback: function (r2) {
@@ -1339,7 +1398,12 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				],
 				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
 					'location', 'native_state', 'creation', 'modified'],
-				limit_page_length: 10000,
+				// Especially important to uncap here: any 2-week window that
+				// includes 2026-08-25/26 (a confirmed bulk import, ~97k records
+				// in those 2 days alone) blew straight through the old 10000
+				// cap on its own — this report would have shown badly wrong
+				// this-week/last-week numbers for weeks including that import.
+				limit_page_length: 0,
 				order_by: 'creation asc'
 			},
 			callback: function (r) {
@@ -1499,6 +1563,10 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		var filters = [];
 		if (from) filters.push(['creation', '>=', from + ' 00:00:00']);
 		if (to) filters.push(['creation', '<=', to + ' 23:59:59']);
+		// Same server-side pre-filter as the District Funnel report — cuts the
+		// row count down before it crosses the wire, exactly equivalent to
+		// getCol()==='ST' since that only checks 'teacher' in role.lower().
+		filters.push(['role', 'like', '%Teacher%']);
 
 		frappe.call({
 			method: 'frappe.client.get_list',
@@ -1507,14 +1575,13 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				filters: filters,
 				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
 					'location', 'worklocation', 'native_state', 'native_district', 'creation'],
-				limit_page_length: 10000,
+				limit_page_length: 0,
 				order_by: 'creation asc'
 			},
 			callback: function (r) {
 				var all = (r && r.message) ? r.message : [];
-				// School Teacher only — getCol() already handles the
-				// region-suffixed variants ("School Teacher - Barmer" etc.)
-				// the same way every other report on this page does.
+				// getCol() still runs as the real classifier — the LIKE above
+				// is just a coarse pre-filter, same reasoning as District Funnel.
 				_stwAllRecs = all.filter(function (rec) { return getCol(rec.role) === 'ST'; });
 				$('#stw-info').text('School Teacher records: ' + _stwAllRecs.length + ' | Date: ' + frappe.datetime.now_date());
 
@@ -1760,6 +1827,20 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		var filters = [];
 		if (from) filters.push(['creation', '>=', from + ' 00:00:00']);
 		if (to) filters.push(['creation', '<=', to + ' 23:59:59']);
+		// Pre-filter server-side on role instead of fetching every Field
+		// Registration Form and filtering with getCol() in the browser.
+		// Confirmed 2026-09-04: this doctype now has 126,000+ records in a
+		// typical date range, so the old limit_page_length:10000 + "creation
+		// asc" combo silently dropped everything past the oldest 10,000 rows
+		// — the newer region-suffixed "School Teacher - <District>" roles
+		// (all created recently) fell outside that window entirely, showing
+		// "School Teacher records: 0" even though the data was really there
+		// (the Excel download was unaffected — reports.py's server-side
+		// query has no such cap). "Teacher" is safe as a plain substring
+		// here: getCol() only checks 'teacher' in role.lower() to classify
+		// 'ST', so this LIKE is exactly equivalent, just done in SQL instead
+		// of after fetching everything.
+		filters.push(['role', 'like', '%Teacher%']);
 
 		frappe.call({
 			method: 'frappe.client.get_list',
@@ -1768,13 +1849,16 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				filters: filters,
 				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
 					'location', 'native_state', 'native_district', 'creation'],
-				limit_page_length: 10000,
+				limit_page_length: 0,
 				order_by: 'creation asc'
 			},
 			callback: function (r) {
 				var all = (r && r.message) ? r.message : [];
-				// School Teacher only — same getCol() substring match every
-				// other report on this page uses for region-suffixed roles.
+				// Still runs getCol() here too — the SQL LIKE above is a
+				// coarse pre-filter (cuts 126k rows down to a few thousand
+				// before they ever cross the wire), getCol() remains the
+				// real classifier so health/livelihood roles that happen to
+				// contain "teacher" as a substring can't slip through.
 				_stfAllRecs = all.filter(function (rec) { return getCol(rec.role) === 'ST'; });
 				$('#stf-info').text('School Teacher records: ' + _stfAllRecs.length + ' | Date: ' + frappe.datetime.now_date());
 				renderSTDistrictBody();
