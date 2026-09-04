@@ -246,6 +246,18 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 	</div>
 	<div class="fod-wrap" id="f-wrap"><div class="fod-load">Loading…</div></div>`);
 
+	// Escapes text for both HTML content and (double-quoted) attribute
+	// contexts — option values come straight from DB fields (district,
+	// role, department, ...) with no guarantee they're free of < > & ",
+	// and were previously inserted as raw HTML/attribute text.
+	function escHtml(s) {
+		return (s == null ? '' : String(s))
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;');
+	}
+
 	// ── Multiselect (tag/chip) widget ─────────────────────────────────────
 	// Each filter is a plain div#f-xxx; this turns it into a chip-input
 	// multiselect and exposes get/setOptions/val via $.data(el, 'fodMs').
@@ -255,7 +267,7 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 		var selected = []; // currently-selected string values
 
 		$el.html(
-			'<div class="fod-ms-box"><span class="fod-ms-ph">' + placeholder + '</span></div>' +
+			'<div class="fod-ms-box"><span class="fod-ms-ph">' + escHtml(placeholder) + '</span></div>' +
 			'<div class="fod-ms-panel">' +
 				'<div class="fod-ms-search"><input type="text" placeholder="Search…"/></div>' +
 				'<div class="fod-ms-actions"><a class="fod-ms-all">Select all</a><a class="fod-ms-none">Clear</a></div>' +
@@ -270,14 +282,15 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 		function renderBox() {
 			$box.empty();
 			if (!selected.length) {
-				$box.append('<span class="fod-ms-ph">' + placeholder + '</span>');
+				$box.append('<span class="fod-ms-ph">' + escHtml(placeholder) + '</span>');
 				return;
 			}
 			var shown = selected.slice(0, 2);
 			shown.forEach(function (v) {
+				var esc = escHtml(v);
 				$box.append(
-					'<span class="fod-ms-chip" title="' + v.replace(/"/g, '&quot;') + '">' +
-						'<span class="txt">' + v + '</span><span class="x" data-v="' + v.replace(/"/g, '&quot;') + '">&times;</span>' +
+					'<span class="fod-ms-chip" title="' + esc + '">' +
+						'<span class="txt">' + esc + '</span><span class="x" data-v="' + esc + '">&times;</span>' +
 					'</span>'
 				);
 			});
@@ -296,10 +309,10 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 			}
 			matches.forEach(function (v) {
 				var checked = selected.indexOf(v) !== -1;
-				var esc = v.replace(/"/g, '&quot;');
+				var esc = escHtml(v);
 				$list.append(
 					'<label class="fod-ms-opt"><input type="checkbox" data-v="' + esc + '"' + (checked ? ' checked' : '') + '/>' +
-						'<span>' + v + '</span></label>'
+						'<span>' + esc + '</span></label>'
 				);
 			});
 		}
