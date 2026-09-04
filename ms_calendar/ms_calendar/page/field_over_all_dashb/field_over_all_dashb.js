@@ -164,14 +164,22 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 	// ── Styles ────────────────────────────────────────────────────────────
 	$(wrapper).find('.page-content').append(`
 	<style>
-		.fod-bar{display:flex;align-items:center;gap:8px;padding:10px 20px 8px;background:#fff;border-bottom:1px solid #e5e7eb;flex-wrap:wrap}
+		.fod-bar{padding:12px 20px;background:#fff;border-bottom:1px solid #e5e7eb}
+		.fod-filters-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+		.fod-filters-div{width:1px;align-self:stretch;background:#e5e7eb;margin:0 2px}
 		.fod-bar label{font-size:12px;font-weight:600;color:#374151}
 		.fod-bar input[type=date],.fod-bar select{padding:5px 8px;border:1px solid #d1d5db;border-radius:5px;font-size:12px;color:#111;background:#fff;min-width:120px}
-		.fod-dt{font-size:12px;color:#9ca3af;margin-left:auto}
-		.fod-btn{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border-radius:6px;font-weight:600;font-size:12px;border:none;cursor:pointer;transition:background .15s}
-		.btn-green{background:#166534;color:#fff}.btn-green:hover{background:#14532d}
+		.fod-dt{font-size:12px;color:#9ca3af}
+		.fod-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:6px;font-weight:600;font-size:12px;border:none;cursor:pointer;transition:background .15s,box-shadow .15s,transform .1s}
 		.btn-blue{background:#1e40af;color:#fff}.btn-blue:hover{background:#1d3a8a}
 		.btn-grey{background:#f3f4f6;color:#374151;border:1px solid #d1d5db}.btn-grey:hover{background:#e5e7eb}
+		.fod-xl-btn{display:inline-flex;align-items:center;gap:8px;padding:8px 18px;border-radius:7px;font-weight:700;font-size:13px;border:none;cursor:pointer;background:linear-gradient(180deg,#3b9eff,#1e7fe0);color:#fff;box-shadow:0 2px 5px rgba(30,127,224,.35);transition:box-shadow .15s,transform .1s}
+		.fod-xl-btn:hover{box-shadow:0 4px 10px rgba(30,127,224,.45);transform:translateY(-1px)}
+		.fod-xl-btn:active{transform:translateY(0);box-shadow:0 2px 4px rgba(30,127,224,.35)}
+		.fod-xl-btn:disabled{opacity:.7;cursor:wait;transform:none}
+		.fod-xl-btn .ic{display:inline-flex;font-size:14px}
+		.fod-xl-btn .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:fod-spin .7s linear infinite}
+		@keyframes fod-spin{to{transform:rotate(360deg)}}
 		.fod-wrap{overflow:auto;padding:0 20px 10px;max-height:calc(100vh - 160px)}
 		.fod-load{padding:60px;text-align:center;color:#9ca3af;font-size:14px}
 		.fod-tbl{border-collapse:collapse;font-size:11px;white-space:nowrap}
@@ -186,30 +194,204 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 		.fod-tbl .r-total .c-tot{background:#9ab8d4!important;color:#1F497D!important}
 		.fod-tbl thead th{position:sticky;top:0;z-index:20;font-weight:700}
 		.fod-tbl thead tr:nth-child(2) th{top:32px;z-index:19}
+		.fod-ms{position:relative;min-width:150px;max-width:230px}
+		.fod-ms-box{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:3px 6px;border:1px solid #d1d5db;border-radius:5px;background:#fff;cursor:pointer;min-height:26px}
+		.fod-ms-box:hover{border-color:#9ca3af}
+		.fod-ms.open .fod-ms-box{border-color:#1e40af;box-shadow:0 0 0 2px rgba(30,64,175,.12)}
+		.fod-ms-ph{font-size:12px;color:#9ca3af;padding:2px 2px}
+		.fod-ms-chip{display:inline-flex;align-items:center;gap:4px;background:#e0e7ff;color:#1e3a8a;border-radius:4px;padding:1px 5px 1px 7px;font-size:11px;font-weight:600;max-width:120px}
+		.fod-ms-chip span.txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+		.fod-ms-chip .x{cursor:pointer;font-size:12px;line-height:1;opacity:.7;padding:0 1px}
+		.fod-ms-chip .x:hover{opacity:1}
+		.fod-ms-more{font-size:11px;color:#6b7280;font-weight:600;padding:1px 4px}
+		.fod-ms-panel{display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:60;background:#fff;border:1px solid #d1d5db;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.15);width:max(100%,200px);max-height:280px;overflow:auto}
+		.fod-ms.open .fod-ms-panel{display:block}
+		.fod-ms-search{position:sticky;top:0;background:#fff;padding:6px;border-bottom:1px solid #eee}
+		.fod-ms-search input{width:100%;padding:4px 7px;border:1px solid #d1d5db;border-radius:4px;font-size:12px}
+		.fod-ms-actions{display:flex;justify-content:space-between;padding:5px 8px;border-bottom:1px solid #eee;font-size:11px}
+		.fod-ms-actions a{color:#1e40af;cursor:pointer;font-weight:600}
+		.fod-ms-opt{display:flex;align-items:center;gap:7px;padding:5px 10px;font-size:12px;cursor:pointer;white-space:nowrap}
+		.fod-ms-opt:hover{background:#f3f4f6}
+		.fod-ms-opt input{margin:0}
+		.fod-ms-empty{padding:10px;font-size:12px;color:#9ca3af;text-align:center}
 		.ss-wrap{padding:18px 20px 28px}
 		.ss-title{font-size:13px;font-weight:700;color:#1e3a5f;margin-bottom:10px;padding-bottom:5px;border-bottom:2px solid #1e3a5f}
-		.ss-grid{display:flex;flex-wrap:wrap;gap:8px}
-		.ss-card{background:#fff;border:1px solid #e5e7eb;border-radius:7px;padding:10px 14px;min-width:140px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,.05);transition:box-shadow .15s,transform .1s}
+		.ss-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+		.ss-card{background:#fff;border:1px solid #e5e7eb;border-radius:7px;padding:12px 14px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,.05);transition:box-shadow .15s,transform .1s;display:flex;flex-direction:column;justify-content:center;min-height:64px}
 		.ss-card:hover{box-shadow:0 3px 10px rgba(0,0,0,.15);transform:translateY(-1px)}
-		.ss-card .n{font-size:26px;font-weight:700}.ss-card .l{font-size:11px;color:#6b7280;font-weight:500}
+		.ss-card .n{font-size:26px;font-weight:700;line-height:1.2}.ss-card .l{font-size:11px;color:#6b7280;font-weight:500;line-height:1.3;margin-top:2px}
+		.fod-recs-dialog .modal-dialog{max-width:min(96vw,1400px)!important;width:96vw!important}
 	</style>
 	<div class="fod-bar">
-		<label>From:</label><input type="date" id="f-from"/>
-		<label>To:</label><input type="date" id="f-to"/>
-		<select id="f-state"><option value="">All States</option></select>
-		<select id="f-district"><option value="">All Districts</option></select>
-		<select id="f-source"><option value="">All Sources</option></select>
-		<button class="fod-btn btn-blue" id="f-apply">Apply</button>
-		<button class="fod-btn btn-grey"  id="f-clear">Clear</button>
-		<button class="fod-btn btn-grey"  id="f-rf">&#x21bb; Refresh</button>
-		<button class="fod-btn btn-green" id="f-xl">&#8659; Download Excel</button>
-		<span class="fod-dt" id="f-dt"></span>
+		<div class="fod-filters-row">
+			<label>From:</label><input type="date" id="f-from"/>
+			<label>To:</label><input type="date" id="f-to"/>
+			<div class="fod-ms" id="f-state" data-placeholder="All States"></div>
+			<div class="fod-ms" id="f-district" data-placeholder="All Districts"></div>
+			<div class="fod-ms" id="f-source" data-placeholder="All Sources"></div>
+			<div class="fod-ms" id="f-role" data-placeholder="All Roles"></div>
+			<div class="fod-ms" id="f-department" data-placeholder="All Departments"></div>
+			<div class="fod-ms" id="f-location" data-placeholder="All Locations"></div>
+			<div class="fod-filters-div"></div>
+			<button class="fod-btn btn-blue" id="f-apply">Apply</button>
+			<button class="fod-btn btn-grey"  id="f-clear">Clear</button>
+			<button class="fod-xl-btn" id="f-xl"><span class="ic">&#8659;</span> Download Excel</button>
+			<div class="fod-filters-div"></div>
+			<span class="fod-dt" id="f-dt"></span>
+		</div>
 	</div>
 	<div class="ss-wrap" id="ss-wrap" style="display:none">
 		<div class="ss-title">Application Status Summary</div>
 		<div class="ss-grid" id="ss-grid"></div>
 	</div>
 	<div class="fod-wrap" id="f-wrap"><div class="fod-load">Loading…</div></div>`);
+
+	// ── Multiselect (tag/chip) widget ─────────────────────────────────────
+	// Each filter is a plain div#f-xxx; this turns it into a chip-input
+	// multiselect and exposes get/setOptions/val via $.data(el, 'fodMs').
+	function makeMultiselect($el, onChange) {
+		var placeholder = $el.data('placeholder') || 'All';
+		var options = []; // full list of selectable string values
+		var selected = []; // currently-selected string values
+
+		$el.html(
+			'<div class="fod-ms-box"><span class="fod-ms-ph">' + placeholder + '</span></div>' +
+			'<div class="fod-ms-panel">' +
+				'<div class="fod-ms-search"><input type="text" placeholder="Search…"/></div>' +
+				'<div class="fod-ms-actions"><a class="fod-ms-all">Select all</a><a class="fod-ms-none">Clear</a></div>' +
+				'<div class="fod-ms-list"></div>' +
+			'</div>'
+		);
+		var $box = $el.find('.fod-ms-box');
+		var $panel = $el.find('.fod-ms-panel');
+		var $search = $el.find('.fod-ms-search input');
+		var $list = $el.find('.fod-ms-list');
+
+		function renderBox() {
+			$box.empty();
+			if (!selected.length) {
+				$box.append('<span class="fod-ms-ph">' + placeholder + '</span>');
+				return;
+			}
+			var shown = selected.slice(0, 2);
+			shown.forEach(function (v) {
+				$box.append(
+					'<span class="fod-ms-chip" title="' + v.replace(/"/g, '&quot;') + '">' +
+						'<span class="txt">' + v + '</span><span class="x" data-v="' + v.replace(/"/g, '&quot;') + '">&times;</span>' +
+					'</span>'
+				);
+			});
+			if (selected.length > shown.length) {
+				$box.append('<span class="fod-ms-more">+' + (selected.length - shown.length) + ' more</span>');
+			}
+		}
+
+		function renderList(filterText) {
+			var q = (filterText || '').toLowerCase();
+			$list.empty();
+			var matches = options.filter(function (v) { return v.toLowerCase().indexOf(q) !== -1; });
+			if (!matches.length) {
+				$list.append('<div class="fod-ms-empty">No matches</div>');
+				return;
+			}
+			matches.forEach(function (v) {
+				var checked = selected.indexOf(v) !== -1;
+				var esc = v.replace(/"/g, '&quot;');
+				$list.append(
+					'<label class="fod-ms-opt"><input type="checkbox" data-v="' + esc + '"' + (checked ? ' checked' : '') + '/>' +
+						'<span>' + v + '</span></label>'
+				);
+			});
+		}
+
+		function open() {
+			if ($el.hasClass('open')) return;
+			$('.fod-ms.open').each(function () { $(this).removeClass('open'); });
+			$el.addClass('open');
+			renderList($search.val());
+			$search.val('').trigger('focus');
+		}
+		function close() { $el.removeClass('open'); }
+
+		$box.on('click', function (e) {
+			if ($(e.target).hasClass('x')) return; // handled below
+			$el.hasClass('open') ? close() : open();
+		});
+		$box.on('click', '.x', function (e) {
+			e.stopPropagation();
+			var v = $(this).data('v').toString();
+			selected = selected.filter(function (s) { return s !== v; });
+			renderBox();
+			if ($el.hasClass('open')) renderList($search.val());
+			onChange(selected.slice());
+		});
+		$search.on('input', function () { renderList($(this).val()); });
+		$search.on('click', function (e) { e.stopPropagation(); });
+		$list.on('click', '.fod-ms-opt', function (e) {
+			e.stopPropagation();
+		});
+		$list.on('change', 'input[type=checkbox]', function () {
+			var v = $(this).data('v').toString();
+			if (this.checked) {
+				if (selected.indexOf(v) === -1) selected.push(v);
+			} else {
+				selected = selected.filter(function (s) { return s !== v; });
+			}
+			renderBox();
+			onChange(selected.slice());
+		});
+		$el.find('.fod-ms-all').on('click', function (e) {
+			e.stopPropagation();
+			var q = ($search.val() || '').toLowerCase();
+			var visible = options.filter(function (v) { return v.toLowerCase().indexOf(q) !== -1; });
+			visible.forEach(function (v) { if (selected.indexOf(v) === -1) selected.push(v); });
+			renderBox(); renderList($search.val());
+			onChange(selected.slice());
+		});
+		$el.find('.fod-ms-none').on('click', function (e) {
+			e.stopPropagation();
+			selected = [];
+			renderBox(); renderList($search.val());
+			onChange(selected.slice());
+		});
+
+		var api = {
+			setOptions: function (opts) {
+				options = opts.slice();
+				selected = selected.filter(function (s) { return options.indexOf(s) !== -1; });
+				renderBox();
+				if ($el.hasClass('open')) renderList($search.val());
+			},
+			val: function () { return selected.slice(); },
+			setVal: function (vals) {
+				selected = (vals || []).filter(function (s) { return options.indexOf(s) !== -1; });
+				renderBox();
+			},
+			clear: function () { selected = []; renderBox(); }
+		};
+		$el.data('fodMs', api);
+		return api;
+	}
+
+	// Global: close any open multiselect when clicking elsewhere on the page.
+	// Unbind first in case on_page_load runs again for this same page instance.
+	$(document).off('click.fodMsOutside').on('click.fodMsOutside', function (e) {
+		if ($(e.target).closest('.fod-ms').length) return;
+		$(wrapper).find('.fod-ms.open').removeClass('open');
+	});
+
+	const MS_IDS = ['f-state', 'f-district', 'f-source', 'f-role', 'f-department', 'f-location'];
+	const _msWidgets = {};
+	MS_IDS.forEach(function (id) {
+		_msWidgets[id] = makeMultiselect($(wrapper).find('#' + id), function () {
+			var filtered = getFilteredRecs();
+			var res = aggregate(filtered);
+			_states = res.states; _data = res.data;
+			renderTable();
+			renderSummary(filtered);
+		});
+	});
+	function msVal(id) { return _msWidgets[id].val(); }
 
 	// ── Event handlers ────────────────────────────────────────────────────
 	// Bound once here (not inside renderSummary, which re-runs on every
@@ -224,27 +406,35 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 		showRecordsDialog(status || 'Overall', matched, ALL_HEADERS, fullRow);
 	});
 	$(wrapper).find('#f-apply').on('click', loadData);
-	$(wrapper).find('#f-rf').on('click', loadData);
 	$(wrapper).find('#f-clear').on('click', function () {
 		$(wrapper).find('#f-from,#f-to').val('');
-		$(wrapper).find('#f-state,#f-district,#f-source').val('');
+		MS_IDS.forEach(function (id) { _msWidgets[id].clear(); });
 		loadData();
 	});
-	$(wrapper).find('#f-state,#f-district,#f-source').on('change', function () {
-		var filtered = getFilteredRecs();
-		var res = aggregate(filtered);
-		_states = res.states; _data = res.data;
-		renderTable();
-		renderSummary(filtered);
-	});
 	$(wrapper).find('#f-xl').on('click', function () {
+		const $btn = $(this);
+		if ($btn.prop('disabled')) return;
 		const from = $(wrapper).find('#f-from').val();
 		const to = $(wrapper).find('#f-to').val();
 		let url = '/api/method/ms_calendar.api.ms_field.download_field_overall_excel';
 		const p = [];
 		if (from) p.push('from_date=' + encodeURIComponent(from));
 		if (to) p.push('to_date=' + encodeURIComponent(to));
+		var paramName = { 'f-state': 'state', 'f-district': 'district', 'f-source': 'source', 'f-role': 'role', 'f-department': 'department', 'f-location': 'location' };
+		MS_IDS.forEach(function (id) {
+			var vals = msVal(id);
+			if (vals.length) p.push(paramName[id] + '=' + encodeURIComponent(JSON.stringify(vals)));
+		});
 		if (p.length) url += '?' + p.join('&');
+
+		// Visual feedback while the file generates — the request is a plain
+		// navigation (needed so the browser's download/save-as flow kicks
+		// in), so there's no XHR "done" event to key off; re-enable after a
+		// fixed delay just to restore the button for a possible re-click.
+		var origHtml = $btn.html();
+		$btn.prop('disabled', true).html('<span class="spin"></span> Preparing file…');
+		setTimeout(function () { $btn.prop('disabled', false).html(origHtml); }, 3000);
+
 		window.location.href = url;
 	});
 
@@ -258,13 +448,19 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 	}
 
 	function getFilteredRecs() {
-		var selState = $(wrapper).find('#f-state').val();
-		var selDist  = $(wrapper).find('#f-district').val();
-		var selSrc   = $(wrapper).find('#f-source').val();
+		var selState = msVal('f-state');
+		var selDist  = msVal('f-district');
+		var selSrc   = msVal('f-source');
+		var selRole  = msVal('f-role');
+		var selDept  = msVal('f-department');
+		var selLoc   = msVal('f-location');
 		return _allRecs.filter(function (r) {
-			if (selState && getRecState(r) !== selState) return false;
-			if (selDist && (r.native_district || '').trim() !== selDist) return false;
-			if (selSrc && (r.opportunity || '').trim() !== selSrc) return false;
+			if (selState.length && selState.indexOf(getRecState(r)) === -1) return false;
+			if (selDist.length && selDist.indexOf((r.native_district || '').trim()) === -1) return false;
+			if (selSrc.length && selSrc.indexOf((r.opportunity || '').trim()) === -1) return false;
+			if (selRole.length && selRole.indexOf((r.role || '').trim()) === -1) return false;
+			if (selDept.length && selDept.indexOf((r.department || '').trim()) === -1) return false;
+			if (selLoc.length && selLoc.indexOf((r.location || '').trim()) === -1) return false;
 			return true;
 		});
 	}
@@ -293,19 +489,22 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 			callback: function (r) {
 				_allRecs = r.message || [];
 				// Populate dropdowns
-				var stSet = {}, diSet = {}, srcSet = {};
+				var stSet = {}, diSet = {}, srcSet = {}, roleSet = {}, deptSet = {}, locSet = {};
 				_allRecs.forEach(function (rec) {
 					var st = getRecState(rec);
 					if (st) stSet[st] = true;
 					if (rec.native_district) diSet[rec.native_district.trim()] = true;
 					if (rec.opportunity) srcSet[rec.opportunity.trim()] = true;
+					if (rec.role) roleSet[rec.role.trim()] = true;
+					if (rec.department) deptSet[rec.department.trim()] = true;
+					if (rec.location) locSet[rec.location.trim()] = true;
 				});
-				var $st = $(wrapper).find('#f-state').empty().append('<option value="">All States</option>');
-				Object.keys(stSet).sort().forEach(function (v) { $st.append('<option value="' + v + '">' + v + '</option>'); });
-				var $di = $(wrapper).find('#f-district').empty().append('<option value="">All Districts</option>');
-				Object.keys(diSet).sort().forEach(function (v) { $di.append('<option value="' + v + '">' + v + '</option>'); });
-				var $so = $(wrapper).find('#f-source').empty().append('<option value="">All Sources</option>');
-				Object.keys(srcSet).sort().forEach(function (v) { $so.append('<option value="' + v + '">' + v + '</option>'); });
+				_msWidgets['f-state'].setOptions(Object.keys(stSet).sort());
+				_msWidgets['f-district'].setOptions(Object.keys(diSet).sort());
+				_msWidgets['f-source'].setOptions(Object.keys(srcSet).sort());
+				_msWidgets['f-role'].setOptions(Object.keys(roleSet).sort());
+				_msWidgets['f-department'].setOptions(Object.keys(deptSet).sort());
+				_msWidgets['f-location'].setOptions(Object.keys(locSet).sort());
 
 				var res = aggregate(_allRecs);
 				_states = res.states; _data = res.data;
@@ -495,7 +694,7 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 		}
 
 		var thCells = headers.map(function (h) {
-			return '<th style="padding:6px 8px;white-space:nowrap;">' + h + '</th>';
+			return '<th style="padding:6px 8px;white-space:nowrap;position:sticky;top:0;background:#1F497D;color:#fff;z-index:1;">' + h + '</th>';
 		}).join('');
 
 		var rows = records.map(function (r) {
@@ -515,12 +714,13 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 			+ '<button id="rec-print-btn" style="padding:5px 14px;background:#1e40af;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;">🖨 Print / PDF</button>'
 			+ '<span style="font-size:11px;color:#6b7280;">Click the ID to open record in Frappe</span>'
 			+ '</div>'
-			+ '<div style="overflow:auto;max-height:420px;">'
+			+ '<div style="overflow:auto;max-height:65vh;">'
 			+ '<table id="rec-dlg-tbl" style="width:100%;border-collapse:collapse;font-size:12px;">'
-			+ '<thead><tr style="background:#1F497D;color:#fff;">' + thCells + '</tr></thead>'
+			+ '<thead><tr>' + thCells + '</tr></thead>'
 			+ '<tbody>' + rows + '</tbody></table></div>';
 
 		frappe.msgprint({ title: title + ' (' + records.length + ')', wide: true, message: html });
+		$('.modal.msgprint-dialog:visible').last().addClass('fod-recs-dialog');
 
 		setTimeout(function () {
 			$('#rec-csv-btn').off('click').on('click', csvDownload);

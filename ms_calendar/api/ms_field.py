@@ -3574,19 +3574,47 @@ def _fov_get_col(role, department):
 
 
 @frappe.whitelist()
-def download_field_overall_excel(from_date=None, to_date=None):
+def download_field_overall_excel(
+    from_date=None,
+    to_date=None,
+    state=None,
+    district=None,
+    source=None,
+    role=None,
+    department=None,
+    location=None,
+):
     from datetime import date as date_cls
+    import json as _json
     import openpyxl
     from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
 
-    # ── Query ──
-    filters = [["docstatus", "!=", "2"]]
-    if from_date:
-        filters.append(["creation", ">=", from_date + " 00:00:00"])
-    if to_date:
-        filters.append(["creation", "<=", to_date + " 23:59:59"])
+    def _as_list(val):
+        # Each filter arrives either as a JSON array (multiselect on the
+        # dashboard sends JSON.stringify([...])) or a plain comma-separated
+        # string (manual/API callers) — normalize both to a list, dropping
+        # blanks so an empty selection behaves like "no filter".
+        if not val:
+            return []
+        if isinstance(val, list):
+            return [str(v).strip() for v in val if str(v).strip()]
+        val = str(val).strip()
+        if val.startswith("["):
+            try:
+                return [str(v).strip() for v in _json.loads(val) if str(v).strip()]
+            except Exception:
+                pass
+        return [v.strip() for v in val.split(",") if v.strip()]
 
+    state_list = _as_list(state)
+    district_list = _as_list(district)
+    source_list = _as_list(source)
+    role_list = _as_list(role)
+    department_list = _as_list(department)
+    location_list = _as_list(location)
+
+    # ── Query ──
     # NOTE: this used to query `tabField Registration Form1` — a leftover
     # duplicate doctype with a single test record — instead of the real
     # `tabField Registration Form` table (120,175 records on production).
@@ -3594,25 +3622,63 @@ def download_field_overall_excel(from_date=None, to_date=None):
     # fallback below (which had the right table but silently dropped the
     # from/to date filters) never ran either. Every export came back
     # almost empty. Fixed to query the real table directly, with filters.
+    #
+    # The dashboard page also lets the user filter by state/district/source/
+    # role/department/location (native_district / opportunity), but the
+    # download button used to ignore all of them and just re-derive its own
+    # unfiltered totals — so the exported file never matched what was on
+    # screen. Now applies the same filters the page is currently showing,
+    # each accepting multiple values (multiselect) via IN (...).
+    conditions = ["docstatus != 2"]
+    params = {}
+
+    def _add_in(field, values, key):
+        if not values:
+            return
+        placeholders = []
+        for i, v in enumerate(values):
+            pkey = "{0}_{1}".format(key, i)
+            placeholders.append("%({0})s".format(pkey))
+            params[pkey] = v
+        conditions.append("{0} IN ({1})".format(field, ", ".join(placeholders)))
+
+    if from_date:
+        conditions.append("creation >= %(fd)s")
+        params["fd"] = from_date + " 00:00:00"
+    if to_date:
+        conditions.append("creation <= %(td)s")
+        params["td"] = to_date + " 23:59:59"
+    _add_in("native_district", district_list, "district")
+    _add_in("opportunity", source_list, "source")
+    _add_in("role", role_list, "role")
+    _add_in("department", department_list, "department")
+    _add_in("location", location_list, "location")
+
     records = frappe.db.sql(
         """
         SELECT native_state, role, department, location, worklocation,
                application_status, creation
         FROM `tabField Registration Form`
-        WHERE docstatus != 2
-        {date_filters}
+        WHERE {conditions}
         """.format(
-            date_filters=(
-                ("AND creation >= %(fd)s" if from_date else "")
-                + (" AND creation <= %(td)s" if to_date else "")
-            )
+            conditions=" AND ".join(conditions)
         ),
-        {
-            "fd": from_date + " 00:00:00" if from_date else None,
-            "td": to_date + " 23:59:59" if to_date else None,
-        },
+        params,
         as_dict=True,
     )
+
+    # state filter matches getRecState() in the dashboard JS: location ||
+    # worklocation || native_state, applied after the SQL fetch since that
+    # derived value isn't a single column.
+    if state_list:
+        records = [
+            r
+            for r in records
+            if (
+                (r.get("location") or r.get("worklocation") or r.get("native_state") or "").strip()
+                in state_list
+            )
+        ]
 
     april_1 = date_cls(date_cls.today().year, 4, 1)
 
@@ -3635,29 +3701,29 @@ def download_field_overall_excel(from_date=None, to_date=None):
     }
 
     for rec in records:
-        state = (
+        state_val = (
             (rec.get("location") or "").strip()
             or (rec.get("worklocation") or "").strip()
             or (rec.get("native_state") or "").strip()
             or ""
         )
-        if not state:
+        if not state_val:
             continue  # skip records with no state data
         col = _fov_get_col(rec.get("role") or "", rec.get("department") or "")
         if not col:
             continue
-        if state not in data:
+        if state_val not in data:
             # add dynamically in case state wasn't in initial set
-            data[state] = {c: {k: 0 for k in _FOV_ALL_KEYS} for c in DATA_COLS}
-            if state not in all_entries:
-                all_entries.insert(-1, state)  # insert before Grand Total
+            data[state_val] = {c: {k: 0 for k in _FOV_ALL_KEYS} for c in DATA_COLS}
+            if state_val not in all_entries:
+                all_entries.insert(-1, state_val)  # insert before Grand Total
 
         creation_date = (
             rec["creation"].date() if rec.get("creation") else date_cls.today()
         )
         sk = _FOV_STATUS_TO_KEY.get(rec.get("application_status") or "")
 
-        for entry in [state, "Grand Total"]:
+        for entry in [state_val, "Grand Total"]:
             data[entry][col]["total"] += 1
             if creation_date < april_1:
                 data[entry][col]["carried_forward"] += 1
