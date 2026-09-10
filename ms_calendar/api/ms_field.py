@@ -14,6 +14,86 @@ _CANDIDATE_SENDER = (
 )
 
 
+def _log_field_interview_email(
+    doc_name, sent_to, subject, channel, status, error=None, message=None
+):
+    """Records one email send attempt straight into Field Interview
+    Schedule's own Activity/Timeline feed (the same tab that already shows
+    "You created this" / comments / the "+ New Email" composer), so a
+    recruiter can open a record and see whether every candidate/interviewer/
+    demo-feedback email for it actually went out — not just the failures.
+    Most sends in this file go straight through Microsoft Graph's own
+    sendMail API (not frappe.sendmail), which never creates a Frappe Email
+    Queue entry at all; before this, a successful Graph send left literally
+    no record anywhere, and a failed one only surfaced in the Error Log,
+    disconnected from the record it happened on.
+
+    `message` is the actual HTML body that was (or would have been) sent —
+    passed through so the logged entry shows the real email content
+    instead of just a one-line "sent to X" note.
+
+    A "Sent" attempt is logged as a real Communication (reference_doctype/
+    reference_name = this record) — the same doc type Frappe's own "+ New
+    Email" composer creates, so it renders in Activity exactly like a sent
+    email, with its `content` set to the real body. frappe.sendmail()
+    itself doesn't create one of these on its own (same reasoning as
+    send_leader_final_round_feedback_pdf's manual Communication insert
+    elsewhere in this file), and a direct Graph sendMail call has even less
+    native trace, so this is the only place either one gets recorded. A
+    "Failed" attempt is logged as a Comment instead — Communication's own
+    status options don't cover a failed send, and a comment already renders
+    in the same Activity feed with a clearly different look, so a failure
+    doesn't get mistaken for a delivered email at a glance; the comment
+    still includes the body that failed to send, for the same reason.
+
+    Both are inserted directly as standalone documents (not via
+    frappe.get_doc(parent).append(...).save()) so logging never re-triggers
+    the parent doctype's own validation/hooks, and a logging failure can
+    never itself break the actual send it's recording — errors here are
+    swallowed, same as this file's existing frappe.log_error() calls.
+    """
+    if not doc_name:
+        return
+    try:
+        if status == "Sent":
+            frappe.get_doc(
+                {
+                    "doctype": "Communication",
+                    "communication_type": "Communication",
+                    "communication_medium": "Email",
+                    "sent_or_received": "Sent",
+                    "reference_doctype": "Field Interview Schedule",
+                    "reference_name": doc_name,
+                    "subject": (subject or "")[:500],
+                    "content": message or f"Sent to {sent_to} via {channel}.",
+                    "recipients": sent_to,
+                }
+            ).insert(ignore_permissions=True)
+        else:
+            _body_html = f"<br>{message}" if message else ""
+            _error_html = f"<br><i>Error: {error}</i>" if error else ""
+            frappe.get_doc(
+                {
+                    "doctype": "Comment",
+                    "comment_type": "Comment",
+                    "reference_doctype": "Field Interview Schedule",
+                    "reference_name": doc_name,
+                    "content": (
+                        f"⚠️ Email to {sent_to} failed ({channel}) — {subject}"
+                        f"{_error_html}{_body_html}"
+                    )[:2000],
+                }
+            ).insert(ignore_permissions=True)
+    except Exception:
+        try:
+            frappe.log_error(
+                title="FIELD_INTERVIEW_EMAIL_LOG_ERROR",
+                message=f"Could not log email attempt for {doc_name}: {frappe.get_traceback()}",
+            )
+        except Exception:
+            pass
+
+
 def _resolve_attachment_bytes(web_path):
     """Resolve a File-field url (private or public) to (file_name, bytes),
     trying every File row that shares this file_url rather than blindly
@@ -1881,6 +1961,19 @@ comments/recommendations for the calibration process and final selection decisio
         )
         patch_res.raise_for_status()
         _patch_ok = True
+        # This PATCH (sendUpdates=sendToAllAndSaveCopy) is what actually
+        # notifies the interviewer(s)/CC — Graph sends them a native Outlook
+        # calendar invite off the attendee list, not a frappe.sendmail/
+        # sendMail call this file makes directly, so without logging it
+        # here explicitly, the interviewer side of "did they get notified?"
+        # would be invisible in Activity even though the candidate side is
+        # covered further below. Logged once per interviewer/CC recipient,
+        # same as every other email path in this function.
+        for _invitee in interviewer_list + cc_list:
+            _log_field_interview_email(
+                doc_name, _invitee, calendar_subject, "Microsoft Graph", "Sent",
+                message=final_body,
+            )
     except Exception as patch_err:
         try:
             _patch_detail = (
@@ -1927,6 +2020,10 @@ comments/recommendations for the calibration process and final selection decisio
             )
             _sr.raise_for_status()
             _self_sent = True
+            _log_field_interview_email(
+                doc_name, Organizer_email, calendar_subject, "Microsoft Graph", "Sent",
+                message=final_body,
+            )
         except Exception as _se:
             try:
                 frappe.log_error(
@@ -1935,6 +2032,10 @@ comments/recommendations for the calibration process and final selection decisio
                 )
             except Exception:
                 pass
+            _log_field_interview_email(
+                doc_name, Organizer_email, calendar_subject, "Microsoft Graph", "Failed", _se,
+                message=final_body,
+            )
 
         if not _self_sent:
             # Only claim Organizer_email as the From address if Frappe has a
@@ -1962,6 +2063,10 @@ comments/recommendations for the calibration process and final selection decisio
                     **_org_sender_arg,
                 )
                 _self_sent = True
+                _log_field_interview_email(
+                    doc_name, Organizer_email, calendar_subject, "Frappe Email", "Sent",
+                    message=final_body,
+                )
             except Exception as _fe:
                 try:
                     frappe.log_error(
@@ -1970,6 +2075,10 @@ comments/recommendations for the calibration process and final selection decisio
                     )
                 except Exception:
                     pass
+                _log_field_interview_email(
+                    doc_name, Organizer_email, calendar_subject, "Frappe Email", "Failed", _fe,
+                    message=final_body,
+                )
 
     # If PATCH failed after all retries, fall back to a plain email to each interviewer
     # so they at least receive the interview details and feedback form link.
@@ -2003,8 +2112,15 @@ comments/recommendations for the calibration process and final selection decisio
                 )
                 _iv_res.raise_for_status()
                 _iv_graph_sent = True
-            except Exception:
-                pass
+                _log_field_interview_email(
+                    doc_name, _iv_email, calendar_subject, "Microsoft Graph", "Sent",
+                    message=final_body,
+                )
+            except Exception as _iv_err:
+                _log_field_interview_email(
+                    doc_name, _iv_email, calendar_subject, "Microsoft Graph", "Failed", _iv_err,
+                    message=final_body,
+                )
             if not _iv_graph_sent:
                 # See comment above: only pass sender= when a matching Email
                 # Account exists, otherwise a mismatched From causes a
@@ -2028,8 +2144,15 @@ comments/recommendations for the calibration process and final selection decisio
                         ],
                         **_iv_sender_arg,
                     )
-                except Exception:
-                    pass
+                    _log_field_interview_email(
+                        doc_name, _iv_email, calendar_subject, "Frappe Email", "Sent",
+                        message=final_body,
+                    )
+                except Exception as _iv_fallback_err:
+                    _log_field_interview_email(
+                        doc_name, _iv_email, calendar_subject, "Frappe Email", "Failed",
+                        _iv_fallback_err, message=final_body,
+                    )
 
     # ----------------------------------------
     # EMAIL TO DEMO FEEDBACK INTERVIEWER(S)
@@ -2084,6 +2207,10 @@ comments/recommendations for the calibration process and final selection decisio
                 )
                 _dr.raise_for_status()
                 _demo_graph_sent = True
+                _log_field_interview_email(
+                    doc_name, _dmail, _demo_subject, "Microsoft Graph", "Sent",
+                    message=_demo_body,
+                )
             except Exception as _derr:
                 try:
                     frappe.log_error(
@@ -2091,6 +2218,10 @@ comments/recommendations for the calibration process and final selection decisio
                     )
                 except Exception:
                     pass
+                _log_field_interview_email(
+                    doc_name, _dmail, _demo_subject, "Microsoft Graph", "Failed", _derr,
+                    message=_demo_body,
+                )
 
             # Fallback: frappe.sendmail if Graph API failed
             if not _demo_graph_sent:
@@ -2111,6 +2242,10 @@ comments/recommendations for the calibration process and final selection decisio
                         delayed=False,
                         **_demo_sender_arg,
                     )
+                    _log_field_interview_email(
+                        doc_name, _dmail, _demo_subject, "Frappe Email", "Sent",
+                        message=_demo_body,
+                    )
                 except Exception as _dfallback_err:
                     try:
                         frappe.log_error(
@@ -2119,6 +2254,10 @@ comments/recommendations for the calibration process and final selection decisio
                         )
                     except Exception:
                         pass
+                    _log_field_interview_email(
+                        doc_name, _dmail, _demo_subject, "Frappe Email", "Failed",
+                        _dfallback_err, message=_demo_body,
+                    )
 
     # ----------------------------------------
     # EMAIL TO CANDIDATE
@@ -2201,6 +2340,10 @@ comments/recommendations for the calibration process and final selection decisio
                 _gc1_err = _gc1.text
                 _gc1.raise_for_status()
                 _graph_cand_sent = True
+                _log_field_interview_email(
+                    doc_name, interviewee_email, candidate_email_subject,
+                    "Microsoft Graph", "Sent", message=candidate_email_body,
+                )
             except Exception as _gc1_exc:
                 try:
                     frappe.log_error(
@@ -2209,6 +2352,11 @@ comments/recommendations for the calibration process and final selection decisio
                     )
                 except Exception:
                     pass
+                _log_field_interview_email(
+                    doc_name, interviewee_email, candidate_email_subject,
+                    "Microsoft Graph", "Failed", _gc1_err or _gc1_exc,
+                    message=candidate_email_body,
+                )
 
             # Attempt 2: frappe.sendmail via Frappe's own outgoing Email Account.
             # IMPORTANT: only claim the candidate sender mailbox as the From
@@ -2253,6 +2401,10 @@ comments/recommendations for the calibration process and final selection decisio
                         **_cand_sender_arg,
                     )
                     _graph_cand_sent = True
+                    _log_field_interview_email(
+                        doc_name, interviewee_email, candidate_email_subject,
+                        "Frappe Email", "Sent", message=candidate_email_body,
+                    )
                 except Exception as _cand_fb_err:
                     try:
                         frappe.log_error(
@@ -2261,6 +2413,10 @@ comments/recommendations for the calibration process and final selection decisio
                         )
                     except Exception:
                         pass
+                    _log_field_interview_email(
+                        doc_name, interviewee_email, candidate_email_subject,
+                        "Frappe Email", "Failed", _cand_fb_err, message=candidate_email_body,
+                    )
 
             if not _graph_cand_sent:
                 try:
@@ -2664,7 +2820,23 @@ def update_interview_event(
     # Candidate is invited by email only (never a Graph attendee), so they
     # don't get Outlook's automatic "meeting updated" notice — email them
     # directly. Interviewers/CC/rooms ARE Graph attendees on this event, so
-    # the PATCH above already notifies them natively.
+    # the PATCH above already notifies them natively — logged here (same as
+    # create_interview_event's own attendees PATCH) so the interviewer side
+    # of "did they get notified?" isn't invisible in Activity just because
+    # it's Outlook's own notice rather than a direct sendmail/sendMail call.
+    # Unlike create_interview_event's PATCH, this one doesn't set a custom
+    # HTML body — only time/attendees change — so there's no email content
+    # to show; the log just records that the native update notice went out.
+    _reschedule_notify_subject = f"Interview Rescheduled – {Applicants_name} ({interview_date_str})"
+    for _invitee in interviewer_list + cc_list:
+        _log_field_interview_email(
+            doc_name, _invitee, _reschedule_notify_subject, "Microsoft Graph", "Sent",
+            message=(
+                "No custom email body — Outlook's native \"meeting updated\" "
+                f"notice was sent for the new time: {interview_date_str}, "
+                f"{interview_time_str}."
+            ),
+        )
     if interviewee_email:
         candidate_body = f"""
         <p>Hi {Applicants_name or "there"},</p>
@@ -2682,18 +2854,27 @@ def update_interview_event(
             {"email_id": doc.candidate_email_sendar, "enable_outgoing": 1},
         ):
             sender_arg = {"sender": doc.candidate_email_sendar}
+        _reschedule_subject = f"Interview Rescheduled – {Applicants_name} ({interview_date_str})"
         try:
             frappe.sendmail(
                 recipients=[interviewee_email],
-                subject=f"Interview Rescheduled – {Applicants_name} ({interview_date_str})",
+                subject=_reschedule_subject,
                 message=candidate_body,
                 delayed=False,
                 **sender_arg,
             )
-        except Exception:
+            _log_field_interview_email(
+                doc_name, interviewee_email, _reschedule_subject, "Frappe Email", "Sent",
+                message=candidate_body,
+            )
+        except Exception as _resched_mail_err:
             frappe.log_error(
                 title="FIELD_INTERVIEW_RESCHEDULE_MAIL_ERROR",
                 message=frappe.get_traceback(),
+            )
+            _log_field_interview_email(
+                doc_name, interviewee_email, _reschedule_subject, "Frappe Email", "Failed",
+                _resched_mail_err, message=candidate_body,
             )
 
     # Hybrid interviewers have their own separate Outlook event — PATCH its
@@ -2949,18 +3130,27 @@ def cancel_interview_event(name):
         <p>We will reach out separately if the interview needs to be rescheduled.</p>
         <p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
         """
+        _cancel_subject = f"Interview Cancelled – Azim Premji Foundation ({interview_date})"
         try:
             frappe.sendmail(
                 recipients=[doc.attendees],
-                subject=f"Interview Cancelled – Azim Premji Foundation ({interview_date})",
+                subject=_cancel_subject,
                 message=candidate_body,
                 delayed=False,
                 **sender_arg,
             )
-        except Exception:
+            _log_field_interview_email(
+                doc.name, doc.attendees, _cancel_subject, "Frappe Email", "Sent",
+                message=candidate_body,
+            )
+        except Exception as _cancel_mail_err:
             frappe.log_error(
                 title="FIELD_INTERVIEW_CANCEL_MAIL_ERROR",
                 message=frappe.get_traceback(),
+            )
+            _log_field_interview_email(
+                doc.name, doc.attendees, _cancel_subject, "Frappe Email", "Failed",
+                _cancel_mail_err, message=candidate_body,
             )
 
     # Interviewers/CC/rooms are Graph attendees on the event, so the DELETE
@@ -4889,21 +5079,30 @@ def send_field_interview_feedback_reminders():
         ):
             sender_arg = {"sender": s.organizer_email}
 
+        _reminder_subject = f"Reminder: Interview Feedback Pending – {s.applicants_name}"
         for email in interviewer_emails:
             try:
                 frappe.sendmail(
                     recipients=[email],
-                    subject=f"Reminder: Interview Feedback Pending – {s.applicants_name}",
+                    subject=_reminder_subject,
                     message=reminder_body,
                     delayed=False,
                     reference_doctype="Field Interview Schedule",
                     reference_name=s.name,
                     **sender_arg,
                 )
-            except Exception:
+                _log_field_interview_email(
+                    s.name, email, _reminder_subject, "Frappe Email", "Sent",
+                    message=reminder_body,
+                )
+            except Exception as _reminder_err:
                 frappe.log_error(
                     title="Field Interview Feedback Reminder Error",
                     message=frappe.get_traceback()[:2000],
+                )
+                _log_field_interview_email(
+                    s.name, email, _reminder_subject, "Frappe Email", "Failed", _reminder_err,
+                    message=reminder_body,
                 )
 
         # Do NOT mark reminder_sent here - keep re-checking daily until
@@ -5004,21 +5203,30 @@ def send_field_interview_first_feedback_reminder():
         ):
             sender_arg = {"sender": s.organizer_email}
 
+        _first_reminder_subject = f"Reminder: Interview Feedback Pending – {s.applicants_name}"
         for email in interviewer_emails:
             try:
                 frappe.sendmail(
                     recipients=[email],
-                    subject=f"Reminder: Interview Feedback Pending – {s.applicants_name}",
+                    subject=_first_reminder_subject,
                     message=reminder_body,
                     delayed=False,
                     reference_doctype="Field Interview Schedule",
                     reference_name=s.name,
                     **sender_arg,
                 )
-            except Exception:
+                _log_field_interview_email(
+                    s.name, email, _first_reminder_subject, "Frappe Email", "Sent",
+                    message=reminder_body,
+                )
+            except Exception as _first_reminder_err:
                 frappe.log_error(
                     title="Field Interview First Feedback Reminder Error",
                     message=frappe.get_traceback()[:2000],
+                )
+                _log_field_interview_email(
+                    s.name, email, _first_reminder_subject, "Frappe Email", "Failed",
+                    _first_reminder_err, message=reminder_body,
                 )
 
         frappe.db.set_value(

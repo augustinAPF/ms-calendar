@@ -60,6 +60,33 @@ def _get_col(role):
 	return "RP"
 
 
+def _detail_fields():
+	"""Every real, per-applicant field on Field Registration Form — layout
+	fields (Section/Column/Tab Break, HTML, Button) and child tables
+	excluded, since those aren't values that belong in one flat row.
+	Built from the doctype's own meta rather than a hand-maintained list,
+	so a field added/renamed there shows up in the Details sheet
+	automatically without this file needing a matching edit — "whole data"
+	is meant literally here (2026-09-07 request), not a curated subset.
+	Returns [(fieldname, label), ...] in form order; a fieldname repeated
+	more than once in the doctype (confirmed: "zayam_id" is on this one)
+	is only included the first time.
+	"""
+	skip_types = {
+		"Section Break", "Column Break", "Tab Break", "HTML", "Button", "Fold",
+		"Table", "Table MultiSelect",
+	}
+	meta = frappe.get_meta("Field Registration Form")
+	seen = set()
+	out = []
+	for f in meta.fields:
+		if f.fieldtype in skip_types or f.fieldname in seen:
+			continue
+		seen.add(f.fieldname)
+		out.append((f.fieldname, f.label or f.fieldname))
+	return out
+
+
 def _district_of(rec):
 	""""School" is derived from the Role field's own text, not
 	native_district/location (confirmed 2026-09-04) — see the matching
@@ -75,7 +102,7 @@ def _district_of(rec):
 
 
 @frappe.whitelist()
-def download_st_district_funnel(from_date=None, to_date=None):
+def download_st_district_funnel(from_date=None, to_date=None, native_state=None, school=None):
 	"""Server-rendered .xlsx of the "School Teacher — District Funnel"
 	report, with the same header/row background colours as the on-screen
 	table (reports.js) — the CSV export used elsewhere on this page has no
@@ -89,20 +116,36 @@ def download_st_district_funnel(from_date=None, to_date=None):
 			[(from_date or "2000-01-01") + " 00:00:00", (to_date or today()) + " 23:59:59"],
 		]
 
+	# "name" and "creation" are the two fields the Details sheet needs that
+	# aren't in _detail_fields() (they're the docname/ID and a standard
+	# system field, not real meta fields on the doctype) — everything else
+	# comes straight from the doctype's own field list, so the Details
+	# sheet always has "whole data", not a hand-picked subset.
+	detail_fields = _detail_fields()
 	rows = frappe.get_all(
 		"Field Registration Form",
 		filters=filters,
-		fields=["name", "full_name_aadhaar", "application_status", "role", "department",
-			"location", "native_state", "native_district", "creation"],
+		fields=["name", "creation"] + [fn for fn, _label in detail_fields],
 		limit_page_length=0,
 	)
 	st_rows = [r for r in rows if _get_col(r.role) == "ST"]
 
+	# Same State/School dropdown filters as the on-screen table
+	# (reports.js's applySTFFilters) — passed through as querystring params
+	# from the Download Excel button so the file matches whatever's
+	# currently filtered on screen, instead of always exporting every
+	# School Teacher record in the date range.
+	if native_state:
+		st_rows = [r for r in st_rows if (r.get("native_state") or "").strip() == native_state]
+	if school:
+		st_rows = [r for r in st_rows if _district_of(r) == school]
+
 	districts = sorted({_district_of(r) for r in st_rows})
 
 	from openpyxl import Workbook
-	from openpyxl.styles import Alignment, Font, PatternFill
+	from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 	from openpyxl.utils import get_column_letter
+	from openpyxl.worksheet.hyperlink import Hyperlink
 
 	wb = Workbook()
 	ws = wb.active
@@ -129,6 +172,75 @@ def download_st_district_funnel(from_date=None, to_date=None):
 		c.font = header_font
 		c.alignment = thin_center
 
+	# "Details" sheet — the Excel equivalent of clicking a number cell on
+	# the on-screen report (reports.js's stf-cell click handler, which
+	# opens a dialog of the matching records). Excel cells can't pop up a
+	# dialog on click, so instead every non-zero count cell on the summary
+	# sheet becomes a hyperlink that jumps straight to that exact block of
+	# matching records here, and the sheet has AutoFilter turned on so it
+	# can be narrowed further by hand. Built in the same School x Stage
+	# loop as the summary counts below, so a block's row range and its
+	# cell's hyperlink target can never drift out of sync.
+	hyperlink_font = Font(color="0563C1", underline="single")
+	details_ws = wb.create_sheet("Details")
+	# School/Stage (this report's own grouping, not on the doctype) +
+	# Applicant ID (the docname) up front, then literally every field
+	# _detail_fields() found on Field Registration Form, in form order —
+	# "whole data" per applicant, not a hand-picked subset.
+	details_headers = ["School", "Stage", "Applicant ID"] + [label for _fn, label in detail_fields] + ["Date"]
+	last_col_letter = get_column_letter(len(details_headers))
+
+	# Row 1: a plain-language instruction banner, not just column headers.
+	# A hyperlink can jump here but can't apply a filter on its own (no
+	# code runs on click in a static .xlsx, and OnlyOffice doesn't
+	# reliably support the macro event that would need). The AutoFilter
+	# buttons on the School/Stage columns below already do the "show only
+	# this, hide everything else" job by hand in two clicks — this banner
+	# spells that out right in the file instead of assuming it's obvious.
+	details_ws.merge_cells(f"A1:{last_col_letter}1")
+	banner = details_ws.cell(
+		row=1, column=1,
+		value=(
+			"To see ONLY one group and hide everything else: click the ▼ on the "
+			"School column below, tick just that School — then click the ▼ on "
+			"Stage and tick just that Stage. Clear both filters (▼ → Clear Filter) "
+			"to see everything again."
+		),
+	)
+	banner.font = Font(bold=True, color="7D4F00")
+	banner.fill = PatternFill(start_color="FFF3D6", end_color="FFF3D6", fill_type="solid")
+	banner.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+	details_ws.row_dimensions[1].height = 30
+
+	for ci, h in enumerate(details_headers, start=1):
+		c = details_ws.cell(row=2, column=ci, value=h)
+		c.fill = header_fill
+		c.font = header_font
+	details_ws.freeze_panes = "A3"
+	details_ws.auto_filter.ref = f"A2:{last_col_letter}2"
+	details_row = 3  # next free row on the Details sheet
+
+	# A real click-driven filter isn't possible in a static .xlsx (that
+	# needs a macro, and OnlyOffice doesn't reliably support the
+	# FollowHyperlink event a macro would need). Every hyperlink already
+	# jumps to a block that is ONLY that School+Stage's matching rows,
+	# nothing else mixed in — this banding just makes that block boundary
+	# obvious at a glance instead of requiring the reader to notice the
+	# School/Stage columns changed.
+	# Both tints, not white — a white block is indistinguishable from the
+	# sheet's own blank background (confirmed 2026-09-07: it just looked
+	# unshaded), which defeated the point of banding every other block.
+	# Same pastel pair as STATE_COLORS in reports.js, so this reads as the
+	# same visual language as the rest of the report.
+	block_fills = [
+		PatternFill(start_color="DDEBF7", end_color="DDEBF7", fill_type="solid"),
+		PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid"),
+	]
+	block_top = Side(style="medium", color="404040")
+	block_bottom = Side(style="medium", color="404040")
+	block_side = Side(style="thin", color="BFBFBF")
+	block_parity = 0  # alternates 0/1 so consecutive blocks never share a fill
+
 	grand = {key: 0 for (_label, key, _statuses) in STF_COLS}
 	row_idx = 2
 	for d in districts:
@@ -137,13 +249,49 @@ def download_st_district_funnel(from_date=None, to_date=None):
 		name_cell.fill = school_fill
 		name_cell.font = Font(bold=True)
 
-		for ci, (_label, key, statuses) in enumerate(STF_COLS, start=2):
+		for ci, (label, key, statuses) in enumerate(STF_COLS, start=2):
 			if statuses is None:
-				cnt = len(recs)
+				matched = recs
 			else:
-				cnt = sum(1 for r in recs if (r.application_status or "").strip() in statuses)
+				matched = [r for r in recs if (r.application_status or "").strip() in statuses]
+			cnt = len(matched)
 			grand[key] += cnt
-			ws.cell(row=row_idx, column=ci, value=cnt or None)
+
+			cell = ws.cell(row=row_idx, column=ci, value=cnt or None)
+			if matched:
+				block_start = details_row
+				block_end = details_row + len(matched) - 1
+				fill = block_fills[block_parity]
+				block_parity = 1 - block_parity
+				for i, r in enumerate(matched):
+					is_first = (details_row == block_start)
+					is_last = (details_row == block_end)
+					border = Border(
+						top=block_top if is_first else None,
+						bottom=block_bottom if is_last else None,
+						left=block_side, right=block_side,
+					)
+					row_values = (
+						[d, label, r.name]
+						+ [r.get(fn) for fn, _label in detail_fields]
+						+ [str(r.creation).split(" ")[0] if r.creation else ""]
+					)
+					for col, val in enumerate(row_values, start=1):
+						dc = details_ws.cell(row=details_row, column=col, value=val)
+						dc.fill = fill
+						dc.border = border
+					details_row += 1
+				# location= (not a "#..." string on cell.hyperlink directly)
+				# is what makes openpyxl write a plain internal `location`
+				# attribute with no relationship at all. Assigning a bare
+				# "#'Details'!A1" string instead makes openpyxl create an
+				# actual external hyperlink relationship whose Target
+				# literally is that "#..." text with TargetMode="External"
+				# — which is exactly what was making OnlyOffice (and Excel)
+				# show a "this link may be unsafe" warning on every click,
+				# despite the link only ever pointing inside this same file.
+				cell.hyperlink = Hyperlink(ref=cell.coordinate, location=f"'Details'!A{block_start}")
+				cell.font = hyperlink_font
 		row_idx += 1
 
 	total_name = ws.cell(row=row_idx, column=1, value="Total")
@@ -153,6 +301,15 @@ def download_st_district_funnel(from_date=None, to_date=None):
 		c = ws.cell(row=row_idx, column=ci, value=grand[key] or None)
 		c.fill = total_fill
 		c.font = total_font
+
+	# details_headers now runs to ~55 columns ("whole data" per applicant,
+	# not a hand-picked subset — see _detail_fields()), so fixed per-letter
+	# widths aren't practical to hand-maintain. Size each one off its own
+	# header text length instead — short ones (Age, DOB) stay narrow, long
+	# ones (the various "If Yes, please mention..." labels) get more room,
+	# capped so one very long label can't blow out the whole sheet.
+	for ci, h in enumerate(details_headers, start=1):
+		details_ws.column_dimensions[get_column_letter(ci)].width = min(40, max(12, len(h) + 4))
 
 	ws.freeze_panes = "B2"
 	ws.column_dimensions["A"].width = 22

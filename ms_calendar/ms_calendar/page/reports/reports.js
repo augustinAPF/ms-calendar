@@ -1777,8 +1777,77 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		{ label: 'Pending with CBT (Offer Released)', key: 'pending_cbt', statuses: ['Pending With CBT', 'CBT Assigned', 'Offer', 'Offer Sent'] },
 	];
 
-	var _stfAllRecs = [];
+	var _stfAllRecs = [];   // everything fetched for the current date range (unfiltered by State/School)
+	var _stfViewRecs = [];  // _stfAllRecs after the State/School dropdown filters are applied — what actually renders
 	var _stfDistricts = [];
+
+	// "School" in the tracker sheet is derived from the candidate's own
+	// Role field, not native_district/location (confirmed 2026-09-04) —
+	// those were sometimes blank or held a full "City, State, India"
+	// address instead of a clean place name. Role is a Link to
+	// "Recruitment Designation", and its value on Field Registration
+	// Form is already that record's own display text (e.g. "School
+	// Teacher - Barmer", "School Teacher - Khargone, Madhya Pradesh")
+	// — Frappe Link fields store the linked doc's `name`, and here
+	// name == label, so no extra lookup query is needed. Takes
+	// everything after the LAST " - " as the school; a handful of
+	// designations (e.g. "Recruitment Drive in Chittorgarh for School
+	// Teacher Rajasthan") don't fit that "<Role> - <School>" shape at
+	// all — those fall back to the whole role text as-is rather than
+	// guessing at an unfamiliar format and risking a wrong bucket.
+	// Hoisted to module scope (was previously local to
+	// renderSTDistrictBody) so the School filter dropdown can use the
+	// exact same bucketing as the table itself.
+	function districtOf(r) {
+		var role = (r.role || '').trim();
+		if (!role) return 'Unspecified';
+		var dashIdx = role.lastIndexOf(' - ');
+		if (dashIdx >= 0) return role.slice(dashIdx + 3).trim() || 'Unspecified';
+		return role;
+	}
+
+	// Populate the State / School dropdowns from the full fetched set
+	// (_stfAllRecs), not the already-filtered _stfViewRecs — otherwise
+	// picking a State would narrow the School list to only that state's
+	// schools and vice versa, instead of both staying full option lists.
+	// Preserves the current selection across a Refresh (re-fetch) as long
+	// as that value still exists in the new data.
+	function populateSTFFilterDropdowns() {
+		var stSet = {}, schSet = {};
+		_stfAllRecs.forEach(function (r) {
+			var st = (r.native_state || '').trim();
+			if (st) stSet[st] = true;
+			schSet[districtOf(r)] = true;
+		});
+		var curState = $('#stf-state').val() || '';
+		var curSchool = $('#stf-school').val() || '';
+
+		var $st = $('#stf-state').empty().append('<option value="">All States</option>');
+		Object.keys(stSet).sort().forEach(function (v) { $st.append('<option value="' + v + '">' + v + '</option>'); });
+		if (stSet[curState]) $st.val(curState);
+
+		var $sch = $('#stf-school').empty().append('<option value="">All Schools</option>');
+		Object.keys(schSet).sort().forEach(function (v) { $sch.append('<option value="' + v + '">' + v + '</option>'); });
+		if (schSet[curSchool]) $sch.val(curSchool);
+	}
+
+	// Applies the current State / School dropdown selections on top of
+	// _stfAllRecs into _stfViewRecs, then re-renders — called both on
+	// dropdown change and right after a fetch.
+	function applySTFFilters() {
+		var stF = $('#stf-state').val() || '';
+		var schF = $('#stf-school').val() || '';
+		_stfViewRecs = _stfAllRecs.filter(function (r) {
+			if (stF && (r.native_state || '').trim() !== stF) return false;
+			if (schF && districtOf(r) !== schF) return false;
+			return true;
+		});
+		var infoText = 'School Teacher records: ' + _stfViewRecs.length;
+		if (stF || schF) infoText += ' of ' + _stfAllRecs.length;
+		infoText += ' | Date: ' + frappe.datetime.now_date();
+		$('#stf-info').text(infoText);
+		renderSTDistrictBody();
+	}
 
 	function showSTDistrictFunnel() {
 		$('#rpt-main').html(`
@@ -1789,6 +1858,8 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				<input type="date" class="rpt-toolbar-date" id="stf-from" />
 				<span class="rpt-toolbar-label">To:</span>
 				<input type="date" class="rpt-toolbar-date" id="stf-to" />
+				<select class="rpt-toolbar-date" id="stf-state" style="min-width:140px;"><option value="">All States</option></select>
+				<select class="rpt-toolbar-date" id="stf-school" style="min-width:160px;"><option value="">All Schools</option></select>
 				<button class="rpt-btn-refresh" id="stf-refresh">&#x21bb; Refresh</button>
 				<button class="rpt-btn-dl" id="stf-download">⬇ Download Excel</button>
 				<span class="rpt-info" id="stf-info"></span>
@@ -1805,16 +1876,23 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 
 		$('#rpt-back').on('click', showHub);
 		$('#stf-refresh').on('click', fetchSTDistrictData);
+		// Re-filter in the browser only — no re-fetch needed, since
+		// _stfAllRecs already has every record for the current date range.
+		$('#stf-state,#stf-school').on('change', applySTFFilters);
 		// Real .xlsx with the same header/row colours as the on-screen
 		// table — the CSV export used elsewhere on this page has no
 		// concept of colour, so this is a server-rendered file instead
 		// (ms_calendar.api.reports.download_st_district_funnel), built
-		// with the exact same From/To filter currently on screen.
+		// with the exact same From/To/State/School filters currently on
+		// screen.
 		$('#stf-download').on('click', function () {
 			var from = $('#stf-from').val() || '';
 			var to = $('#stf-to').val() || '';
+			var state = $('#stf-state').val() || '';
+			var school = $('#stf-school').val() || '';
 			var url = '/api/method/ms_calendar.api.reports.download_st_district_funnel'
-				+ '?from_date=' + encodeURIComponent(from) + '&to_date=' + encodeURIComponent(to);
+				+ '?from_date=' + encodeURIComponent(from) + '&to_date=' + encodeURIComponent(to)
+				+ '&native_state=' + encodeURIComponent(state) + '&school=' + encodeURIComponent(school);
 			window.open(url, '_blank');
 		});
 		fetchSTDistrictData();
@@ -1860,8 +1938,10 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				// real classifier so health/livelihood roles that happen to
 				// contain "teacher" as a substring can't slip through.
 				_stfAllRecs = all.filter(function (rec) { return getCol(rec.role) === 'ST'; });
-				$('#stf-info').text('School Teacher records: ' + _stfAllRecs.length + ' | Date: ' + frappe.datetime.now_date());
-				renderSTDistrictBody();
+				populateSTFFilterDropdowns();
+				// Sets #stf-info itself (accounting for whatever State/School
+				// filter is currently selected) and renders the table.
+				applySTFFilters();
 			},
 			error: function () {
 				$('#stf-tbl-wrap').html('<div class="rpt-loading">Failed to load. Please refresh.</div>');
@@ -1870,34 +1950,20 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 	}
 
 	function renderSTDistrictBody() {
-		// "School" in the tracker sheet is derived from the candidate's own
-		// Role field, not native_district/location (confirmed 2026-09-04) —
-		// those were sometimes blank or held a full "City, State, India"
-		// address instead of a clean place name. Role is a Link to
-		// "Recruitment Designation", and its value on Field Registration
-		// Form is already that record's own display text (e.g. "School
-		// Teacher - Barmer", "School Teacher - Khargone, Madhya Pradesh")
-		// — Frappe Link fields store the linked doc's `name`, and here
-		// name == label, so no extra lookup query is needed. Takes
-		// everything after the LAST " - " as the school; a handful of
-		// designations (e.g. "Recruitment Drive in Chittorgarh for School
-		// Teacher Rajasthan") don't fit that "<Role> - <School>" shape at
-		// all — those fall back to the whole role text as-is rather than
-		// guessing at an unfamiliar format and risking a wrong bucket.
-		function districtOf(r) {
-			var role = (r.role || '').trim();
-			if (!role) return 'Unspecified';
-			var dashIdx = role.lastIndexOf(' - ');
-			if (dashIdx >= 0) return role.slice(dashIdx + 3).trim() || 'Unspecified';
-			return role;
-		}
-
+		// districtOf() is now module-level (see above, near
+		// populateSTFFilterDropdowns) so the School dropdown and this
+		// table use the exact same bucketing.
+		//
+		// Renders _stfViewRecs — _stfAllRecs after the State/School
+		// dropdown filters are applied (see applySTFFilters above), not
+		// the raw fetch — so the table, the info line, and the
+		// drill-down dialog all agree with what's currently selected.
 		var distSet = {};
-		_stfAllRecs.forEach(function (r) { distSet[districtOf(r)] = true; });
+		_stfViewRecs.forEach(function (r) { distSet[districtOf(r)] = true; });
 		_stfDistricts = Object.keys(distSet).sort();
 
 		if (!_stfDistricts.length) {
-			$('#stf-tbl-wrap').html('<div class="rpt-loading">No School Teacher applications in this range.</div>');
+			$('#stf-tbl-wrap').html('<div class="rpt-loading">No School Teacher applications match the current filters.</div>');
 			return;
 		}
 
@@ -1908,7 +1974,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		thead += '</tr></thead>';
 
 		function districtRecs(d) {
-			return _stfAllRecs.filter(function (r) { return districtOf(r) === d; });
+			return _stfViewRecs.filter(function (r) { return districtOf(r) === d; });
 		}
 		function colCount(recs, col) {
 			if (!col.statuses) return recs.length;

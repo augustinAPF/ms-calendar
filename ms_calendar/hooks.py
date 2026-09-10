@@ -565,6 +565,7 @@ fixtures = [
                     "Health Interview Schedule",
                     "Health Document Collection",
                     "Philanthrophy Document Collection",
+                    "Field Document Collection",
                 ],
             ]
         ],

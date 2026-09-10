@@ -80,17 +80,17 @@ def _logo_html():
     return f'<img src="data:image/png;base64,{logo_base64}" style="height:48px;">'
 
 
-# Every Health-family sub-unit (PG Fellowship, MBBS Fellowship, Health -
-# Common) sends interviewers to a real public feedback web form hosted on
+# Every Health-family sub-unit (PG Fellowship, MBBS Fellowship, Hospital
+# and Urban) sends interviewers to a real public feedback web form hosted on
 # pathways.azimpremjifoundation.org — not a Desk route — and which exact
 # form depends on BOTH which sub-unit the interview belongs to AND which
-# round it is. This program (ms_health.py) only handles Health - Common
+# round it is. This program (ms_health.py) only handles Hospital and Urban
 # right now, so SUB_UNIT is hardcoded below, but the table itself already
 # covers all three so MBBS Fellowship's and PG Fellowship's future
 # create_interview_event()s (in ms_healthfellowship.py / a future
 # ms_pgfellowship.py) can reuse this exact same table and matching logic
 # instead of duplicating it.
-SUB_UNIT = "Health - Common"
+SUB_UNIT = "Hospital and Urban"
 
 FEEDBACK_FORM_URLS = {
     "PG Fellowship": {
@@ -101,7 +101,7 @@ FEEDBACK_FORM_URLS = {
         "Round One": "https://pathways.azimpremjifoundation.org/health-feedback-form-one/new",
         "Round Two": "https://pathways.azimpremjifoundation.org/mbbs-health-feedback-form-two/new",
     },
-    "Health - Common": {
+    "Hospital and Urban": {
         "Round One": "https://pathways.azimpremjifoundation.org/health-feedback-form-one/new",
         "Round Two": "https://pathways.azimpremjifoundation.org/health-feedback-form-two/new",
         "Round Three": "https://pathways.azimpremjifoundation.org/health-feedback-form-three/new",
@@ -113,10 +113,13 @@ FEEDBACK_FORM_URLS = {
 # statuses set right after that round's feedback is already in, so an
 # interview (re)scheduled while status is still at the plain round also
 # needs the same round's form — this maps every status down to the round
-# name FEEDBACK_FORM_URLS is keyed by. Non-interview statuses (New
-# Applicant, CV Shortlist/Reject, Test Process/Select/Reject/No Response)
-# aren't a real round and have no form, so they're left unmapped on
-# purpose — _health_feedback_url falls back to Round One for those.
+# name FEEDBACK_FORM_URLS is keyed by. Shortlist - CV/R1/R2 are likewise
+# post-decision statuses set right after CV/Round One/Round Two feedback
+# is already in, so they map to that same round's form. Non-interview
+# statuses (New Applicant, CV Reject, Test Process/Select/Reject/No
+# Response) aren't a real round and have no form, so they're left
+# unmapped on purpose — _health_feedback_url falls back to Round One for
+# those.
 ROUND_ALIASES = {
     "Round One Select": "Round One",
     "Round One Reject": "Round One",
@@ -124,18 +127,38 @@ ROUND_ALIASES = {
     "Round Two Reject": "Round Two",
     "Round Three Select": "Round Three",
     "Round Three Reject": "Round Three",
+    "Shortlist - CV": "Round One",
+    "Shortlist - R1": "Round Two",
+    "Shortlist - R2": "Round Three",
 }
 
 
-def _health_feedback_url(interview_round, application_id, applicants_name):
-    """Maps this Health - Common interview's round (the application_status
-    value at scheduling time) to the correct public feedback form, with
-    application_id/applicants_name pre-filled as query params (same
+def _resolve_sub_unit(role):
+    """Picks which top-level FEEDBACK_FORM_URLS table an interview's
+    feedback link should come from, based on the applicant's actual Role —
+    e.g. a role of "PG Fellowship - 2026" routes to the "PG Fellowship"
+    table, "MBBS Fellowship - 2026" to "MBBS Fellowship". Matched as a
+    substring, case-insensitively, so any year/batch suffix on the role
+    ("- 2026", "- 2027", ...) doesn't matter. Anything else (including no
+    role at all) falls back to SUB_UNIT, this program's own default."""
+    role_lower = str(role or "").strip().lower()
+    if "pg fellowship" in role_lower:
+        return "PG Fellowship"
+    if "mbbs fellowship" in role_lower:
+        return "MBBS Fellowship"
+    return SUB_UNIT
+
+
+def _health_feedback_url(interview_round, application_id, applicants_name, role=None):
+    """Maps this interview's round (the application_status value at
+    scheduling time) to the correct public feedback form — which table it
+    comes from depends on the applicant's Role (see _resolve_sub_unit) —
+    with application_id/applicants_name pre-filled as query params (same
     pattern as every other feedback-form link already sent from this app,
     e.g. ms_philanthropy.py's feedback_url)."""
     status = str(interview_round or "").strip()
     round_name = ROUND_ALIASES.get(status, status)
-    table = FEEDBACK_FORM_URLS[SUB_UNIT]
+    table = FEEDBACK_FORM_URLS[_resolve_sub_unit(role)]
     base_url = table.get(round_name) or table["Round One"]
     return f"{base_url}?applicant_id={application_id}&applicant_name={applicants_name}"
 
@@ -166,9 +189,29 @@ def _document_attachment_paths(application_id):
     return [v for v in values.values() if v]
 
 
-def _new_feedback_link_html(interview_round, application_id, applicants_name):
-    url = _health_feedback_url(interview_round, application_id, applicants_name)
+def _new_feedback_link_html(interview_round, application_id, applicants_name, role=None):
+    url = _health_feedback_url(interview_round, application_id, applicants_name, role)
     return f'<p style="margin:6px 0;">Feedback form to share your views: <a href="{url}" target="_blank">Click here</a></p>'
+
+
+def _coerce_is_online(value):
+    """`is_online` arrives from health_interview_schedule.js as
+    `frm.doc.interview_type` — the raw "Interview Mode" Select value
+    ("Online" / "Offline" / "Phone"), not an actual 0/1 flag. The old
+    `int(is_online)` conversion silently swallowed that: `int("Online")`
+    always raises, so the except below always fell back to 0 — meaning
+    every interview marked "Online" on the form still went out as
+    "In-Person" in the email, and never got a real Teams meeting created
+    (isOnlineMeeting/onlineMeetingProvider both derive from this same
+    value). Recognizes the string form explicitly before falling through
+    to a plain numeric parse, so a genuine 0/1/"1" caller (e.g. a direct
+    API call) still works exactly as before."""
+    if isinstance(value, str) and value.strip().lower() == "online":
+        return 1
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _mode_link_html(is_online, join_web_url, location_adress, map_location):
@@ -529,10 +572,7 @@ def create_interview_event(
     name=None,
 ):
 
-    try:
-        is_online = int(is_online)
-    except:
-        is_online = 0
+    is_online = _coerce_is_online(is_online)
 
     # An empty Organizer Email used to reach requests.post() as-is,
     # building a malformed Graph URL (.../users//events — empty organizer
@@ -578,7 +618,7 @@ def create_interview_event(
             application_pdf_url = _r.get(_resume_field)
 
     feedback_url = _health_feedback_url(
-        interview_round, application_id, Applicants_name
+        interview_round, application_id, Applicants_name, Applicants_Role
     )
 
     # -------- CREATE EVENT --------
@@ -686,7 +726,7 @@ def create_interview_event(
     {meeting_room_html}
     <p><strong>Documents:</strong> Resume, Application form, and Feedback from earlier
     discussions (if any) are attached to this invite.</p>
-    {_new_feedback_link_html(interview_round, application_id, Applicants_name)}
+    {_new_feedback_link_html(interview_round, application_id, Applicants_name, Applicants_Role)}
     <p>Kindly reach out to us if you have any questions.</p>
     <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
     """
@@ -789,10 +829,7 @@ def update_interview_event(
             "This interview was cancelled — it needs to be scheduled fresh, not rescheduled."
         )
 
-    try:
-        is_online = int(is_online)
-    except:
-        is_online = 0
+    is_online = _coerce_is_online(is_online)
 
     if not (Organizer_email or "").strip():
         frappe.throw(
@@ -929,7 +966,7 @@ def update_interview_event(
     {meeting_room_html}
     <p><strong>Documents:</strong> Resume, Application form, and Feedback from earlier
     discussions (if any) are attached to this invite.</p>
-    {_new_feedback_link_html(interview_round, application_id, Applicants_name)}
+    {_new_feedback_link_html(interview_round, application_id, Applicants_name, Applicants_Role)}
     <p>Kindly reach out to us if you have any questions.</p>
     <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
     """
@@ -1216,7 +1253,7 @@ def send_interviewer_feedback_reminders():
             continue
 
         feedback_url = _health_feedback_url(
-            s.interview_round, s.application_id, s.applicants_name
+            s.interview_round, s.application_id, s.applicants_name, s.role
         )
         reminder_body = f"""
         <p>Hi,</p>
