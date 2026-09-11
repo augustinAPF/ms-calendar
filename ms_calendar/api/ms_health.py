@@ -729,6 +729,18 @@ def create_interview_event(
     mode_link_html = _mode_link_html(
         is_online, join_web_url, Location_adress, Map_location
     )
+    # The "Message to the Interviewer" field (message_to_the_interviewer on
+    # the form, passed through as Comments_for_interviewer) used to be
+    # normalized to "" above and then never actually rendered anywhere —
+    # confirmed 2026-09-11: a recruiter's note here silently never reached
+    # the interviewer's inbox. Only the interviewer email carries it, per
+    # the field's own name/purpose — the candidate template has no matching
+    # line.
+    comments_html = (
+        f'<p style="margin:6px 0;"><strong>Message to the Interviewer:</strong> {Comments_for_interviewer}</p>'
+        if Comments_for_interviewer
+        else ""
+    )
 
     # Official templates (items 8 & 9) — see below for the "Documents"
     # section, which only item 8 (the panel email) carries.
@@ -742,6 +754,7 @@ def create_interview_event(
     <p><strong>Mode:</strong> {mode_label}</p>
     {mode_link_html}
     {meeting_room_html}
+    {comments_html}
     <p><strong>Documents:</strong> Resume, Application form, and Feedback from earlier
     discussions (if any) are attached to this invite.</p>
     {_new_feedback_link_html(interview_round, application_id, Applicants_name, Applicants_Role)}
@@ -960,6 +973,14 @@ def update_interview_event(
     mode_link_html = _mode_link_html(
         is_online, join_web_url, Location_adress, Map_location
     )
+    # See create_interview_event's matching comment — Comments_for_interviewer
+    # (the "Message to the Interviewer" field) used to be normalized and then
+    # never actually rendered into either email template.
+    comments_html = (
+        f'<p style="margin:6px 0;"><strong>Message to the Interviewer:</strong> {Comments_for_interviewer}</p>'
+        if Comments_for_interviewer
+        else ""
+    )
 
     _application_dt = _application_doctype()
     _resume_field = _APPLICATION_RESUME_FIELD.get(_application_dt, "resume")
@@ -986,6 +1007,7 @@ def update_interview_event(
     <p><strong>Mode:</strong> {mode_label}</p>
     {mode_link_html}
     {meeting_room_html}
+    {comments_html}
     <p><strong>Documents:</strong> Resume, Application form, and Feedback from earlier
     discussions (if any) are attached to this invite.</p>
     {_new_feedback_link_html(interview_round, application_id, Applicants_name, Applicants_Role)}
