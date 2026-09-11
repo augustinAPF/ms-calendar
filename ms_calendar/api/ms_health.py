@@ -203,11 +203,20 @@ def _coerce_is_online(value):
     every interview marked "Online" on the form still went out as
     "In-Person" in the email, and never got a real Teams meeting created
     (isOnlineMeeting/onlineMeetingProvider both derive from this same
-    value). Recognizes the string form explicitly before falling through
-    to a plain numeric parse, so a genuine 0/1/"1" caller (e.g. a direct
-    API call) still works exactly as before."""
-    if isinstance(value, str) and value.strip().lower() == "online":
-        return 1
+    value). Recognizes "Online" and "Phone" explicitly (1 and 2) before
+    falling through to a plain numeric parse, so a genuine 0/1/2 caller
+    (e.g. a direct API call) still works exactly as before — "Offline"
+    (and anything else unrecognized) stays In-Person (0). "Phone" used to
+    collapse into this same 0/In-Person bucket too (confirmed 2026-09-11:
+    a telephonic interview's email wrongly went out with the In-Person
+    template instead of "Telephonic discussion" — see mode_label below),
+    since int("Phone") also always raises."""
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v == "online":
+            return 1
+        if v == "phone":
+            return 2
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -223,6 +232,11 @@ def _mode_link_html(is_online, join_web_url, location_adress, map_location):
             f'<p style="margin:6px 0;"><strong>MS Teams link / Venue address:</strong> '
             f'<a href="{join_web_url}" target="_blank">Join Now</a></p>'
         )
+    if is_online == 2:
+        # Phone/telephonic — no Teams link or venue address to show; the
+        # candidate/interviewer is just called on the confirmed number, per
+        # the official "Telephonic discussion" template (see mode_label).
+        return ""
     if location_adress or map_location:
         map_part = (
             f' (<a href="{map_location}" target="_blank">Map</a>)'
@@ -597,7 +611,11 @@ def create_interview_event(
     interview_date = start_dt.strftime("%d %B %Y")
     start_time = start_dt.strftime("%I:%M %p")
     end_time = end_dt.strftime("%I:%M %p")
-    mode_label = "Teams Meeting" if is_online == 1 else "In-Person"
+    mode_label = (
+        "Teams Meeting" if is_online == 1
+        else "Telephonic discussion - Please be available to receive the call" if is_online == 2
+        else "In-Person"
+    )
 
     headers = _graph_headers()
     meeting_room = _resolve_meeting_room(room_emails, headers)
@@ -847,7 +865,11 @@ def update_interview_event(
     interview_date = start_dt.strftime("%d %B %Y")
     start_time = start_dt.strftime("%I:%M %p")
     end_time = end_dt.strftime("%I:%M %p")
-    mode_label = "Teams Meeting" if is_online == 1 else "In-Person"
+    mode_label = (
+        "Teams Meeting" if is_online == 1
+        else "Telephonic discussion - Please be available to receive the call" if is_online == 2
+        else "In-Person"
+    )
 
     headers = _graph_headers()
     meeting_room = _resolve_meeting_room(room_emails, headers)

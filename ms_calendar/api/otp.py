@@ -89,8 +89,14 @@ def _normalize_mobile(phone):
 # now shared across Field and Health Registration Form, but each has its
 # own recruiter inbox candidates already expect replies to land in.
 _OTP_SENDER_BY_FORM = {
-    "Field Registration Form": ("field.recruitment@azimpremjifoundation.org", "Field Registration Form"),
-    "Health Registration Form": ("health.fellowship@azimpremjifoundation.org", "Health Registration Form"),
+    "Field Registration Form": (
+        "field.recruitment@azimpremjifoundation.org",
+        "Field Registration Form",
+    ),
+    "Health Registration Form": (
+        "health.jobs@azimpremjifoundation.org",
+        "Health Registration Form",
+    ),
 }
 _DEFAULT_OTP_SENDER = _OTP_SENDER_BY_FORM["Field Registration Form"]
 
@@ -154,7 +160,10 @@ def verify_email_otp(email, otp):
     stored = frappe.cache().get_value(cache_key)
 
     if not stored:
-        return {"success": False, "message": "OTP expired or not sent. Please request a new OTP."}
+        return {
+            "success": False,
+            "message": "OTP expired or not sent. Please request a new OTP.",
+        }
     if stored != otp:
         attempts = (frappe.cache().get_value(attempts_key) or 0) + 1
         if attempts >= _OTP_MAX_ATTEMPTS:
@@ -169,7 +178,9 @@ def verify_email_otp(email, otp):
 
     frappe.cache().delete_value(cache_key)
     frappe.cache().delete_value(attempts_key)
-    frappe.cache().set_value(f"field_reg_email_otp_verified_{email}", "1", expires_in_sec=1800)
+    frappe.cache().set_value(
+        f"field_reg_email_otp_verified_{email}", "1", expires_in_sec=1800
+    )
     return {"success": True, "message": "Email address verified successfully."}
 
 
@@ -194,7 +205,9 @@ def enforce_otp_verification(doc, method=None):
     #     frappe.throw("Please verify your phone number with the OTP before submitting.")
 
     email = (doc.email_address or "").strip().lower()
-    if not email or not frappe.cache().get_value(f"field_reg_email_otp_verified_{email}"):
+    if not email or not frappe.cache().get_value(
+        f"field_reg_email_otp_verified_{email}"
+    ):
         frappe.throw("Please verify your email address with the OTP before submitting.")
 
     # doc.phone_verified = 1

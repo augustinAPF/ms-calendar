@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import re
+from collections import Counter
 
 import frappe
 from frappe.utils import cint
@@ -20,7 +21,7 @@ KEYWORD_FIELDS = [
 
 LIST_FIELDS = [
     "name", "full_name_aadhaar", "email_address", "phone_number", "role",
-    "department", "application_status", "job_code", "creation",
+    "department", "application_status", "job_code", "creation", "date_of_applied",
 ]
 
 FACET_FIELDS = {"application_status", "role", "department", "job_code", "location"}
@@ -66,12 +67,18 @@ def search_field_registration_forms(keywords=None, filters=None, start=0, page_l
         page_length=cint(page_length),
     )
 
-    total = frappe.get_list(
+    # A plain COUNT(*) aggregate in `fields` isn't portable across Frappe
+    # versions — {"COUNT": "*", ...} is REQUIRED on some versions and
+    # rejected as a raw SQL string on others (and vice versa), so pulling
+    # just `name` and counting the rows in Python works identically on any
+    # version instead of guessing which syntax this site's Frappe wants.
+    total = len(frappe.get_list(
         DOCTYPE,
-        fields=[{"COUNT": "*", "as": "total"}],
+        fields=["name"],
         filters=filters,
         or_filters=or_filters,
-    )[0].total
+        limit_page_length=0,
+    ))
 
     return {"rows": rows, "total": total}
 
@@ -120,16 +127,21 @@ def get_field_registration_facet_counts(field, keywords=None, filters=None):
     filters = [f for f in filters if f[0] != field]
     or_filters = _keyword_or_filters(keywords)
 
-    data = frappe.get_list(
+    # Same portability problem as search_field_registration_forms' total
+    # count above (dict-style COUNT(*) aggregates aren't safe across
+    # Frappe versions) — pull just this one field's values for every
+    # matching row and group-count them in Python instead.
+    values = frappe.get_list(
         DOCTYPE,
         filters=filters,
         or_filters=or_filters,
-        group_by=field,
-        fields=[{"COUNT": "*", "as": "count"}, f"{field} as value"],
-        order_by="count desc",
-        limit_page_length=50,
+        fields=[field],
+        limit_page_length=0,
     )
-    return [d for d in data if d.get("value")]
+    counts = Counter(v.get(field) for v in values if v.get(field))
+    data = [{"value": value, "count": count} for value, count in counts.items()]
+    data.sort(key=lambda d: d["count"], reverse=True)
+    return data[:50]
 
 
 # ---------------------------------------------------------------------------
@@ -145,13 +157,24 @@ def _job_code_shortcuts_by(group_field, group_key):
     job_title, count}, ...]}, ...], grouped by `group_field` (department or
     location), ordered by group size. Job codes are labelled with the
     matching Job Opening's title where we have one."""
-    rows = frappe.get_list(
+    # Same portability problem as the two counts above (dict-style
+    # COUNT(*) aggregates aren't safe across Frappe versions — this is the
+    # one that actually crashed on the cloud site, since its older Frappe
+    # doesn't understand the dict form at all) — pull the raw
+    # (group_field, job_code) pairs for every matching row and group-count
+    # them in Python instead of asking the DB to aggregate.
+    pairs = frappe.get_list(
         DOCTYPE,
         filters=[[group_field, "is", "set"], ["job_code", "is", "set"]],
-        fields=[group_field, "job_code", {"COUNT": "*", "as": "count"}],
-        group_by=f"{group_field}, job_code",
-        order_by=f"{group_field}, count desc",
+        fields=[group_field, "job_code"],
+        limit_page_length=0,
     )
+    pair_counts = Counter((p.get(group_field), p.get("job_code")) for p in pairs)
+    rows = [
+        frappe._dict({group_field: group_val, "job_code": job_code, "count": count})
+        for (group_val, job_code), count in pair_counts.items()
+    ]
+    rows.sort(key=lambda r: (r.get(group_field) or "", -r["count"]))
 
     job_titles = {
         j.job_code: j.job_title

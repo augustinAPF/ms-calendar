@@ -92,9 +92,9 @@ frappe.pages['field-workspace-'].on_page_load = function (wrapper) {
 		return STATUS_COLORS[status] || '#6b7280';
 	}
 
-	// Alternating accent for the state/department group cards — navy +
-	// gold, a higher-contrast pairing than two shades of the same blue.
-	const GROUP_PALETTE = ['#1F497D', '#b45309'];
+	// Alternating accent for the state/department group cards — teal +
+	// purple, a higher-contrast pairing than two shades of the same blue.
+	const GROUP_PALETTE = ['#0f766e', '#6d28d9'];
 	function groupAccent(idx) {
 		return GROUP_PALETTE[idx % GROUP_PALETTE.length];
 	}
@@ -245,9 +245,9 @@ frappe.pages['field-workspace-'].on_page_load = function (wrapper) {
 			}
 			.fov-dept-group {
 				/* --accent set per-card in JS (groupAccent()) — alternates
-				   between the two brand blues so adjacent cards are easy
-				   to tell apart at a glance. */
-				--accent: #1F497D;
+				   between teal and purple (GROUP_PALETTE) so adjacent cards
+				   are easy to tell apart at a glance. */
+				--accent: #0f766e;
 				background: #fafbfc;
 				border: 1px solid #eef0f2;
 				border-left: 4px solid var(--accent);
@@ -557,6 +557,21 @@ frappe.pages['field-workspace-'].on_page_load = function (wrapper) {
 			}
 			.frs-chip .frs-chip-x { cursor: pointer; font-weight: 700; opacity: 0.6; }
 			.frs-chip .frs-chip-x:hover { opacity: 1; }
+
+			/* Date Applied — From/To range box, same shell as the other
+			   above-table filter boxes (.frs-multiselect) */
+			.frs-date-range { display: flex; align-items: center; gap: 5px; }
+			.frs-date-range input[type="date"] {
+				flex: 1 1 0;
+				min-width: 0;
+				border: 1px solid #d1d5db;
+				border-radius: 5px;
+				padding: 4px 5px;
+				font-size: 11.5px;
+				color: #374151;
+			}
+			.frs-date-range input[type="date"]:focus { outline: none; border-color: #1F497D; }
+			.frs-date-sep { color: #9ca3af; font-size: 11px; }
 
 			/* Role / Department / Job Code — chip-box + dropdown panel
 			   multiselect (same widget style as the Field Over All Dashboard) */
@@ -976,6 +991,10 @@ frappe.pages['field-workspace-'].on_page_load = function (wrapper) {
 
 	const state = {
 		filters: {},
+		// date_of_applied is a plain Date field, not a discrete set of
+		// values like the other filters above, so it gets its own From/To
+		// pair instead of living in state.filters as a Set.
+		dateFilters: { date_of_applied: { from: '', to: '' } },
 		selected: new Set(), // names of rows checked in the results table
 		page_length: PAGE_SIZES[0]
 	};
@@ -992,6 +1011,9 @@ frappe.pages['field-workspace-'].on_page_load = function (wrapper) {
 				filters.push([field, 'in', Array.from(state.filters[field])]);
 			}
 		});
+		const { from, to } = state.dateFilters.date_of_applied;
+		if (from) filters.push(['date_of_applied', '>=', from]);
+		if (to) filters.push(['date_of_applied', '<=', to]);
 		return filters;
 	}
 
@@ -1024,11 +1046,29 @@ frappe.pages['field-workspace-'].on_page_load = function (wrapper) {
 			});
 		});
 
-		if (keywords || Object.values(state.filters).some((s) => s.size)) {
+		const { from: appliedFrom, to: appliedTo } = state.dateFilters.date_of_applied;
+		if (appliedFrom || appliedTo) {
+			const valueText = appliedFrom && appliedTo
+				? `${appliedFrom} to ${appliedTo}`
+				: appliedFrom ? `from ${appliedFrom}` : `to ${appliedTo}`;
+			const $pill = $(`<span class="frs-pill">Date Applied: ${frappe.utils.escape_html(valueText)} <span class="frs-pill-x">×</span></span>`);
+			$pill.find('.frs-pill-x').on('click', () => {
+				state.dateFilters.date_of_applied = { from: '', to: '' };
+				$(wrapper).find('.frs-date-from').val('');
+				$(wrapper).find('.frs-date-to').val('');
+				runSearch();
+			});
+			$pills.append($pill);
+		}
+
+		if (keywords || appliedFrom || appliedTo || Object.values(state.filters).some((s) => s.size)) {
 			const $clear = $('<span class="frs-clear-all">Clear All</span>');
 			$clear.on('click', () => {
 				$keywords.val('');
 				ALL_FILTER_FIELDS.forEach((field) => state.filters[field].clear());
+				state.dateFilters.date_of_applied = { from: '', to: '' };
+				$(wrapper).find('.frs-date-from').val('');
+				$(wrapper).find('.frs-date-to').val('');
 				runSearch();
 			});
 			$pills.append($clear);
@@ -1061,6 +1101,7 @@ frappe.pages['field-workspace-'].on_page_load = function (wrapper) {
 						<th>Job Code</th>
 						<th>Application Status</th>
 						<th>Applied On</th>
+						<th>Date Applied</th>
 					</tr>
 				</thead>
 				<tbody></tbody>
@@ -1086,6 +1127,7 @@ frappe.pages['field-workspace-'].on_page_load = function (wrapper) {
 					<td>${frappe.utils.escape_html(row.job_code || '')}</td>
 					<td>${statusHtml}</td>
 					<td>${frappe.datetime.str_to_user(row.creation)}</td>
+					<td>${row.date_of_applied ? frappe.datetime.str_to_user(row.date_of_applied) : ''}</td>
 				</tr>
 			`;
 		}).join('');
@@ -1393,6 +1435,35 @@ frappe.pages['field-workspace-'].on_page_load = function (wrapper) {
 
 		$filterRow.append($wrap);
 	});
+
+	// ── Above-table: Date Applied — plain From/To date range ───────────────
+	// (date_of_applied is a Date field, not a discrete value list, so this
+	// is a simple range instead of a chip/checkbox multiselect.)
+	(function () {
+		const $wrap = $(`
+			<div class="frs-multiselect frs-date-filter" data-field="date_of_applied">
+				<label>Date Applied</label>
+				<div class="frs-date-range">
+					<input type="date" class="frs-date-from">
+					<span class="frs-date-sep">–</span>
+					<input type="date" class="frs-date-to">
+				</div>
+			</div>
+		`);
+		const $from = $wrap.find('.frs-date-from');
+		const $to = $wrap.find('.frs-date-to');
+
+		$from.on('change', () => {
+			state.dateFilters.date_of_applied.from = $from.val() || '';
+			runSearch();
+		});
+		$to.on('change', () => {
+			state.dateFilters.date_of_applied.to = $to.val() || '';
+			runSearch();
+		});
+
+		$filterRow.append($wrap);
+	})();
 
 	// Rows checked in the results table jump into the native Field
 	// Registration Form List View, filtered to just those records.

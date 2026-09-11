@@ -100,6 +100,153 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		return 'In Process';
 	}
 
+	// Escapes text for both HTML content and (double-quoted) attribute
+	// contexts — option values come straight from DB fields (state, school,
+	// ...) with no guarantee they're free of < > & ".
+	function escHtml(s) {
+		return (s == null ? '' : String(s))
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;');
+	}
+
+	// ── Multiselect (tag/chip) widget ───────────────────────────────────────
+	// Turns a plain div#xxx into a chip-input multiselect (search box,
+	// Select all/Clear, checkbox list) and returns a get/setOptions/val API.
+	// Same widget style as the Field Over All Dashboard's makeMultiselect —
+	// kept as its own copy here (rpt- prefixed classes) since this page has
+	// no shared JS module with that one to import it from.
+	function makeMultiselect($el, onChange) {
+		var placeholder = $el.data('placeholder') || 'All';
+		var options = []; // full list of selectable string values
+		var selected = []; // currently-selected string values
+
+		$el.html(
+			'<div class="rpt-ms-box"><span class="rpt-ms-ph">' + escHtml(placeholder) + '</span></div>' +
+			'<div class="rpt-ms-panel">' +
+				'<div class="rpt-ms-search"><input type="text" placeholder="Search…"/></div>' +
+				'<div class="rpt-ms-actions"><a class="rpt-ms-all">Select all</a><a class="rpt-ms-none">Clear</a></div>' +
+				'<div class="rpt-ms-list"></div>' +
+			'</div>'
+		);
+		var $box = $el.find('.rpt-ms-box');
+		var $search = $el.find('.rpt-ms-search input');
+		var $list = $el.find('.rpt-ms-list');
+
+		function renderBox() {
+			$box.empty();
+			if (!selected.length) {
+				$box.append('<span class="rpt-ms-ph">' + escHtml(placeholder) + '</span>');
+				return;
+			}
+			var shown = selected.slice(0, 2);
+			shown.forEach(function (v) {
+				var esc = escHtml(v);
+				$box.append(
+					'<span class="rpt-ms-chip" title="' + esc + '">' +
+						'<span class="txt">' + esc + '</span><span class="x" data-v="' + esc + '">&times;</span>' +
+					'</span>'
+				);
+			});
+			if (selected.length > shown.length) {
+				$box.append('<span class="rpt-ms-more">+' + (selected.length - shown.length) + ' more</span>');
+			}
+		}
+
+		function renderList(filterText) {
+			var q = (filterText || '').toLowerCase();
+			$list.empty();
+			var matches = options.filter(function (v) { return v.toLowerCase().indexOf(q) !== -1; });
+			if (!matches.length) {
+				$list.append('<div class="rpt-ms-empty">No matches</div>');
+				return;
+			}
+			matches.forEach(function (v) {
+				var checked = selected.indexOf(v) !== -1;
+				var esc = escHtml(v);
+				$list.append(
+					'<label class="rpt-ms-opt"><input type="checkbox" data-v="' + esc + '"' + (checked ? ' checked' : '') + '/>' +
+						'<span>' + esc + '</span></label>'
+				);
+			});
+		}
+
+		function open() {
+			if ($el.hasClass('open')) return;
+			$('.rpt-ms.open').each(function () { $(this).removeClass('open'); });
+			$el.addClass('open');
+			renderList($search.val());
+			$search.val('').trigger('focus');
+		}
+		function close() { $el.removeClass('open'); }
+
+		$box.on('click', function (e) {
+			if ($(e.target).hasClass('x')) return; // handled below
+			$el.hasClass('open') ? close() : open();
+		});
+		$box.on('click', '.x', function (e) {
+			e.stopPropagation();
+			var v = $(this).data('v').toString();
+			selected = selected.filter(function (s) { return s !== v; });
+			renderBox();
+			if ($el.hasClass('open')) renderList($search.val());
+			onChange(selected.slice());
+		});
+		$search.on('input', function () { renderList($(this).val()); });
+		$search.on('click', function (e) { e.stopPropagation(); });
+		$list.on('click', '.rpt-ms-opt', function (e) {
+			e.stopPropagation();
+		});
+		$list.on('change', 'input[type=checkbox]', function () {
+			var v = $(this).data('v').toString();
+			if (this.checked) {
+				if (selected.indexOf(v) === -1) selected.push(v);
+			} else {
+				selected = selected.filter(function (s) { return s !== v; });
+			}
+			renderBox();
+			onChange(selected.slice());
+		});
+		$el.find('.rpt-ms-all').on('click', function (e) {
+			e.stopPropagation();
+			var q = ($search.val() || '').toLowerCase();
+			var visible = options.filter(function (v) { return v.toLowerCase().indexOf(q) !== -1; });
+			visible.forEach(function (v) { if (selected.indexOf(v) === -1) selected.push(v); });
+			renderBox(); renderList($search.val());
+			onChange(selected.slice());
+		});
+		$el.find('.rpt-ms-none').on('click', function (e) {
+			e.stopPropagation();
+			selected = [];
+			renderBox(); renderList($search.val());
+			onChange(selected.slice());
+		});
+
+		var api = {
+			setOptions: function (opts) {
+				options = opts.slice();
+				selected = selected.filter(function (s) { return options.indexOf(s) !== -1; });
+				renderBox();
+				if ($el.hasClass('open')) renderList($search.val());
+			},
+			val: function () { return selected.slice(); },
+			setVal: function (vals) {
+				selected = (vals || []).filter(function (s) { return options.indexOf(s) !== -1; });
+				renderBox();
+			},
+			clear: function () { selected = []; renderBox(); }
+		};
+		$el.data('rptMs', api);
+		return api;
+	}
+
+	// Global: close any open multiselect when clicking elsewhere on the page.
+	$(document).off('click.rptMsOutside').on('click.rptMsOutside', function (e) {
+		if ($(e.target).closest('.rpt-ms').length) return;
+		$(wrapper).find('.rpt-ms.open').removeClass('open');
+	});
+
 
 	// ── Styles ────────────────────────────────────────────────────────────
 	$(wrapper).find('.page-content').append(`<style>
@@ -183,6 +330,28 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		.rec-dlg-fullscreen .modal-body { flex:1 1 auto; overflow:auto; }
 		.rec-dlg-fullscreen .modal-header,.rec-dlg-fullscreen .modal-footer { flex:0 0 auto; }
 		.ar-month-item input { cursor:pointer; accent-color:#1F497D; }
+		/* ── Chip multiselect (State / School filters) ── */
+		.rpt-ms{position:relative;min-width:150px;max-width:230px}
+		.rpt-ms-box{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:3px 6px;border:1px solid #d1d5db;border-radius:5px;background:#fff;cursor:pointer;min-height:26px}
+		.rpt-ms-box:hover{border-color:#9ca3af}
+		.rpt-ms.open .rpt-ms-box{border-color:#1e40af;box-shadow:0 0 0 2px rgba(30,64,175,.12)}
+		.rpt-ms-ph{font-size:12px;color:#9ca3af;padding:2px 2px}
+		.rpt-ms-chip{display:inline-flex;align-items:center;gap:4px;background:#e0e7ff;color:#1e3a8a;border-radius:4px;padding:1px 5px 1px 7px;font-size:11px;font-weight:600;max-width:120px}
+		.rpt-ms-chip span.txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+		.rpt-ms-chip .x{cursor:pointer;font-size:12px;line-height:1;opacity:.7;padding:0 1px}
+		.rpt-ms-chip .x:hover{opacity:1}
+		.rpt-ms-more{font-size:11px;color:#6b7280;font-weight:600;padding:1px 4px}
+		.rpt-ms-panel{display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:60;background:#fff;border:1px solid #d1d5db;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.15);width:max(100%,270px);max-width:min(360px,90vw);max-height:300px;overflow-y:auto;overflow-x:hidden}
+		.rpt-ms.open .rpt-ms-panel{display:block}
+		.rpt-ms-search{position:sticky;top:0;background:#fff;padding:6px;border-bottom:1px solid #eee}
+		.rpt-ms-search input{width:100%;padding:4px 7px;border:1px solid #d1d5db;border-radius:4px;font-size:12px}
+		.rpt-ms-actions{display:flex;justify-content:space-between;padding:5px 8px;border-bottom:1px solid #eee;font-size:11px}
+		.rpt-ms-actions a{color:#1e40af;cursor:pointer;font-weight:600}
+		.rpt-ms-opt{display:flex;align-items:flex-start;gap:8px;padding:6px 10px;font-size:12px;cursor:pointer;white-space:normal;line-height:1.35}
+		.rpt-ms-opt:hover{background:#f3f4f6}
+		.rpt-ms-opt input{margin:2px 0 0;flex:none}
+		.rpt-ms-opt span{overflow-wrap:anywhere}
+		.rpt-ms-empty{padding:10px;font-size:12px;color:#9ca3af;text-align:center}
 	</style>
 	<div class="rpt-wrap" id="rpt-main"></div>`);
 
@@ -1780,6 +1949,37 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 	var _stfAllRecs = [];   // everything fetched for the current date range (unfiltered by State/School)
 	var _stfViewRecs = [];  // _stfAllRecs after the State/School dropdown filters are applied — what actually renders
 	var _stfDistricts = [];
+	var _stfMsState = null, _stfMsSchool = null, _stfMsJobCode = null;   // chip-multiselect widgets (built in showSTDistrictFunnel)
+
+	// The School filter only ever offers these 12 known schools (confirmed
+	// 2026-09-11) instead of every distinct districtOf() bucket in the
+	// data — that full set also includes ~20 non-school noise buckets
+	// (unsuffixed roles like "School Teacher Education", "Resource Person /
+	// Teacher Educator", "Azim Premji School: ...", etc.) nobody actually
+	// wants to filter by. `value` is the real districtOf() bucket text
+	// stored in the data (which the label doesn't always match verbatim —
+	// e.g. "Khargone, Madhya Pradesh", "Itki, Ranchi", "Udham Singh Nagar").
+	// Both applySTFFilters and the Download Excel handler translate the
+	// selected label(s) to their real value via SCHOOL_LABEL_TO_VALUE
+	// before filtering/sending, so reports.py's download endpoint only
+	// ever sees real values and needs no matching list of its own.
+	var FIXED_SCHOOLS = [
+		{ label: 'Bangalore', value: 'Bengaluru' },
+		{ label: 'Kalaburgi', value: 'Kalaburagi' },
+		{ label: 'Yadgir', value: 'Yadgir' },
+		{ label: 'Dhamtari', value: 'Dhamtari' },
+		{ label: 'Raigarh', value: 'Raigarh' },
+		{ label: 'Barmer', value: 'Barmer' },
+		{ label: 'Sirohi', value: 'Sirohi' },
+		{ label: 'Tonk', value: 'Tonk' },
+		{ label: 'Ranchi', value: 'Itki, Ranchi' },
+		{ label: 'USN', value: 'Udham Singh Nagar' },
+		{ label: 'Uttarkashi', value: 'Uttarkashi' },
+		{ label: 'Khargone', value: 'Khargone, Madhya Pradesh' },
+	];
+	var SCHOOL_LABEL_TO_VALUE = {};
+	FIXED_SCHOOLS.forEach(function (s) { SCHOOL_LABEL_TO_VALUE[s.label] = s.value; });
+	var STF_SCHOOL_VALUES = FIXED_SCHOOLS.map(function (s) { return s.value; });
 
 	// "School" in the tracker sheet is derived from the candidate's own
 	// Role field, not native_district/location (confirmed 2026-09-04) —
@@ -1806,44 +2006,50 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		return role;
 	}
 
-	// Populate the State / School dropdowns from the full fetched set
+	// Populate the State / Job Code multiselects from the full fetched set
 	// (_stfAllRecs), not the already-filtered _stfViewRecs — otherwise
-	// picking a State would narrow the School list to only that state's
-	// schools and vice versa, instead of both staying full option lists.
-	// Preserves the current selection across a Refresh (re-fetch) as long
-	// as that value still exists in the new data.
+	// picking a School would narrow the State/Job Code lists to only that
+	// school's values. The School multiselect's options are the fixed
+	// FIXED_SCHOOLS list instead (set once in showSTDistrictFunnel, not
+	// rebuilt here) — see FIXED_SCHOOLS above for why. setOptions() (see
+	// makeMultiselect) already preserves any current selection that still
+	// exists in the new option list, so a Refresh (re-fetch) keeps whatever
+	// State/Job Code was picked before as long as it's still present in the
+	// new data.
 	function populateSTFFilterDropdowns() {
-		var stSet = {}, schSet = {};
+		var stSet = {}, jcSet = {};
 		_stfAllRecs.forEach(function (r) {
 			var st = (r.native_state || '').trim();
 			if (st) stSet[st] = true;
-			schSet[districtOf(r)] = true;
+			var jc = (r.job_code || '').trim();
+			if (jc) jcSet[jc] = true;
 		});
-		var curState = $('#stf-state').val() || '';
-		var curSchool = $('#stf-school').val() || '';
-
-		var $st = $('#stf-state').empty().append('<option value="">All States</option>');
-		Object.keys(stSet).sort().forEach(function (v) { $st.append('<option value="' + v + '">' + v + '</option>'); });
-		if (stSet[curState]) $st.val(curState);
-
-		var $sch = $('#stf-school').empty().append('<option value="">All Schools</option>');
-		Object.keys(schSet).sort().forEach(function (v) { $sch.append('<option value="' + v + '">' + v + '</option>'); });
-		if (schSet[curSchool]) $sch.val(curSchool);
+		_stfMsState.setOptions(Object.keys(stSet).sort());
+		_stfMsJobCode.setOptions(Object.keys(jcSet).sort());
 	}
 
-	// Applies the current State / School dropdown selections on top of
-	// _stfAllRecs into _stfViewRecs, then re-renders — called both on
-	// dropdown change and right after a fetch.
+	// Applies the current State / School / Job Code multiselect selections
+	// on top of _stfAllRecs into _stfViewRecs, then re-renders — called both
+	// on multiselect change and right after a fetch. Each is now a list of
+	// zero or more values — empty means "All" (no filtering on that field),
+	// same as the old blank-option select; a non-empty list is OR'd within
+	// itself (state IN [...]) and AND'd against the other fields, same as
+	// picking multiple checkboxes should read: "any of these states, any of
+	// these schools, any of these job codes". The School multiselect stores
+	// its short display labels (FIXED_SCHOOLS) — translated to the real
+	// districtOf() value via SCHOOL_LABEL_TO_VALUE before matching.
 	function applySTFFilters() {
-		var stF = $('#stf-state').val() || '';
-		var schF = $('#stf-school').val() || '';
+		var stF = _stfMsState.val();
+		var schF = _stfMsSchool.val().map(function (label) { return SCHOOL_LABEL_TO_VALUE[label] || label; });
+		var jcF = _stfMsJobCode.val();
 		_stfViewRecs = _stfAllRecs.filter(function (r) {
-			if (stF && (r.native_state || '').trim() !== stF) return false;
-			if (schF && districtOf(r) !== schF) return false;
+			if (stF.length && stF.indexOf((r.native_state || '').trim()) === -1) return false;
+			if (schF.length && schF.indexOf(districtOf(r)) === -1) return false;
+			if (jcF.length && jcF.indexOf((r.job_code || '').trim()) === -1) return false;
 			return true;
 		});
 		var infoText = 'School Teacher records: ' + _stfViewRecs.length;
-		if (stF || schF) infoText += ' of ' + _stfAllRecs.length;
+		if (stF.length || schF.length || jcF.length) infoText += ' of ' + _stfAllRecs.length;
 		infoText += ' | Date: ' + frappe.datetime.now_date();
 		$('#stf-info').text(infoText);
 		renderSTDistrictBody();
@@ -1858,8 +2064,13 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				<input type="date" class="rpt-toolbar-date" id="stf-from" />
 				<span class="rpt-toolbar-label">To:</span>
 				<input type="date" class="rpt-toolbar-date" id="stf-to" />
-				<select class="rpt-toolbar-date" id="stf-state" style="min-width:140px;"><option value="">All States</option></select>
-				<select class="rpt-toolbar-date" id="stf-school" style="min-width:160px;"><option value="">All Schools</option></select>
+				<span class="rpt-toolbar-label">Applied From:</span>
+				<input type="date" class="rpt-toolbar-date" id="stf-applied-from" />
+				<span class="rpt-toolbar-label">Applied To:</span>
+				<input type="date" class="rpt-toolbar-date" id="stf-applied-to" />
+				<div class="rpt-ms" id="stf-state" data-placeholder="All States"></div>
+				<div class="rpt-ms" id="stf-school" data-placeholder="All Schools"></div>
+				<div class="rpt-ms" id="stf-jobcode" data-placeholder="All Job Codes"></div>
 				<button class="rpt-btn-refresh" id="stf-refresh">&#x21bb; Refresh</button>
 				<button class="rpt-btn-dl" id="stf-download">⬇ Download Excel</button>
 				<span class="rpt-info" id="stf-info"></span>
@@ -1874,25 +2085,45 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			$('#stf-to').val(t.toISOString().slice(0, 10));
 		})();
 
+		// Re-filter in the browser only on every change — no re-fetch
+		// needed, since _stfAllRecs already has every record for the
+		// current date range.
+		_stfMsState = makeMultiselect($('#stf-state'), applySTFFilters);
+		_stfMsSchool = makeMultiselect($('#stf-school'), applySTFFilters);
+		_stfMsJobCode = makeMultiselect($('#stf-jobcode'), applySTFFilters);
+		// School's option list is the fixed FIXED_SCHOOLS set, not derived
+		// from fetched data — set once here rather than on every fetch.
+		_stfMsSchool.setOptions(FIXED_SCHOOLS.map(function (s) { return s.label; }));
+
 		$('#rpt-back').on('click', showHub);
 		$('#stf-refresh').on('click', fetchSTDistrictData);
-		// Re-filter in the browser only — no re-fetch needed, since
-		// _stfAllRecs already has every record for the current date range.
-		$('#stf-state,#stf-school').on('change', applySTFFilters);
 		// Real .xlsx with the same header/row colours as the on-screen
 		// table — the CSV export used elsewhere on this page has no
 		// concept of colour, so this is a server-rendered file instead
 		// (ms_calendar.api.reports.download_st_district_funnel), built
-		// with the exact same From/To/State/School filters currently on
-		// screen.
+		// with the exact same From/To/Applied From/Applied To/State/School/
+		// Job Code filters currently on screen. Multiple selected
+		// states/schools/job codes are sent JSON-encoded (not comma-joined
+		// — school names like "Khargone, Madhya Pradesh" already contain
+		// commas, so a plain join/split would wrongly split a single
+		// school into two) — see download_st_district_funnel's matching
+		// json.loads handling. School is translated from its short display
+		// label to the real districtOf() value before sending, same as
+		// applySTFFilters does for the on-screen table — the server only
+		// knows the real values.
 		$('#stf-download').on('click', function () {
 			var from = $('#stf-from').val() || '';
 			var to = $('#stf-to').val() || '';
-			var state = $('#stf-state').val() || '';
-			var school = $('#stf-school').val() || '';
+			var appliedFrom = $('#stf-applied-from').val() || '';
+			var appliedTo = $('#stf-applied-to').val() || '';
+			var state = JSON.stringify(_stfMsState.val());
+			var school = JSON.stringify(_stfMsSchool.val().map(function (label) { return SCHOOL_LABEL_TO_VALUE[label] || label; }));
+			var jobCode = JSON.stringify(_stfMsJobCode.val());
 			var url = '/api/method/ms_calendar.api.reports.download_st_district_funnel'
 				+ '?from_date=' + encodeURIComponent(from) + '&to_date=' + encodeURIComponent(to)
-				+ '&native_state=' + encodeURIComponent(state) + '&school=' + encodeURIComponent(school);
+				+ '&applied_from=' + encodeURIComponent(appliedFrom) + '&applied_to=' + encodeURIComponent(appliedTo)
+				+ '&native_state=' + encodeURIComponent(state) + '&school=' + encodeURIComponent(school)
+				+ '&job_code=' + encodeURIComponent(jobCode);
 			window.open(url, '_blank');
 		});
 		fetchSTDistrictData();
@@ -1902,9 +2133,20 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		$('#stf-tbl-wrap').html('<div class="rpt-loading">Loading…</div>');
 		var from = $('#stf-from').val() || '';
 		var to = $('#stf-to').val() || '';
+		var appliedFrom = $('#stf-applied-from').val() || '';
+		var appliedTo = $('#stf-applied-to').val() || '';
 		var filters = [];
 		if (from) filters.push(['creation', '>=', from + ' 00:00:00']);
 		if (to) filters.push(['creation', '<=', to + ' 23:59:59']);
+		// Separate, optional range on date_of_applied (a plain Date field,
+		// so no time component) — additive to the From/To range above, not
+		// a replacement for it: From/To is when the record was saved in
+		// Frappe (creation), Applied From/To is the candidate's own
+		// self-reported application date, and the two can differ (e.g.
+		// bulk-imported records all share one creation timestamp but keep
+		// their real original application dates).
+		if (appliedFrom) filters.push(['date_of_applied', '>=', appliedFrom]);
+		if (appliedTo) filters.push(['date_of_applied', '<=', appliedTo]);
 		// Pre-filter server-side on role instead of fetching every Field
 		// Registration Form and filtering with getCol() in the browser.
 		// Confirmed 2026-09-04: this doctype now has 126,000+ records in a
@@ -1926,7 +2168,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				doctype: 'Field Registration Form',
 				filters: filters,
 				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
-					'location', 'native_state', 'native_district', 'creation'],
+					'location', 'native_state', 'native_district', 'creation', 'job_code'],
 				limit_page_length: 0,
 				order_by: 'creation asc'
 			},
@@ -1937,7 +2179,19 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				// before they ever cross the wire), getCol() remains the
 				// real classifier so health/livelihood roles that happen to
 				// contain "teacher" as a substring can't slip through.
-				_stfAllRecs = all.filter(function (rec) { return getCol(rec.role) === 'ST'; });
+				//
+				// Also restricted to only the 12 known schools in
+				// FIXED_SCHOOLS (confirmed 2026-09-11) — this report is
+				// meant to be just those, not every distinct districtOf()
+				// bucket (unsuffixed roles like "School Teacher Education",
+				// "Resource Person / Teacher Educator", "Azim Premji
+				// School: ...", state-only buckets like "Rajasthan", etc.).
+				// Applied here, before the School filter and before the
+				// table renders, so those noise rows never show up even
+				// with no School filter selected.
+				_stfAllRecs = all
+					.filter(function (rec) { return getCol(rec.role) === 'ST'; })
+					.filter(function (rec) { return STF_SCHOOL_VALUES.indexOf(districtOf(rec)) !== -1; });
 				populateSTFFilterDropdowns();
 				// Sets #stf-info itself (accounting for whatever State/School
 				// filter is currently selected) and renders the table.

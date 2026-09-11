@@ -1,7 +1,29 @@
 import io
+import json
 
 import frappe
 from frappe.utils import today
+
+
+def _parse_multi(val):
+	"""Turns the native_state/school querystring param into a list of
+	selected values. reports.js's State/School filters are now chip
+	multiselects (see makeMultiselect) and send their selection
+	JSON-encoded — not comma-joined, since school names like "Khargone,
+	Madhya Pradesh" already contain commas and a plain join/split would
+	wrongly split one school into two. Falls back to treating `val` as a
+	single plain value if it isn't valid JSON, so a hand-typed URL (or any
+	older caller) with a bare string still works as a one-item filter.
+	"""
+	if not val:
+		return []
+	try:
+		parsed = json.loads(val)
+	except (TypeError, ValueError):
+		return [val]
+	if isinstance(parsed, list):
+		return [str(v).strip() for v in parsed if str(v).strip()]
+	return [str(parsed).strip()] if str(parsed).strip() else []
 
 
 # Same role/column mapping as the "School Teacher — District Funnel" report
@@ -101,8 +123,25 @@ def _district_of(rec):
 	return role
 
 
+# The report only ever covers these 12 known schools (confirmed
+# 2026-09-11) — same real districtOf() values as FIXED_SCHOOLS in
+# reports.js (kept in sync manually, like STF_COLS above). Every other
+# distinct _district_of() bucket in the data (unsuffixed roles like
+# "School Teacher Education", "Resource Person / Teacher Educator",
+# "Azim Premji School: ...", state-only buckets like "Rajasthan", etc.)
+# is noise nobody wants in this report, on screen or in the download.
+STF_SCHOOL_VALUES = [
+	"Bengaluru", "Kalaburagi", "Yadgir", "Dhamtari", "Raigarh", "Barmer",
+	"Sirohi", "Tonk", "Itki, Ranchi", "Udham Singh Nagar", "Uttarkashi",
+	"Khargone, Madhya Pradesh",
+]
+
+
 @frappe.whitelist()
-def download_st_district_funnel(from_date=None, to_date=None, native_state=None, school=None):
+def download_st_district_funnel(
+	from_date=None, to_date=None, applied_from=None, applied_to=None,
+	native_state=None, school=None, job_code=None
+):
 	"""Server-rendered .xlsx of the "School Teacher — District Funnel"
 	report, with the same header/row background colours as the on-screen
 	table (reports.js) — the CSV export used elsewhere on this page has no
@@ -114,6 +153,14 @@ def download_st_district_funnel(from_date=None, to_date=None, native_state=None,
 		filters["creation"] = [
 			"between",
 			[(from_date or "2000-01-01") + " 00:00:00", (to_date or today()) + " 23:59:59"],
+		]
+	# Separate, optional range on date_of_applied (a plain Date field, no
+	# time component) — additive to the From/To (creation) range above, same
+	# as reports.js's Applied From/Applied To fields alongside From/To.
+	if applied_from or applied_to:
+		filters["date_of_applied"] = [
+			"between",
+			[applied_from or "2000-01-01", applied_to or today()],
 		]
 
 	# "name" and "creation" are the two fields the Details sheet needs that
@@ -130,15 +177,28 @@ def download_st_district_funnel(from_date=None, to_date=None, native_state=None,
 	)
 	st_rows = [r for r in rows if _get_col(r.role) == "ST"]
 
-	# Same State/School dropdown filters as the on-screen table
+	# Restricted to only the 12 known schools (see STF_SCHOOL_VALUES) —
+	# same restriction reports.js applies before the table ever renders,
+	# so the download always matches the on-screen report even with no
+	# School filter selected.
+	st_rows = [r for r in st_rows if _district_of(r) in STF_SCHOOL_VALUES]
+
+	# Same State/School/Job Code multiselect filters as the on-screen table
 	# (reports.js's applySTFFilters) — passed through as querystring params
 	# from the Download Excel button so the file matches whatever's
 	# currently filtered on screen, instead of always exporting every
-	# School Teacher record in the date range.
-	if native_state:
-		st_rows = [r for r in st_rows if (r.get("native_state") or "").strip() == native_state]
-	if school:
-		st_rows = [r for r in st_rows if _district_of(r) == school]
+	# School Teacher record in the date range. Each is zero or more
+	# selected values (see _parse_multi) — empty means "All" (no
+	# filtering), a non-empty list matches any of the selected values.
+	states = _parse_multi(native_state)
+	schools = _parse_multi(school)
+	job_codes = _parse_multi(job_code)
+	if states:
+		st_rows = [r for r in st_rows if (r.get("native_state") or "").strip() in states]
+	if schools:
+		st_rows = [r for r in st_rows if _district_of(r) in schools]
+	if job_codes:
+		st_rows = [r for r in st_rows if (r.get("job_code") or "").strip() in job_codes]
 
 	districts = sorted({_district_of(r) for r in st_rows})
 
