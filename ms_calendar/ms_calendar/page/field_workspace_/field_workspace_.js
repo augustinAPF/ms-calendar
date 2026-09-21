@@ -996,7 +996,14 @@ frappe.pages['field-workspace-'].on_page_load = function (wrapper) {
 		// pair instead of living in state.filters as a Set.
 		dateFilters: { date_of_applied: { from: '', to: '' } },
 		selected: new Set(), // names of rows checked in the results table
-		page_length: PAGE_SIZES[0]
+		page_length: PAGE_SIZES[0],
+		// Bumped on every runSearch() call; a response only gets applied if
+		// its captured seq is still the latest by the time it arrives.
+		// Without this, checking several filters quickly (each one fires its
+		// own request immediately) can let an older, slower request's
+		// results land after a newer one and silently overwrite the table
+		// with results that no longer match what's actually checked.
+		searchSeq: 0
 	};
 	ALL_FILTER_FIELDS.forEach((field) => { state.filters[field] = new Set(); });
 
@@ -1101,7 +1108,91 @@ frappe.pages['field-workspace-'].on_page_load = function (wrapper) {
 						<th>Job Code</th>
 						<th>Application Status</th>
 						<th>Applied On</th>
-						<th>Date Applied</th>
+						<th>Candidate ID</th>
+						<th>Reason for Blocklist</th>
+						<th>On Hold Reason</th>
+						<th>Reasons for Shortlist</th>
+						<th>Other reason for shortlist</th>
+						<th>Reasons for Reject</th>
+						<th>Other reasons for reject</th>
+						<th>Shortlist to another job</th>
+						<th>Application Form</th>
+						<th>Reason for shortlisting to another job</th>
+						<th>Job Title</th>
+						<th>Another Job Role</th>
+						<th>Another Job Code</th>
+						<th>Another Job Department</th>
+						<th>Another Job Location</th>
+						<th>Offer Status</th>
+						<th>Offer Date</th>
+						<th>Decline Reason</th>
+						<th>Email Verified</th>
+						<th>Phone Verified</th>
+						<th>Alternate contact no</th>
+						<th>Date of birth</th>
+						<th>Age</th>
+						<th>Preferred Job Location</th>
+						<th>Gender</th>
+						<th>Native State</th>
+						<th>Native District</th>
+						<th>Zwayam id</th>
+						<th>Units</th>
+						<th>Location</th>
+						<th>Highest Educational Qualification</th>
+						<th>Teaching Degrees</th>
+						<th>Teaching Exp (Years)</th>
+						<th>Teaching Exp (Months)</th>
+						<th>Health Exp (Years)</th>
+						<th>Health Exp (Months)</th>
+						<th>Former Employee</th>
+						<th>Applied in Last 12 Months</th>
+						<th>How Did You Know</th>
+						<th>If Email Invite</th>
+						<th>Employee Referral Name</th>
+						<th>Ex-Employee Name</th>
+						<th>Recruiter (Upload)</th>
+						<th>Others, Specify</th>
+						<th>Associated with APF</th>
+						<th>Family at APF</th>
+						<th>Open to Other Location</th>
+						<th>English Medium Education</th>
+						<th>Fluent in English</th>
+						<th>Test Location</th>
+						<th>Preferred Test Mode</th>
+						<th>Written Test Subject</th>
+						<th>CTET Qualified</th>
+						<th>Remarks</th>
+						<th>Cooling Off Period</th>
+						<th>Field Mail</th>
+						<th>Resume Request Status</th>
+						<th>Application Date</th>
+						<th>Address</th>
+						<th>Taluk/Block</th>
+						<th>State</th>
+						<th>District / City</th>
+						<th>Pin Code</th>
+						<th>Current Location</th>
+						<th>Total Experience</th>
+						<th>Current Organisation</th>
+						<th>Last Designation</th>
+						<th>Last Drawn CTC</th>
+						<th>Permanent Address</th>
+						<th>Permanent Taluk/Block</th>
+						<th>Permanent State</th>
+						<th>Permanent District / City</th>
+						<th>Permanent Pin Code</th>
+						<th>Permanent Address (Full)</th>
+						<th>Date of Recruiter Round</th>
+						<th>Recruiter Round Panel</th>
+						<th>Recruiter Round Status</th>
+						<th>Date of Functional Round</th>
+						<th>Functional Panel Member 1</th>
+						<th>Functional Panel Member 2</th>
+						<th>Functional Round Status</th>
+						<th>Date of Final Round</th>
+						<th>Final Panel Member 1</th>
+						<th>Final Panel Member 2</th>
+						<th>Final Round Status</th>
 					</tr>
 				</thead>
 				<tbody></tbody>
@@ -1127,7 +1218,91 @@ frappe.pages['field-workspace-'].on_page_load = function (wrapper) {
 					<td>${frappe.utils.escape_html(row.job_code || '')}</td>
 					<td>${statusHtml}</td>
 					<td>${frappe.datetime.str_to_user(row.creation)}</td>
-					<td>${row.date_of_applied ? frappe.datetime.str_to_user(row.date_of_applied) : ''}</td>
+					<td>${frappe.utils.escape_html(row.candidate_id || '')}</td>
+					<td>${frappe.utils.escape_html(row.blocklist_reason || '')}</td>
+					<td>${frappe.utils.escape_html(row.hold_reason || '')}</td>
+					<td>${frappe.utils.escape_html(row.reasons_for_shortlist || '')}</td>
+					<td>${frappe.utils.escape_html(row.other_shortlist || '')}</td>
+					<td>${frappe.utils.escape_html(row.reasons_for_reject || '')}</td>
+					<td>${frappe.utils.escape_html(row.other_reject || '')}</td>
+					<td>${row.other_job ? 'Yes' : 'No'}</td>
+					<td>${row.application_form ? 'Yes' : 'No'}</td>
+					<td>${frappe.utils.escape_html(row.reason_otherjob || '')}</td>
+					<td>${frappe.utils.escape_html(row.job_title || '')}</td>
+					<td>${frappe.utils.escape_html(row.another_job_role || '')}</td>
+					<td>${frappe.utils.escape_html(row.another_job_code || '')}</td>
+					<td>${frappe.utils.escape_html(row.another_job_department || '')}</td>
+					<td>${frappe.utils.escape_html(row.another_job_location || '')}</td>
+					<td>${frappe.utils.escape_html(row.offer || '')}</td>
+					<td>${frappe.utils.escape_html(row.date_offer || '')}</td>
+					<td>${frappe.utils.escape_html(row.reason_decline || '')}</td>
+					<td>${row.email_verified ? 'Yes' : 'No'}</td>
+					<td>${row.phone_verified ? 'Yes' : 'No'}</td>
+					<td>${frappe.utils.escape_html(row.alternate_no || '')}</td>
+					<td>${row.dob ? frappe.datetime.str_to_user(row.dob) : ''}</td>
+					<td>${row.age != null ? row.age : ''}</td>
+					<td>${frappe.utils.escape_html(row.preferred_location_form || '')}</td>
+					<td>${frappe.utils.escape_html(row.gender || '')}</td>
+					<td>${frappe.utils.escape_html(row.native_state || '')}</td>
+					<td>${frappe.utils.escape_html(row.native_district || '')}</td>
+					<td>${frappe.utils.escape_html(row.zayam_id || '')}</td>
+					<td>${frappe.utils.escape_html(row.units || '')}</td>
+					<td>${frappe.utils.escape_html(row.location || '')}</td>
+					<td>${frappe.utils.escape_html(row.highest_education || '')}</td>
+					<td>${frappe.utils.escape_html(row.teaching_degrees || '')}</td>
+					<td>${frappe.utils.escape_html(row.teaching_year || '')}</td>
+					<td>${frappe.utils.escape_html(row.teachingexp_month || '')}</td>
+					<td>${frappe.utils.escape_html(row.health_expyear || '')}</td>
+					<td>${frappe.utils.escape_html(row.health_expmonth || '')}</td>
+					<td>${frappe.utils.escape_html(row.former_employee || '')}</td>
+					<td>${frappe.utils.escape_html(row.process_12 || '')}</td>
+					<td>${frappe.utils.escape_html(row.opportunity || '')}</td>
+					<td>${frappe.utils.escape_html(row.if_email_invite || '')}</td>
+					<td>${frappe.utils.escape_html(row.employee_referral || '')}</td>
+					<td>${frappe.utils.escape_html(row.ex_emplyee_name || '')}</td>
+					<td>${frappe.utils.escape_html(row.if_recruiter_upload || '')}</td>
+					<td>${frappe.utils.escape_html(row.then_other || '')}</td>
+					<td>${frappe.utils.escape_html(row.apf_associated || '')}</td>
+					<td>${frappe.utils.escape_html(row.apf_family || '')}</td>
+					<td>${frappe.utils.escape_html(row.worklocation || '')}</td>
+					<td>${frappe.utils.escape_html(row.english_medium || '')}</td>
+					<td>${frappe.utils.escape_html(row.english_fluent || '')}</td>
+					<td>${frappe.utils.escape_html(row.test_location || '')}</td>
+					<td>${frappe.utils.escape_html(row.preferred_test_mode || '')}</td>
+					<td>${frappe.utils.escape_html(row.written_subject || '')}</td>
+					<td>${frappe.utils.escape_html(row.ctet_qualify || '')}</td>
+					<td>${frappe.utils.escape_html(row.remarks || '')}</td>
+					<td>${frappe.utils.escape_html(row.cool_of_period || '')}</td>
+					<td>${frappe.utils.escape_html(row.field_mail || '')}</td>
+					<td>${frappe.utils.escape_html(row.resume_request_status || '')}</td>
+					<td>${row.application_date ? frappe.datetime.str_to_user(row.application_date) : ''}</td>
+					<td>${frappe.utils.escape_html(row.address || '')}</td>
+					<td>${frappe.utils.escape_html(row.block || '')}</td>
+					<td>${frappe.utils.escape_html(row.state || '')}</td>
+					<td>${frappe.utils.escape_html(row.district_city || '')}</td>
+					<td>${row.pin_code != null ? row.pin_code : ''}</td>
+					<td>${frappe.utils.escape_html(row.current_location1 || '')}</td>
+					<td>${frappe.utils.escape_html(row.total_experience1 || '')}</td>
+					<td>${frappe.utils.escape_html(row.current_organisation1 || '')}</td>
+					<td>${frappe.utils.escape_html(row.last_designation || '')}</td>
+					<td>${frappe.utils.escape_html(row.last_drawn_salary || '')}</td>
+					<td>${frappe.utils.escape_html(row.permanent_address || '')}</td>
+					<td>${frappe.utils.escape_html(row.taluk || '')}</td>
+					<td>${frappe.utils.escape_html(row.permanent_state || '')}</td>
+					<td>${frappe.utils.escape_html(row.permanent_district || '')}</td>
+					<td>${row.permanent_pin != null ? row.permanent_pin : ''}</td>
+					<td>${frappe.utils.escape_html(row.permanent_address1 || '')}</td>
+					<td>${row.date_of_recruiter_round ? frappe.datetime.str_to_user(row.date_of_recruiter_round) : ''}</td>
+					<td>${frappe.utils.escape_html(row.recruiter_round_name || '')}</td>
+					<td>${frappe.utils.escape_html(row.recruiter_round_status || '')}</td>
+					<td>${row.date_of_functional_round ? frappe.datetime.str_to_user(row.date_of_functional_round) : ''}</td>
+					<td>${frappe.utils.escape_html(row.functional_panel1 || '')}</td>
+					<td>${frappe.utils.escape_html(row.functional_panel2 || '')}</td>
+					<td>${frappe.utils.escape_html(row.functional_round_status || '')}</td>
+					<td>${row.date_of_final_round ? frappe.datetime.str_to_user(row.date_of_final_round) : ''}</td>
+					<td>${frappe.utils.escape_html(row.final_panel1 || '')}</td>
+					<td>${frappe.utils.escape_html(row.final_panel2 || '')}</td>
+					<td>${frappe.utils.escape_html(row.final_round_status || '')}</td>
 				</tr>
 			`;
 		}).join('');
@@ -1508,6 +1683,8 @@ frappe.pages['field-workspace-'].on_page_load = function (wrapper) {
 		renderPageSizeButtons();
 		$resultCount.text('Searching…');
 
+		const mySeq = ++state.searchSeq;
+
 		frappe.call({
 			method: SEARCH_METHOD,
 			args: {
@@ -1517,6 +1694,10 @@ frappe.pages['field-workspace-'].on_page_load = function (wrapper) {
 				page_length: state.page_length // 0 = All
 			}
 		}).then((r) => {
+			// A newer search has started since this request went out — its
+			// own response will render the table; applying this stale one
+			// now would overwrite correct results with outdated ones.
+			if (mySeq !== state.searchSeq) return;
 			const { rows, total } = r.message || { rows: [], total: 0 };
 			const shown = state.page_length === 0 ? total : Math.min(state.page_length, rows.length);
 			$resultCount.html(
@@ -1524,7 +1705,24 @@ frappe.pages['field-workspace-'].on_page_load = function (wrapper) {
 					? `<b>${total.toLocaleString()}</b> profile${total === 1 ? '' : 's'} found`
 					: `Showing <b>${shown.toLocaleString()}</b> of <b>${total.toLocaleString()}</b> profiles`
 			);
+			// Auto-check every row currently on screen whenever the results
+			// came from an active filter/search (not the default unfiltered
+			// landing view) and selection wasn't explicitly preserved from a
+			// page-size change — so checking a status (or any other) filter
+			// leaves every matching row pre-selected, ready for "Open N in
+			// List View" without an extra manual "select all" click.
+			if (!(opts && opts.keepSelection)) {
+				const hasActiveFilter =
+					keywords ||
+					Object.values(state.filters).some((s) => s.size) ||
+					state.dateFilters.date_of_applied.from ||
+					state.dateFilters.date_of_applied.to;
+				if (hasActiveFilter) {
+					rows.forEach((row) => state.selected.add(row.name));
+				}
+			}
 			renderResults(rows, total);
+			updateOpenListButton();
 		});
 
 		refreshFacets();

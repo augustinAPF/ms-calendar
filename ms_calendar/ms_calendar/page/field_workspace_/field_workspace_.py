@@ -21,7 +21,92 @@ KEYWORD_FIELDS = [
 
 LIST_FIELDS = [
     "name", "full_name_aadhaar", "email_address", "phone_number", "role",
-    "department", "application_status", "job_code", "creation", "date_of_applied",
+    "department", "application_status", "job_code", "creation",
+    "candidate_id",
+    "blocklist_reason",
+    "hold_reason",
+    "reasons_for_shortlist",
+    "other_shortlist",
+    "reasons_for_reject",
+    "other_reject",
+    "other_job",
+    "application_form",
+    "reason_otherjob",
+    "job_title",
+    "another_job_role",
+    "another_job_code",
+    "another_job_department",
+    "another_job_location",
+    "offer",
+    "date_offer",
+    "reason_decline",
+    "email_verified",
+    "phone_verified",
+    "alternate_no",
+    "dob",
+    "age",
+    "preferred_location_form",
+    "gender",
+    "native_state",
+    "native_district",
+    "zayam_id",
+    "units",
+    "location",
+    "highest_education",
+    "teaching_degrees",
+    "teaching_year",
+    "teachingexp_month",
+    "health_expyear",
+    "health_expmonth",
+    "former_employee",
+    "process_12",
+    "opportunity",
+    "if_email_invite",
+    "employee_referral",
+    "ex_emplyee_name",
+    "if_recruiter_upload",
+    "then_other",
+    "apf_associated",
+    "apf_family",
+    "worklocation",
+    "english_medium",
+    "english_fluent",
+    "test_location",
+    "preferred_test_mode",
+    "written_subject",
+    "ctet_qualify",
+    "remarks",
+    "cool_of_period",
+    "field_mail",
+    "resume_request_status",
+    "application_date",
+    "address",
+    "block",
+    "state",
+    "district_city",
+    "pin_code",
+    "current_location1",
+    "total_experience1",
+    "current_organisation1",
+    "last_designation",
+    "last_drawn_salary",
+    "permanent_address",
+    "taluk",
+    "permanent_state",
+    "permanent_district",
+    "permanent_pin",
+    "permanent_address1",
+    "date_of_recruiter_round",
+    "recruiter_round_name",
+    "recruiter_round_status",
+    "date_of_functional_round",
+    "functional_panel1",
+    "functional_panel2",
+    "functional_round_status",
+    "date_of_final_round",
+    "final_panel1",
+    "final_panel2",
+    "final_round_status",
 ]
 
 FACET_FIELDS = {"application_status", "role", "department", "job_code", "location"}
@@ -192,12 +277,24 @@ def _job_code_shortcuts_by(group_field, group_key):
         if group_val not in grouped:
             grouped[group_val] = []
             order.append(group_val)
-        if len(grouped[group_val]) < SHORTCUTS_PER_GROUP:
-            grouped[group_val].append({
-                "job_code": job_code,
-                "job_title": job_titles.get(job_code),
-                "count": r.count,
-            })
+        grouped[group_val].append({
+            "job_code": job_code,
+            "job_title": job_titles.get(job_code),
+            "count": r.count,
+        })
+
+    # 200-series job codes are the currently open positions (every Job
+    # Opening record uses a 200-series code, none use 100-series) — the
+    # plain top-N-by-count cap below was burying almost all of them under
+    # the much higher historical volume of old 100-series codes. Keep every
+    # 200-series code and the top SHORTCUTS_PER_GROUP of the rest as two
+    # independent caps, so a department with more than 12 open codes (e.g.
+    # School Teacher Education) doesn't crowd the 100-series ones out
+    # entirely.
+    for group_val, shortcuts in grouped.items():
+        active = [s for s in shortcuts if s["job_code"].startswith("20")]
+        rest = [s for s in shortcuts if not s["job_code"].startswith("20")]
+        grouped[group_val] = active + rest[:SHORTCUTS_PER_GROUP]
 
     totals = {
         d["value"]: d["count"] for d in get_field_registration_facet_counts(group_field)
