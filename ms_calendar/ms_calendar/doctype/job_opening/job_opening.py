@@ -54,14 +54,16 @@ class JobOpening(WebsiteGenerator):
     # Maps unit_lower (must match a real "Recruitment Units" record name,
     # lowercased) → careers.frappe.cloud form slug
     _UNIT_FORM_MAP = {
-        "field":                    "field-registration-form",
-        "grants":                   "philanthropy-registration-form",
-        "scholarship":              "scholarship-recruitment-form",
-        "health":                   "health-registration-form",
+        "field": "field-registration-form",
+        "grants": "philanthropy-registration-form",
+        "scholarship": "scholarship-recruitment-form",
+        "health": "health-registration-form",
+        "enablers": "enablers-registration-form",
     }
 
     def _auto_set_job_application_route(self):
         from urllib.parse import urlencode
+
         unit_key = (self.unit or "").strip().lower()
         form_slug = self._UNIT_FORM_MAP.get(unit_key)
         if not form_slug:
@@ -81,8 +83,14 @@ class JobOpening(WebsiteGenerator):
             params["job_code"] = self.job_code
         if getattr(self, "school", None):
             params["school"] = self.school
-        if getattr(self, "preferred_location", None) and self.location and "/" in self.location:
-            options = [part.strip() for part in self.location.split("/") if part.strip()]
+        if (
+            getattr(self, "preferred_location", None)
+            and self.location
+            and "/" in self.location
+        ):
+            options = [
+                part.strip() for part in self.location.split("/") if part.strip()
+            ]
             if options:
                 params["preferred_location_options"] = ",".join(options)
         url = f"https://careers.frappe.cloud/{form_slug}/new"
@@ -138,7 +146,11 @@ def close_expired_job_openings():
     openings = (
         frappe.qb.from_(Opening)
         .select(Opening.name)
-        .where((Opening.status == "Open") & (Opening.closes_on.isnotnull()) & (Opening.closes_on < today))
+        .where(
+            (Opening.status == "Open")
+            & (Opening.closes_on.isnotnull())
+            & (Opening.closes_on < today)
+        )
     ).run(pluck=True)
 
     for d in openings:

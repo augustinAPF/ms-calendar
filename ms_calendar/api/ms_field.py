@@ -14,86 +14,6 @@ _CANDIDATE_SENDER = (
 )
 
 
-def _log_field_interview_email(
-    doc_name, sent_to, subject, channel, status, error=None, message=None
-):
-    """Records one email send attempt straight into Field Interview
-    Schedule's own Activity/Timeline feed (the same tab that already shows
-    "You created this" / comments / the "+ New Email" composer), so a
-    recruiter can open a record and see whether every candidate/interviewer/
-    demo-feedback email for it actually went out — not just the failures.
-    Most sends in this file go straight through Microsoft Graph's own
-    sendMail API (not frappe.sendmail), which never creates a Frappe Email
-    Queue entry at all; before this, a successful Graph send left literally
-    no record anywhere, and a failed one only surfaced in the Error Log,
-    disconnected from the record it happened on.
-
-    `message` is the actual HTML body that was (or would have been) sent —
-    passed through so the logged entry shows the real email content
-    instead of just a one-line "sent to X" note.
-
-    A "Sent" attempt is logged as a real Communication (reference_doctype/
-    reference_name = this record) — the same doc type Frappe's own "+ New
-    Email" composer creates, so it renders in Activity exactly like a sent
-    email, with its `content` set to the real body. frappe.sendmail()
-    itself doesn't create one of these on its own (same reasoning as
-    send_leader_final_round_feedback_pdf's manual Communication insert
-    elsewhere in this file), and a direct Graph sendMail call has even less
-    native trace, so this is the only place either one gets recorded. A
-    "Failed" attempt is logged as a Comment instead — Communication's own
-    status options don't cover a failed send, and a comment already renders
-    in the same Activity feed with a clearly different look, so a failure
-    doesn't get mistaken for a delivered email at a glance; the comment
-    still includes the body that failed to send, for the same reason.
-
-    Both are inserted directly as standalone documents (not via
-    frappe.get_doc(parent).append(...).save()) so logging never re-triggers
-    the parent doctype's own validation/hooks, and a logging failure can
-    never itself break the actual send it's recording — errors here are
-    swallowed, same as this file's existing frappe.log_error() calls.
-    """
-    if not doc_name:
-        return
-    try:
-        if status == "Sent":
-            frappe.get_doc(
-                {
-                    "doctype": "Communication",
-                    "communication_type": "Communication",
-                    "communication_medium": "Email",
-                    "sent_or_received": "Sent",
-                    "reference_doctype": "Field Interview Schedule",
-                    "reference_name": doc_name,
-                    "subject": (subject or "")[:500],
-                    "content": message or f"Sent to {sent_to} via {channel}.",
-                    "recipients": sent_to,
-                }
-            ).insert(ignore_permissions=True)
-        else:
-            _body_html = f"<br>{message}" if message else ""
-            _error_html = f"<br><i>Error: {error}</i>" if error else ""
-            frappe.get_doc(
-                {
-                    "doctype": "Comment",
-                    "comment_type": "Comment",
-                    "reference_doctype": "Field Interview Schedule",
-                    "reference_name": doc_name,
-                    "content": (
-                        f"⚠️ Email to {sent_to} failed ({channel}) — {subject}"
-                        f"{_error_html}{_body_html}"
-                    )[:2000],
-                }
-            ).insert(ignore_permissions=True)
-    except Exception:
-        try:
-            frappe.log_error(
-                title="FIELD_INTERVIEW_EMAIL_LOG_ERROR",
-                message=f"Could not log email attempt for {doc_name}: {frappe.get_traceback()}",
-            )
-        except Exception:
-            pass
-
-
 def _resolve_attachment_bytes(web_path):
     """Resolve a File-field url (private or public) to (file_name, bytes),
     trying every File row that shares this file_url rather than blindly
@@ -642,7 +562,9 @@ def get_org_rooms_and_availability(interview_date, start_time, end_time):
             # confusing framework error instead of the actual explanation.
             frappe.log_error(
                 title="Room Availability Error",
-                message=f"getSchedule failed for context user {_context_user}: {_he}"[:2000],
+                message=f"getSchedule failed for context user {_context_user}: {_he}"[
+                    :2000
+                ],
             )
             frappe.throw(
                 f"Could not check room availability. The organiser account "
@@ -684,8 +606,12 @@ def get_org_rooms_and_availability(interview_date, start_time, end_time):
         busy = schedule_map[key]
         available = True
         for slot in busy:
-            s = datetime.fromisoformat(slot["start"]["dateTime"]).replace(tzinfo=timezone.utc)
-            e = datetime.fromisoformat(slot["end"]["dateTime"]).replace(tzinfo=timezone.utc)
+            s = datetime.fromisoformat(slot["start"]["dateTime"]).replace(
+                tzinfo=timezone.utc
+            )
+            e = datetime.fromisoformat(slot["end"]["dateTime"]).replace(
+                tzinfo=timezone.utc
+            )
             if not (e <= start_utc or s >= end_utc):
                 available = False
                 break
@@ -709,6 +635,117 @@ def get_org_rooms_and_availability(interview_date, start_time, end_time):
         )
 
     return {"rooms": final}
+
+
+def _log_field_interview_communication(doc_name, subject, content, recipients, cc=None):
+    """
+    Field Interview Schedule invites/updates/cancellations go out either as
+    a Graph calendar event (attendees notified natively by Outlook) or via
+    frappe.sendmail() without a reference_doctype/reference_name - neither
+    path creates a Communication record, so none of them ever show up in
+    the record's Activity timeline. Call this right after a send succeeds
+    to log one manually (same pattern already used for the Leader Final
+    Round Feedback Form's merged-feedback email).
+    """
+    if not doc_name or not recipients:
+        return
+    try:
+        frappe.get_doc(
+            {
+                "doctype": "Communication",
+                "communication_type": "Communication",
+                "communication_medium": "Email",
+                "sent_or_received": "Sent",
+                "reference_doctype": "Field Interview Schedule",
+                "reference_name": doc_name,
+                "subject": subject,
+                "content": content,
+                "recipients": recipients if isinstance(recipients, str) else ", ".join(recipients),
+                "cc": cc or "",
+            }
+        ).insert(ignore_permissions=True)
+    except Exception:
+        frappe.log_error(
+            title="FIELD_INTERVIEW_COMMUNICATION_LOG_ERROR",
+            message=frappe.get_traceback(),
+        )
+
+
+def _fetch_teams_meeting_info(organizer_email, event_id, headers, mode_is_online):
+    """
+    Polls the Graph event until its Teams meeting is attached (Graph doesn't
+    always have it ready the instant an event is created/patched), then
+    resolves the numeric Meeting ID + Passcode shown on the Outlook invite.
+    The dedicated onlineMeetings lookup frequently returns empty, so this
+    falls back to regex-scraping them straight out of the HTML body Graph
+    auto-appends to the event once the Teams meeting is attached (same body
+    Outlook itself renders). Mirrors the extraction create_interview_event
+    already does inline for a freshly created event — reused here so
+    update_interview_event's reschedule email can show the same Join
+    link/Meeting ID/Passcode instead of a stripped-down notice.
+    """
+    event_fetch_url = f"https://graph.microsoft.com/v1.0/users/{organizer_email}/events/{event_id}"
+
+    join_web_url = ""
+    json_data = {}
+    for _ in range(10):
+        data = requests.get(event_fetch_url, headers=headers)
+        json_data = data.json()
+        if json_data.get("onlineMeeting"):
+            join_web_url = json_data["onlineMeeting"].get("joinUrl", "")
+            break
+        _time.sleep(1)
+
+    # Graph doesn't reliably re-attach/return the onlineMeeting property on
+    # a PATCHed event (seen on a reschedule) even though the Teams meeting
+    # itself is unchanged - the join link is already embedded as plain HTML
+    # in the event's own body (set when the invite was first created), so
+    # fall back to reading it straight out of that instead of leaving the
+    # whole Teams section blank.
+    if mode_is_online and not join_web_url:
+        html_body = json_data.get("body", {}).get("content", "")
+        m0 = re.search(r'<a href="(https://teams\.microsoft\.com[^"]+)"', html_body)
+        if m0:
+            join_web_url = m0.group(1)
+
+    join_meeting_id = ""
+    join_passcode = ""
+
+    if mode_is_online and join_web_url:
+        filter_url = (
+            f"https://graph.microsoft.com/v1.0/users/{organizer_email}"
+            f"/onlineMeetings?$filter=JoinWebUrl eq '{join_web_url}'"
+        )
+        om_res = requests.get(filter_url, headers=headers)
+        if om_res.status_code == 200:
+            values = om_res.json().get("value", [])
+            if values:
+                join_meeting_id = values[0].get("joinMeetingId", "") or ""
+                join_passcode = values[0].get("passcode", "") or ""
+
+    if mode_is_online and (not join_meeting_id or not join_passcode):
+        try:
+            html_body = json_data.get("body", {}).get("content", "")
+
+            m1 = re.search(r"Meeting ID:\s*</span><span[^>]*>([\d\s]+)<", html_body)
+            if m1:
+                join_meeting_id = m1.group(1).strip()
+            elif not join_meeting_id:
+                m1b = re.search(r"Meeting ID:\s*([\d\s]+)", html_body)
+                if m1b:
+                    join_meeting_id = m1b.group(1).strip()
+
+            m2 = re.search(r"Passcode:\s*</span><span[^>]*>([\w\d]+)<", html_body)
+            if m2:
+                join_passcode = m2.group(1).strip()
+            elif not join_passcode:
+                m2b = re.search(r"Passcode:\s*([\w\d]+)", html_body)
+                if m2b:
+                    join_passcode = m2b.group(1).strip()
+        except Exception:
+            pass
+
+    return join_web_url, join_meeting_id, join_passcode
 
 
 @frappe.whitelist()
@@ -957,9 +994,8 @@ def create_interview_event(
         k in _dept_raw for k in ("livelihood", "livelihoods")
     )
     _is_education = (
-        (not _is_arp and not _is_health and not _is_livelihood)
-        and "education" in _dept_raw
-    )
+        not _is_arp and not _is_health and not _is_livelihood
+    ) and "education" in _dept_raw
     # Within Education, _EDUCATION_FEEDBACK_URLS is further keyed by which
     # role the department string names (e.g. "School Teacher Education" vs
     # "Resource Person Education") — read straight off department, not the
@@ -1339,9 +1375,7 @@ def create_interview_event(
                     message=f"File too large: {_f_fname}",
                 )
                 continue
-            final_files.append(
-                (_f_fname, base64.b64encode(_f_bytes).decode())
-            )
+            final_files.append((_f_fname, base64.b64encode(_f_bytes).decode()))
         except Exception as _fe:
             frappe.log_error(
                 title="Interview Event File Error",
@@ -1453,7 +1487,10 @@ def create_interview_event(
                 # falls back to deriving a name from the URL if no File
                 # record exists at all yet (matches the old behaviour).
                 _afd = frappe.get_all(
-                    "File", filters={"file_url": web_path}, fields=["file_name"], limit=1
+                    "File",
+                    filters={"file_url": web_path},
+                    fields=["file_name"],
+                    limit=1,
                 )
                 _af_fname = _afd[0]["file_name"] if _afd else web_path.split("/")[-1]
 
@@ -1479,7 +1516,9 @@ def create_interview_event(
                 except Exception as _afe:
                     frappe.log_error(
                         title="Interview Auto-Attach Error",
-                        message=f"Auto-attach failed for field={field} url={web_path}: {_afe}"[:2000],
+                        message=f"Auto-attach failed for field={field} url={web_path}: {_afe}"[
+                            :2000
+                        ],
                     )
                     continue
 
@@ -1961,19 +2000,6 @@ comments/recommendations for the calibration process and final selection decisio
         )
         patch_res.raise_for_status()
         _patch_ok = True
-        # This PATCH (sendUpdates=sendToAllAndSaveCopy) is what actually
-        # notifies the interviewer(s)/CC — Graph sends them a native Outlook
-        # calendar invite off the attendee list, not a frappe.sendmail/
-        # sendMail call this file makes directly, so without logging it
-        # here explicitly, the interviewer side of "did they get notified?"
-        # would be invisible in Activity even though the candidate side is
-        # covered further below. Logged once per interviewer/CC recipient,
-        # same as every other email path in this function.
-        for _invitee in interviewer_list + cc_list:
-            _log_field_interview_email(
-                doc_name, _invitee, calendar_subject, "Microsoft Graph", "Sent",
-                message=final_body,
-            )
     except Exception as patch_err:
         try:
             _patch_detail = (
@@ -2020,10 +2046,6 @@ comments/recommendations for the calibration process and final selection decisio
             )
             _sr.raise_for_status()
             _self_sent = True
-            _log_field_interview_email(
-                doc_name, Organizer_email, calendar_subject, "Microsoft Graph", "Sent",
-                message=final_body,
-            )
         except Exception as _se:
             try:
                 frappe.log_error(
@@ -2032,10 +2054,6 @@ comments/recommendations for the calibration process and final selection decisio
                 )
             except Exception:
                 pass
-            _log_field_interview_email(
-                doc_name, Organizer_email, calendar_subject, "Microsoft Graph", "Failed", _se,
-                message=final_body,
-            )
 
         if not _self_sent:
             # Only claim Organizer_email as the From address if Frappe has a
@@ -2063,10 +2081,6 @@ comments/recommendations for the calibration process and final selection decisio
                     **_org_sender_arg,
                 )
                 _self_sent = True
-                _log_field_interview_email(
-                    doc_name, Organizer_email, calendar_subject, "Frappe Email", "Sent",
-                    message=final_body,
-                )
             except Exception as _fe:
                 try:
                     frappe.log_error(
@@ -2075,10 +2089,6 @@ comments/recommendations for the calibration process and final selection decisio
                     )
                 except Exception:
                     pass
-                _log_field_interview_email(
-                    doc_name, Organizer_email, calendar_subject, "Frappe Email", "Failed", _fe,
-                    message=final_body,
-                )
 
     # If PATCH failed after all retries, fall back to a plain email to each interviewer
     # so they at least receive the interview details and feedback form link.
@@ -2112,15 +2122,8 @@ comments/recommendations for the calibration process and final selection decisio
                 )
                 _iv_res.raise_for_status()
                 _iv_graph_sent = True
-                _log_field_interview_email(
-                    doc_name, _iv_email, calendar_subject, "Microsoft Graph", "Sent",
-                    message=final_body,
-                )
-            except Exception as _iv_err:
-                _log_field_interview_email(
-                    doc_name, _iv_email, calendar_subject, "Microsoft Graph", "Failed", _iv_err,
-                    message=final_body,
-                )
+            except Exception:
+                pass
             if not _iv_graph_sent:
                 # See comment above: only pass sender= when a matching Email
                 # Account exists, otherwise a mismatched From causes a
@@ -2144,15 +2147,8 @@ comments/recommendations for the calibration process and final selection decisio
                         ],
                         **_iv_sender_arg,
                     )
-                    _log_field_interview_email(
-                        doc_name, _iv_email, calendar_subject, "Frappe Email", "Sent",
-                        message=final_body,
-                    )
-                except Exception as _iv_fallback_err:
-                    _log_field_interview_email(
-                        doc_name, _iv_email, calendar_subject, "Frappe Email", "Failed",
-                        _iv_fallback_err, message=final_body,
-                    )
+                except Exception:
+                    pass
 
     # ----------------------------------------
     # EMAIL TO DEMO FEEDBACK INTERVIEWER(S)
@@ -2207,10 +2203,6 @@ comments/recommendations for the calibration process and final selection decisio
                 )
                 _dr.raise_for_status()
                 _demo_graph_sent = True
-                _log_field_interview_email(
-                    doc_name, _dmail, _demo_subject, "Microsoft Graph", "Sent",
-                    message=_demo_body,
-                )
             except Exception as _derr:
                 try:
                     frappe.log_error(
@@ -2218,10 +2210,6 @@ comments/recommendations for the calibration process and final selection decisio
                     )
                 except Exception:
                     pass
-                _log_field_interview_email(
-                    doc_name, _dmail, _demo_subject, "Microsoft Graph", "Failed", _derr,
-                    message=_demo_body,
-                )
 
             # Fallback: frappe.sendmail if Graph API failed
             if not _demo_graph_sent:
@@ -2242,10 +2230,6 @@ comments/recommendations for the calibration process and final selection decisio
                         delayed=False,
                         **_demo_sender_arg,
                     )
-                    _log_field_interview_email(
-                        doc_name, _dmail, _demo_subject, "Frappe Email", "Sent",
-                        message=_demo_body,
-                    )
                 except Exception as _dfallback_err:
                     try:
                         frappe.log_error(
@@ -2254,10 +2238,6 @@ comments/recommendations for the calibration process and final selection decisio
                         )
                     except Exception:
                         pass
-                    _log_field_interview_email(
-                        doc_name, _dmail, _demo_subject, "Frappe Email", "Failed",
-                        _dfallback_err, message=_demo_body,
-                    )
 
     # ----------------------------------------
     # EMAIL TO CANDIDATE
@@ -2293,7 +2273,9 @@ comments/recommendations for the calibration process and final selection decisio
         # The interviewer/organizer mailbox (Organizer_email) is never used
         # here either way — it's only for the interviewer-facing email above.
         _candidate_sender_email = (
-            frappe.db.get_value("Field Interview Schedule", doc_name, "candidate_email_sendar")
+            frappe.db.get_value(
+                "Field Interview Schedule", doc_name, "candidate_email_sendar"
+            )
             if doc_name
             else None
         ) or _CANDIDATE_SENDER_EMAIL
@@ -2340,10 +2322,6 @@ comments/recommendations for the calibration process and final selection decisio
                 _gc1_err = _gc1.text
                 _gc1.raise_for_status()
                 _graph_cand_sent = True
-                _log_field_interview_email(
-                    doc_name, interviewee_email, candidate_email_subject,
-                    "Microsoft Graph", "Sent", message=candidate_email_body,
-                )
             except Exception as _gc1_exc:
                 try:
                     frappe.log_error(
@@ -2352,11 +2330,6 @@ comments/recommendations for the calibration process and final selection decisio
                     )
                 except Exception:
                     pass
-                _log_field_interview_email(
-                    doc_name, interviewee_email, candidate_email_subject,
-                    "Microsoft Graph", "Failed", _gc1_err or _gc1_exc,
-                    message=candidate_email_body,
-                )
 
             # Attempt 2: frappe.sendmail via Frappe's own outgoing Email Account.
             # IMPORTANT: only claim the candidate sender mailbox as the From
@@ -2401,10 +2374,6 @@ comments/recommendations for the calibration process and final selection decisio
                         **_cand_sender_arg,
                     )
                     _graph_cand_sent = True
-                    _log_field_interview_email(
-                        doc_name, interviewee_email, candidate_email_subject,
-                        "Frappe Email", "Sent", message=candidate_email_body,
-                    )
                 except Exception as _cand_fb_err:
                     try:
                         frappe.log_error(
@@ -2413,10 +2382,6 @@ comments/recommendations for the calibration process and final selection decisio
                         )
                     except Exception:
                         pass
-                    _log_field_interview_email(
-                        doc_name, interviewee_email, candidate_email_subject,
-                        "Frappe Email", "Failed", _cand_fb_err, message=candidate_email_body,
-                    )
 
             if not _graph_cand_sent:
                 try:
@@ -2426,6 +2391,14 @@ comments/recommendations for the calibration process and final selection decisio
                     )
                 except Exception:
                     pass
+            else:
+                _log_field_interview_communication(
+                    doc_name, candidate_email_subject, candidate_email_body, interviewee_email
+                )
+
+    _log_field_interview_communication(
+        doc_name, calendar_subject, final_body, interviewer_list
+    )
 
     # Save event_id to the document so reschedule can cancel it later
     if doc_name:
@@ -2510,7 +2483,9 @@ comments/recommendations for the calibration process and final selection decisio
         # this is one single call, not two — reuse the main event's own
         # Teams meeting instead of creating a second, unconnected one that
         # nobody but the hybrid group would be in.
-        _share_main_meeting = _hybrid_is_online and mode_is_online and bool(join_web_url)
+        _share_main_meeting = (
+            _hybrid_is_online and mode_is_online and bool(join_web_url)
+        )
 
         if _hybrid_is_online:
             _hybrid_location_html = ""
@@ -2620,9 +2595,7 @@ comments/recommendations for the calibration process and final selection decisio
                                     _h_html,
                                 )
                                 if not _m1:
-                                    _m1 = re.search(
-                                        r"Meeting ID:\s*([\d\s]+)", _h_html
-                                    )
+                                    _m1 = re.search(r"Meeting ID:\s*([\d\s]+)", _h_html)
                                 if _m1:
                                     _h_meeting_id = _m1.group(1).strip()
                             if not _h_passcode:
@@ -2631,9 +2604,7 @@ comments/recommendations for the calibration process and final selection decisio
                                     _h_html,
                                 )
                                 if not _m2:
-                                    _m2 = re.search(
-                                        r"Passcode:\s*([\w\d]+)", _h_html
-                                    )
+                                    _m2 = re.search(r"Passcode:\s*([\w\d]+)", _h_html)
                                 if _m2:
                                     _h_passcode = _m2.group(1).strip()
                         except Exception:
@@ -2645,9 +2616,7 @@ comments/recommendations for the calibration process and final selection decisio
                         f"<b>Passcode:</b> {_h_passcode}</p>"
                     )
                 else:
-                    _hybrid_join_html = (
-                        "<p>Teams join details will follow.</p>"
-                    )
+                    _hybrid_join_html = "<p>Teams join details will follow.</p>"
 
             _hybrid_final_body = f"""
             <p>Hi,</p>
@@ -2706,6 +2675,56 @@ comments/recommendations for the calibration process and final selection decisio
         "meeting_id": join_meeting_id,
         "passcode": join_passcode,
         "is_online": is_online,
+    }
+
+
+@frappe.whitelist()
+def get_interview_event_content(doc_name):
+    """
+    Field Interview Schedule invites are sent by create_interview_event
+    creating an event directly on the organizer's Outlook calendar via MS
+    Graph - Frappe never sees that email, so it has no Communication
+    record and shows nothing in the Activity timeline. This fetches the
+    live event straight from Graph so the actual subject/body/attendees
+    that went out to the candidate and interviewer can be inspected.
+    """
+    doc = frappe.get_doc("Field Interview Schedule", doc_name)
+    if not doc.ms_event_id:
+        frappe.throw("No ms_event_id on this record - no calendar invite was created for it.")
+
+    creds = frappe.get_single("MS Graph Credentials")
+    tok = requests.post(
+        f"https://login.microsoftonline.com/{creds.tenant_id.strip()}/oauth2/v2.0/token",
+        data={
+            "grant_type": "client_credentials",
+            "client_id": creds.client_id.strip(),
+            "client_secret": creds.get_password("client_secret"),
+            "scope": "https://graph.microsoft.com/.default",
+        },
+        timeout=30,
+    )
+    tok.raise_for_status()
+    headers = {"Authorization": f"Bearer {tok.json()['access_token']}"}
+
+    resp = requests.get(
+        f"https://graph.microsoft.com/v1.0/users/{doc.organizer_email}/events/{doc.ms_event_id}",
+        headers=headers,
+        params={"$select": "subject,body,attendees,start,end,location"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    return {
+        "subject": data.get("subject"),
+        "attendees": [
+            {"email": a["emailAddress"]["address"], "type": a.get("type")}
+            for a in data.get("attendees", [])
+        ],
+        "location": data.get("location", {}).get("displayName"),
+        "start": data.get("start"),
+        "end": data.get("end"),
+        "body_html": data.get("body", {}).get("content"),
     }
 
 
@@ -2820,32 +2839,102 @@ def update_interview_event(
     # Candidate is invited by email only (never a Graph attendee), so they
     # don't get Outlook's automatic "meeting updated" notice — email them
     # directly. Interviewers/CC/rooms ARE Graph attendees on this event, so
-    # the PATCH above already notifies them natively — logged here (same as
-    # create_interview_event's own attendees PATCH) so the interviewer side
-    # of "did they get notified?" isn't invisible in Activity just because
-    # it's Outlook's own notice rather than a direct sendmail/sendMail call.
-    # Unlike create_interview_event's PATCH, this one doesn't set a custom
-    # HTML body — only time/attendees change — so there's no email content
-    # to show; the log just records that the native update notice went out.
-    _reschedule_notify_subject = f"Interview Rescheduled – {Applicants_name} ({interview_date_str})"
-    for _invitee in interviewer_list + cc_list:
-        _log_field_interview_email(
-            doc_name, _invitee, _reschedule_notify_subject, "Microsoft Graph", "Sent",
-            message=(
-                "No custom email body — Outlook's native \"meeting updated\" "
-                f"notice was sent for the new time: {interview_date_str}, "
-                f"{interview_time_str}."
-            ),
-        )
+    # the PATCH above already notifies them natively.
     if interviewee_email:
+        display_mode = (doc.interview_mode or "Face-to-Face").strip()
+        _mode_lower = display_mode.lower()
+        mode_is_online = is_online == 1
+
+        # Same Teams meeting persists across a reschedule (PATCH doesn't
+        # touch it) - fetch its Join link/Meeting ID/Passcode so the
+        # candidate's reschedule email carries the same full detail as the
+        # original invite, not a stripped-down "new date/time only" notice.
+        join_web_url = join_meeting_id = join_passcode = ""
+        if mode_is_online:
+            join_web_url, join_meeting_id, join_passcode = _fetch_teams_meeting_info(
+                Organizer_email, doc.ms_event_id, headers, mode_is_online
+            )
+
+        if _mode_lower == "online" and join_web_url:
+            candidate_mode_html = (
+                f"<p><b>Join Teams Meeting:</b> "
+                f"<a href='{join_web_url}' target='_blank'>Join Now</a><br>"
+                f"<b>Meeting ID:</b> {join_meeting_id}<br>"
+                f"<b>Passcode:</b> {join_passcode}</p>"
+            )
+        elif _mode_lower == "phone":
+            candidate_mode_html = (
+                f"<p><b>Candidate Phone No.:</b> {doc.phone_no}</p>" if doc.phone_no else ""
+            )
+        elif _mode_lower in ("face-to-face", "hybrid") and (doc.location or doc.google_map):
+            from urllib.parse import quote as _qmap
+
+            _search_text = (doc.google_map or doc.location or "").strip()
+            if _search_text.startswith("http"):
+                _final_map_url = _search_text
+            else:
+                _final_map_url = "https://www.google.com/maps/search/?api=1&query=" + _qmap(
+                    _search_text
+                )
+            _map_link = (
+                f' <a href="{_final_map_url}" target="_blank">View on Google Maps</a>'
+                if _final_map_url
+                else ""
+            )
+            candidate_mode_html = f"<p><b>Location:</b> {doc.location or ''}{_map_link}</p>"
+        else:
+            candidate_mode_html = ""
+
+        if _mode_lower == "online":
+            candidate_advice_html = (
+                "<p>For attending the interview through video conference on M S Teams, "
+                "please ensure you are in a suitable environment (quiet, well-lit, and with "
+                "minimal disturbance). Kindly test your internet connection, webcam, and "
+                "microphone in advance.</p>"
+            )
+        elif _mode_lower == "phone":
+            candidate_advice_html = (
+                "<p>For attending the interview through phone, please ensure you are in a "
+                "suitable environment (quiet, and with minimal disturbance). "
+                "Be available for phone call</p>"
+            )
+        else:
+            candidate_advice_html = (
+                "<p>Kindly reach the venue <b>15 minutes prior</b> to the assigned time.</p>"
+            )
+
         candidate_body = f"""
-        <p>Hi {Applicants_name or "there"},</p>
-        <p>Your interview for the role of <strong>{Applicants_Role}</strong>
-        has been <strong>rescheduled</strong>:</p>
-        <div style="border:1px solid #e3e3e3;border-radius:10px;padding:14px;background:#f9fafb;">
-        <p><strong>New Date:</strong> {interview_date_str}</p>
-        <p><strong>New Time:</strong> {interview_time_str}</p>
-        </div>
+        <p>Dear {Applicants_name or "there"},</p>
+
+        <p>Your interview for the position of <b>{Applicants_Role}</b> at Azim Premji
+        Foundation has been <b>rescheduled</b>. Please find the updated details below:</p>
+
+        <p><b>Interview Details</b></p>
+        <table style="border-collapse:collapse; width:auto;">
+          <tr>
+            <td style="padding:4px 12px 4px 0;"><b>Interview Round:</b></td>
+            <td style="padding:4px 0;">{doc.interview_round or ""}</td>
+          </tr>
+          <tr>
+            <td style="padding:4px 12px 4px 0;"><b>New Date:</b></td>
+            <td style="padding:4px 0;">{interview_date_str}</td>
+          </tr>
+          <tr>
+            <td style="padding:4px 12px 4px 0;"><b>New Time:</b></td>
+            <td style="padding:4px 0;">{interview_time_str}</td>
+          </tr>
+          <tr>
+            <td style="padding:4px 12px 4px 0;"><b>Interview Mode:</b></td>
+            <td style="padding:4px 0;">{display_mode}</td>
+          </tr>
+        </table>
+
+        {candidate_mode_html}
+
+        {candidate_advice_html}
+
+        <p>We wish you all the best for your interview.</p>
+
         <p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
         """
         sender_arg = {}
@@ -2854,7 +2943,7 @@ def update_interview_event(
             {"email_id": doc.candidate_email_sendar, "enable_outgoing": 1},
         ):
             sender_arg = {"sender": doc.candidate_email_sendar}
-        _reschedule_subject = f"Interview Rescheduled – {Applicants_name} ({interview_date_str})"
+        _reschedule_subject = f"Interview Rescheduled - {doc.interview_round} for {Applicants_Role} {doc.phone_no}"
         try:
             frappe.sendmail(
                 recipients=[interviewee_email],
@@ -2863,18 +2952,13 @@ def update_interview_event(
                 delayed=False,
                 **sender_arg,
             )
-            _log_field_interview_email(
-                doc_name, interviewee_email, _reschedule_subject, "Frappe Email", "Sent",
-                message=candidate_body,
+            _log_field_interview_communication(
+                doc_name, _reschedule_subject, candidate_body, interviewee_email
             )
-        except Exception as _resched_mail_err:
+        except Exception:
             frappe.log_error(
                 title="FIELD_INTERVIEW_RESCHEDULE_MAIL_ERROR",
                 message=frappe.get_traceback(),
-            )
-            _log_field_interview_email(
-                doc_name, interviewee_email, _reschedule_subject, "Frappe Email", "Failed",
-                _resched_mail_err, message=candidate_body,
             )
 
     # Hybrid interviewers have their own separate Outlook event — PATCH its
@@ -3139,18 +3223,13 @@ def cancel_interview_event(name):
                 delayed=False,
                 **sender_arg,
             )
-            _log_field_interview_email(
-                doc.name, doc.attendees, _cancel_subject, "Frappe Email", "Sent",
-                message=candidate_body,
+            _log_field_interview_communication(
+                name, _cancel_subject, candidate_body, doc.attendees
             )
-        except Exception as _cancel_mail_err:
+        except Exception:
             frappe.log_error(
                 title="FIELD_INTERVIEW_CANCEL_MAIL_ERROR",
                 message=frappe.get_traceback(),
-            )
-            _log_field_interview_email(
-                doc.name, doc.attendees, _cancel_subject, "Frappe Email", "Failed",
-                _cancel_mail_err, message=candidate_body,
             )
 
     # Interviewers/CC/rooms are Graph attendees on the event, so the DELETE
@@ -3865,7 +3944,12 @@ def download_field_overall_excel(
             r
             for r in records
             if (
-                (r.get("location") or r.get("worklocation") or r.get("native_state") or "").strip()
+                (
+                    r.get("location")
+                    or r.get("worklocation")
+                    or r.get("native_state")
+                    or ""
+                ).strip()
                 in state_list
             )
         ]
@@ -4398,7 +4482,11 @@ def notify_others_on_feedback_submission(
     # Secret is now mandatory — this endpoint is allow_guest=True, so without
     # a required secret it was fully open to anyone on the internet.
     expected_secret = frappe.conf.get("feedback_webhook_secret")
-    if not expected_secret or not secret or not hmac.compare_digest(secret, expected_secret):
+    if (
+        not expected_secret
+        or not secret
+        or not hmac.compare_digest(secret, expected_secret)
+    ):
         frappe.throw("Invalid webhook secret", frappe.PermissionError)
 
     application_id = (application_id or "").strip()
@@ -4722,8 +4810,8 @@ def _merge_feedback_submissions_to_registration_form(doc, target_field, pdf_titl
                 if df.fieldtype in skip_fieldtypes:
                     continue
                 value = fb_doc.get(df.fieldname)
-                if not value:
-                    continue
+                if value in (None, ""):
+                    value = "-"
                 row_bg = "#f7f8fa" if i % 2 == 0 else "#ffffff"
                 rows_html += (
                     f"<tr style='background:{row_bg};'>"
@@ -4835,6 +4923,20 @@ def _merge_feedback_submissions_to_registration_form(doc, target_field, pdf_titl
             title=f"{doc.doctype} PDF: Generation Failed",
             message=f"{doc.doctype} {doc.name}, applicant {applicant_id}: {e}",
         )
+
+
+@frappe.whitelist()
+def regenerate_feedback_pdf(doctype, docname, target_field):
+    """
+    Manually re-run _merge_feedback_submissions_to_registration_form for one
+    existing Feedback Form submission. Needed when a doctype's fields were
+    added/changed after a submission's PDF was already generated - the
+    existing attachment stays stale (built from the older schema) until
+    another submission comes in and re-triggers after_insert, unless this
+    is called to force it sooner.
+    """
+    doc = frappe.get_doc(doctype, docname)
+    _merge_feedback_submissions_to_registration_form(doc, target_field, doctype)
 
 
 def send_recruiter_feedback_pdf_to_registration_form(doc, method=None):
@@ -5009,9 +5111,7 @@ def send_field_interview_feedback_reminders():
         feedback_doctypes = FIELD_FEEDBACK_ROUND_MAP.get(base_round)
         if not feedback_doctypes:
             # No feedback form step is expected for this round - nothing to chase.
-            frappe.db.set_value(
-                "Field Interview Schedule", s.name, "reminder_sent", 1
-            )
+            frappe.db.set_value("Field Interview Schedule", s.name, "reminder_sent", 1)
             frappe.db.commit()
             continue
 
@@ -5032,9 +5132,7 @@ def send_field_interview_feedback_reminders():
         ]
 
         if not interviewer_emails:
-            frappe.db.set_value(
-                "Field Interview Schedule", s.name, "reminder_sent", 1
-            )
+            frappe.db.set_value("Field Interview Schedule", s.name, "reminder_sent", 1)
             frappe.db.commit()
             continue
 
@@ -5044,22 +5142,18 @@ def send_field_interview_feedback_reminders():
         )
 
         if feedback_submitted:
-            frappe.db.set_value(
-                "Field Interview Schedule", s.name, "reminder_sent", 1
-            )
+            frappe.db.set_value("Field Interview Schedule", s.name, "reminder_sent", 1)
             frappe.db.commit()
             continue
 
         if elapsed > timedelta(days=7):
             # Gave it a full week of daily reminders - stop nagging.
-            frappe.db.set_value(
-                "Field Interview Schedule", s.name, "reminder_sent", 1
-            )
+            frappe.db.set_value("Field Interview Schedule", s.name, "reminder_sent", 1)
             frappe.db.commit()
             continue
 
         feedback_link_html = (
-            f'<p><strong>Feedback form:</strong> '
+            f"<p><strong>Feedback form:</strong> "
             f'<a href="{s.feedback_form_link}" target="_blank">Click here</a></p>'
             if s.feedback_form_link
             else ""
@@ -5079,30 +5173,21 @@ def send_field_interview_feedback_reminders():
         ):
             sender_arg = {"sender": s.organizer_email}
 
-        _reminder_subject = f"Reminder: Interview Feedback Pending – {s.applicants_name}"
         for email in interviewer_emails:
             try:
                 frappe.sendmail(
                     recipients=[email],
-                    subject=_reminder_subject,
+                    subject=f"Reminder: Interview Feedback Pending – {s.applicants_name}",
                     message=reminder_body,
                     delayed=False,
                     reference_doctype="Field Interview Schedule",
                     reference_name=s.name,
                     **sender_arg,
                 )
-                _log_field_interview_email(
-                    s.name, email, _reminder_subject, "Frappe Email", "Sent",
-                    message=reminder_body,
-                )
-            except Exception as _reminder_err:
+            except Exception:
                 frappe.log_error(
                     title="Field Interview Feedback Reminder Error",
                     message=frappe.get_traceback()[:2000],
-                )
-                _log_field_interview_email(
-                    s.name, email, _reminder_subject, "Frappe Email", "Failed", _reminder_err,
-                    message=reminder_body,
                 )
 
         # Do NOT mark reminder_sent here - keep re-checking daily until
@@ -5183,7 +5268,7 @@ def send_field_interview_first_feedback_reminder():
             continue
 
         feedback_link_html = (
-            f'<p><strong>Feedback form:</strong> '
+            f"<p><strong>Feedback form:</strong> "
             f'<a href="{s.feedback_form_link}" target="_blank">Click here</a></p>'
             if s.feedback_form_link
             else ""
@@ -5203,30 +5288,21 @@ def send_field_interview_first_feedback_reminder():
         ):
             sender_arg = {"sender": s.organizer_email}
 
-        _first_reminder_subject = f"Reminder: Interview Feedback Pending – {s.applicants_name}"
         for email in interviewer_emails:
             try:
                 frappe.sendmail(
                     recipients=[email],
-                    subject=_first_reminder_subject,
+                    subject=f"Reminder: Interview Feedback Pending – {s.applicants_name}",
                     message=reminder_body,
                     delayed=False,
                     reference_doctype="Field Interview Schedule",
                     reference_name=s.name,
                     **sender_arg,
                 )
-                _log_field_interview_email(
-                    s.name, email, _first_reminder_subject, "Frappe Email", "Sent",
-                    message=reminder_body,
-                )
-            except Exception as _first_reminder_err:
+            except Exception:
                 frappe.log_error(
                     title="Field Interview First Feedback Reminder Error",
                     message=frappe.get_traceback()[:2000],
-                )
-                _log_field_interview_email(
-                    s.name, email, _first_reminder_subject, "Frappe Email", "Failed",
-                    _first_reminder_err, message=reminder_body,
                 )
 
         frappe.db.set_value(
