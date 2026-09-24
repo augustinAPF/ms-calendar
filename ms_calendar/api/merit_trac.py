@@ -714,12 +714,13 @@ def test_result_api():
         # building these unconditionally previously crashed every Scholarship
         # insert. Also skip any non-dict rows defensively either way.
         #
-        # section_wise_score/descriptive_response are Long Text fields (JSON
-        # stored as text), not Table fields — frf_list.js's result dialog
-        # JSON.parse()s them back into arrays before rendering.
+        # section_wise_score/descriptive_response are Table fields (child
+        # doctypes "Field MeritTrac Section Score" / "Field MeritTrac
+        # Descriptive Response") — pass plain lists of row dicts, not JSON
+        # strings; frappe.get_doc() builds the child rows from these directly.
         if result_doctype == "Field MeritTrac Test Result":
             doc_fields["overall_percentage_score"] = percentage
-            doc_fields["section_wise_score"] = frappe.as_json([
+            doc_fields["section_wise_score"] = [
                 {
                     "section_name": section.get("name"),
                     "score": section.get("score"),
@@ -727,15 +728,15 @@ def test_result_api():
                 }
                 for section in section_wise_score
                 if isinstance(section, dict)
-            ])
-            doc_fields["descriptive_response"] = frappe.as_json([
+            ]
+            doc_fields["descriptive_response"] = [
                 {
                     "question_text": resp.get("questionText"),
                     "candidate_response": resp.get("candidateResponse"),
                 }
                 for resp in descriptive_response
                 if isinstance(resp, dict)
-            ])
+            ]
 
         test_doc = frappe.get_doc(doc_fields)
 

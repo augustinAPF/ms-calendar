@@ -140,6 +140,14 @@ _HEALTH_FEEDBACK_URLS = {
     "leader round-2": "https://careers.frappe.cloud/health-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
 }
 
+# Enabler ("Enablers - Field" department): keyed by round_lower
+_ENABLER_FEEDBACK_URLS = {
+    "recruiter round": "https://pathways.azimpremjifoundation.org/enablers-recruiter-feeback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "functional round": "https://pathways.azimpremjifoundation.org/enablers-functional-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "leader round-1": "https://pathways.azimpremjifoundation.org/enablers-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    "leader round-2": "https://pathways.azimpremjifoundation.org/enablers-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+}
+
 
 @frappe.whitelist()
 def get_field_registration_contact(application_id):
@@ -650,6 +658,13 @@ def _log_field_interview_communication(doc_name, subject, content, recipients, c
     if not doc_name or not recipients:
         return
     try:
+        # The timeline shows `sender`/`sender_full_name`, not `owner` — left
+        # blank, it doesn't fall back to any fixed identity, it silently
+        # shows whichever user happens to be VIEWING the page (so the same
+        # entry reads "Administrator" for one viewer and the actual actor's
+        # name for another). Set them explicitly to the user who actually
+        # triggered this send, so the entry is attributed correctly for
+        # everyone.
         frappe.get_doc(
             {
                 "doctype": "Communication",
@@ -662,6 +677,8 @@ def _log_field_interview_communication(doc_name, subject, content, recipients, c
                 "content": content,
                 "recipients": recipients if isinstance(recipients, str) else ", ".join(recipients),
                 "cc": cc or "",
+                "sender": frappe.session.user,
+                "sender_full_name": frappe.utils.get_fullname(frappe.session.user),
             }
         ).insert(ignore_permissions=True)
     except Exception:
@@ -996,6 +1013,9 @@ def create_interview_event(
     _is_education = (
         not _is_arp and not _is_health and not _is_livelihood
     ) and "education" in _dept_raw
+    _is_enabler = (
+        not _is_arp and not _is_health and not _is_livelihood and not _is_education
+    ) and "enabler" in _dept_raw
     # Within Education, _EDUCATION_FEEDBACK_URLS is further keyed by which
     # role the department string names (e.g. "School Teacher Education" vs
     # "Resource Person Education") — read straight off department, not the
@@ -1060,6 +1080,14 @@ def create_interview_event(
                 applicant_name=_fq(str(Applicants_name or ""), safe=""),
             )
 
+    elif _is_enabler:
+        _tmpl = _ENABLER_FEEDBACK_URLS.get(_round_norm, "")
+        if _tmpl:
+            feedback_url = _tmpl.format(
+                app_id=_fq(str(application_id or ""), safe=""),
+                applicant_name=_fq(str(Applicants_name or ""), safe=""),
+            )
+
     # Fallback to value passed from JS / stored on form
     if not feedback_url:
         feedback_url = str(feedback_form_link or "").strip()
@@ -1075,7 +1103,11 @@ def create_interview_event(
                 else (
                     "livelihood"
                     if _is_livelihood
-                    else "education" if _is_education else "none"
+                    else (
+                        "education"
+                        if _is_education
+                        else "enabler" if _is_enabler else "none"
+                    )
                 )
             )
         )
@@ -2818,9 +2850,100 @@ def update_interview_event(
         + [{"emailAddress": {"address": r}, "type": "resource"} for r in room_list]
     )
 
+    # Both the Graph event body (what interviewers/CC/rooms see natively)
+    # and the candidate email below need the same mode/meeting-info detail
+    # (Teams link, location, candidate phone) — computed once here, before
+    # the PATCH, so it can be embedded directly in that PATCH's own "body".
+    display_mode = (doc.interview_mode or "Face-to-Face").strip()
+    _mode_lower = display_mode.lower()
+    mode_is_online = is_online == 1
+
+    # Same Teams meeting persists across a reschedule (PATCH doesn't create
+    # a new one) - fetch its Join link/Meeting ID/Passcode so the rebuilt
+    # body carries the same full detail as the original invite, not a
+    # stripped-down "new date/time only" notice.
+    join_web_url = join_meeting_id = join_passcode = ""
+    if mode_is_online:
+        join_web_url, join_meeting_id, join_passcode = _fetch_teams_meeting_info(
+            Organizer_email, doc.ms_event_id, headers, mode_is_online
+        )
+
+    if _mode_lower == "online" and join_web_url:
+        mode_info_html = (
+            f"<p><b>Join Teams Meeting:</b> "
+            f"<a href='{join_web_url}' target='_blank'>Join Now</a><br>"
+            f"<b>Meeting ID:</b> {join_meeting_id}<br>"
+            f"<b>Passcode:</b> {join_passcode}</p>"
+        )
+    elif _mode_lower == "phone":
+        mode_info_html = (
+            f"<p><b>Candidate Phone No.:</b> {doc.phone_no}</p>" if doc.phone_no else ""
+        )
+    elif _mode_lower in ("face-to-face", "hybrid") and (doc.location or doc.google_map):
+        from urllib.parse import quote as _qmap
+
+        _search_text = (doc.google_map or doc.location or "").strip()
+        if _search_text.startswith("http"):
+            _final_map_url = _search_text
+        else:
+            _final_map_url = "https://www.google.com/maps/search/?api=1&query=" + _qmap(
+                _search_text
+            )
+        _map_link = (
+            f' <a href="{_final_map_url}" target="_blank">View on Google Maps</a>'
+            if _final_map_url
+            else ""
+        )
+        mode_info_html = f"<p><b>Location:</b> {doc.location or ''}{_map_link}</p>"
+    else:
+        mode_info_html = ""
+
+    # Feedback Form Link button, reused from the URL create_interview_event
+    # already resolved by department/round and saved on the doc — same
+    # button style as the original creation-time email.
+    _feedback_url = (doc.feedback_form_link or "").strip()
+    feedback_html_block = (
+        f"<p><b>Feedback Form Link:</b><br>"
+        f'<a href="{_feedback_url}" target="_blank" '
+        f'style="display:inline-block;margin-top:6px;padding:8px 18px;'
+        f"background-color:#1d4ed8;color:#ffffff;text-decoration:none;"
+        f'border-radius:4px;font-weight:600;font-size:13px;">'
+        f"Click Here to Open Feedback Form</a></p>"
+        if _feedback_url
+        else ""
+    )
+
+    interviewer_body = f"""
+    <p>Hi,</p>
+
+    <p>An interview with <b>{Applicants_name}</b> for the role of <b>{Applicants_Role}</b> has been confirmed.
+    Please find the details of the interview below.</p>
+
+    <p>
+    <b>Date:</b> {interview_date_str}<br>
+    <b>Interview Mode:</b> {display_mode}<br>
+    {mode_info_html}
+    <b>Interview Round:</b> {doc.interview_round or ""}<br>
+    <b>Interview Time:</b> {interview_time_str}<br>
+    </p>
+
+    {feedback_html_block}
+
+    <p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
+    """
+
+    # Interviewers/CC/rooms are Graph attendees on this event, so the
+    # calendar invite's own stored body IS what they see (Outlook's "sent a
+    # meeting request" / "updated the meeting time" notices render THIS
+    # body, not a separate email) — PATCHing only start/end/attendees here
+    # left that body frozen at its creation-time text forever, so
+    # rescheduling never actually changed what interviewers read even
+    # though the meeting time itself moved. Rebuilding body here (mirroring
+    # create_interview_event's own PATCH) and requesting sendToAllAndSaveCopy
+    # (same as create_interview_event) is what actually pushes the update.
     event_url = (
         f"https://graph.microsoft.com/v1.0/users/{Organizer_email}"
-        f"/events/{doc.ms_event_id}"
+        f"/events/{doc.ms_event_id}?sendUpdates=sendToAllAndSaveCopy"
     )
     res = requests.patch(
         event_url,
@@ -2831,6 +2954,7 @@ def update_interview_event(
             "attendees": attendees,
             "isOnlineMeeting": True if is_online == 1 else False,
             "showAs": "busy",
+            "body": {"contentType": "HTML", "content": interviewer_body},
         },
         timeout=30,
     )
@@ -2838,53 +2962,9 @@ def update_interview_event(
 
     # Candidate is invited by email only (never a Graph attendee), so they
     # don't get Outlook's automatic "meeting updated" notice — email them
-    # directly. Interviewers/CC/rooms ARE Graph attendees on this event, so
-    # the PATCH above already notifies them natively.
+    # directly instead. Interviewers/CC/rooms already got the update above,
+    # via the calendar invite's own rebuilt body.
     if interviewee_email:
-        display_mode = (doc.interview_mode or "Face-to-Face").strip()
-        _mode_lower = display_mode.lower()
-        mode_is_online = is_online == 1
-
-        # Same Teams meeting persists across a reschedule (PATCH doesn't
-        # touch it) - fetch its Join link/Meeting ID/Passcode so the
-        # candidate's reschedule email carries the same full detail as the
-        # original invite, not a stripped-down "new date/time only" notice.
-        join_web_url = join_meeting_id = join_passcode = ""
-        if mode_is_online:
-            join_web_url, join_meeting_id, join_passcode = _fetch_teams_meeting_info(
-                Organizer_email, doc.ms_event_id, headers, mode_is_online
-            )
-
-        if _mode_lower == "online" and join_web_url:
-            candidate_mode_html = (
-                f"<p><b>Join Teams Meeting:</b> "
-                f"<a href='{join_web_url}' target='_blank'>Join Now</a><br>"
-                f"<b>Meeting ID:</b> {join_meeting_id}<br>"
-                f"<b>Passcode:</b> {join_passcode}</p>"
-            )
-        elif _mode_lower == "phone":
-            candidate_mode_html = (
-                f"<p><b>Candidate Phone No.:</b> {doc.phone_no}</p>" if doc.phone_no else ""
-            )
-        elif _mode_lower in ("face-to-face", "hybrid") and (doc.location or doc.google_map):
-            from urllib.parse import quote as _qmap
-
-            _search_text = (doc.google_map or doc.location or "").strip()
-            if _search_text.startswith("http"):
-                _final_map_url = _search_text
-            else:
-                _final_map_url = "https://www.google.com/maps/search/?api=1&query=" + _qmap(
-                    _search_text
-                )
-            _map_link = (
-                f' <a href="{_final_map_url}" target="_blank">View on Google Maps</a>'
-                if _final_map_url
-                else ""
-            )
-            candidate_mode_html = f"<p><b>Location:</b> {doc.location or ''}{_map_link}</p>"
-        else:
-            candidate_mode_html = ""
-
         if _mode_lower == "online":
             candidate_advice_html = (
                 "<p>For attending the interview through video conference on M S Teams, "
@@ -2929,7 +3009,7 @@ def update_interview_event(
           </tr>
         </table>
 
-        {candidate_mode_html}
+        {mode_info_html}
 
         {candidate_advice_html}
 
@@ -2960,6 +3040,15 @@ def update_interview_event(
                 title="FIELD_INTERVIEW_RESCHEDULE_MAIL_ERROR",
                 message=frappe.get_traceback(),
             )
+
+    if interviewer_list or cc_list:
+        _log_field_interview_communication(
+            doc_name,
+            f"Interview Rescheduled - {doc.interview_round} for {Applicants_name} ({Applicants_Role})",
+            interviewer_body,
+            interviewer_list or cc_list,
+            cc=", ".join(cc_list) if interviewer_list else "",
+        )
 
     # Hybrid interviewers have their own separate Outlook event — PATCH its
     # time in place too (same reasoning as the main event above: a PATCH
