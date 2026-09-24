@@ -729,6 +729,15 @@ def create_interview_event(
     mode_link_html = _mode_link_html(
         is_online, join_web_url, Location_adress, Map_location
     )
+    # join_meeting_id/join_passcode were fetched from Graph above but never
+    # threaded into any email — candidate-only, since the interviewer already
+    # gets them via the Outlook/Teams calendar invite itself.
+    meeting_id_html = (
+        f'<p style="margin:6px 0;"><strong>Meeting ID:</strong> {join_meeting_id}<br>'
+        f'<strong>Passcode:</strong> {join_passcode}</p>'
+        if is_online == 1 and join_web_url and (join_meeting_id or join_passcode)
+        else ""
+    )
     # The "Message to the Interviewer" field (message_to_the_interviewer on
     # the form, passed through as Comments_for_interviewer) used to be
     # normalized to "" above and then never actually rendered anywhere —
@@ -770,6 +779,7 @@ def create_interview_event(
     <p><strong>Time:</strong> {start_time} – {end_time}</p>
     <p><strong>Mode:</strong> {mode_label}</p>
     {mode_link_html}
+    {meeting_id_html}
     <p>Kindly reach out to us if you have any questions.</p>
     <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
     """
@@ -900,36 +910,14 @@ def update_interview_event(
         + [{"emailAddress": {"address": r}, "type": "resource"} for r in room_list]
     )
 
-    # Attach BEFORE the time/attendees PATCH below — see
-    # ms_philanthropy.py's update_interview_event for the full reasoning
-    # (PATCHing is what triggers Exchange's "meeting updated" notice, and a
-    # freshly-attached file only shows up in it if it's already on the
-    # event by the time this PATCH fires).
-    _attach_files_to_event(
-        headers,
-        Organizer_email,
-        doc.event_id,
-        attachment_paths,
-        _document_attachment_paths(application_id),
-    )
-
-    res = requests.patch(
-        event_url,
-        headers=headers,
-        json={
-            "start": {"dateTime": start_datetime, "timeZone": "Asia/Kolkata"},
-            "end": {"dateTime": end_datetime, "timeZone": "Asia/Kolkata"},
-            "location": {"displayName": meeting_room} if meeting_room else None,
-            "locations": (
-                [{"displayName": meeting_room, "locationType": "conferenceRoom"}]
-                if meeting_room
-                else []
-            ),
-            "attendees": attendees,
-            "showAs": "busy",
-        },
-    )
-    if res.status_code == 404:
+    # Fetch the existing event first (instead of PATCHing straight away) so
+    # the Teams join details are known BEFORE the single PATCH below — that
+    # PATCH now carries the refreshed body too, so interviewers get exactly
+    # one "meeting updated" invite showing the new date/time, instead of an
+    # updated invite still showing the OLD time in its body plus a second,
+    # separate "(Rescheduled)" email.
+    ev_res = requests.get(event_url, headers=headers)
+    if ev_res.status_code == 404:
         frappe.log_error(
             title="HEALTH_INTERVIEW_RESCHEDULE_STALE_EVENT",
             message=(
@@ -957,13 +945,45 @@ def update_interview_event(
             attachment_paths=attachment_paths,
             name=name,
         )
-    res.raise_for_status()
+    ev_res.raise_for_status()
+    ev = ev_res.json()
 
     join_web_url = ""
+    join_meeting_id = ""
+    join_passcode = ""
     if is_online == 1:
-        ev = requests.get(event_url, headers=headers).json()
         if ev.get("onlineMeeting"):
             join_web_url = ev["onlineMeeting"].get("joinUrl", "")
+
+        try:
+            html_body = ev.get("body", {}).get("content", "")
+
+            m1 = re.search(r"Meeting ID:\s*</span><span[^>]*>([\d\s]+)<", html_body)
+            if not m1:
+                m1 = re.search(r"Meeting ID:\s*([\d\s]+)", html_body)
+            if m1:
+                join_meeting_id = m1.group(1).strip()
+
+            m2 = re.search(r"Passcode:\s*</span><span[^>]*>([\w\d]+)<", html_body)
+            if not m2:
+                m2 = re.search(r"Passcode:\s*([\w\d]+)", html_body)
+            if m2:
+                join_passcode = m2.group(1).strip()
+        except Exception:
+            pass
+
+        if join_web_url and (not join_meeting_id or not join_passcode):
+            filter_url = (
+                f"https://graph.microsoft.com/v1.0/users/{Organizer_email}"
+                f"/onlineMeetings?$filter=JoinWebUrl eq '{join_web_url}'"
+            )
+            om = requests.get(filter_url, headers=headers)
+            if om.status_code == 200:
+                values = om.json().get("value", [])
+                if values:
+                    m = values[0]
+                    join_meeting_id = m.get("joinMeetingId", "") or join_meeting_id
+                    join_passcode = m.get("passcode", "") or join_passcode
 
     meeting_room_html = (
         f'<p style="margin:6px 0;"><strong>Meeting room:</strong> {meeting_room}</p>'
@@ -972,6 +992,14 @@ def update_interview_event(
     )
     mode_link_html = _mode_link_html(
         is_online, join_web_url, Location_adress, Map_location
+    )
+    # See create_interview_event's matching comment — candidate-only, the
+    # interviewer already gets these via the calendar invite itself.
+    meeting_id_html = (
+        f'<p style="margin:6px 0;"><strong>Meeting ID:</strong> {join_meeting_id}<br>'
+        f'<strong>Passcode:</strong> {join_passcode}</p>'
+        if is_online == 1 and join_web_url and (join_meeting_id or join_passcode)
+        else ""
     )
     # See create_interview_event's matching comment — Comments_for_interviewer
     # (the "Message to the Interviewer" field) used to be normalized and then
@@ -983,27 +1011,22 @@ def update_interview_event(
     )
 
     _application_dt = _application_doctype()
-    _resume_field = _APPLICATION_RESUME_FIELD.get(_application_dt, "resume")
     interview_round = (
         frappe.db.get_value(_application_dt, application_id, "application_status")
         if application_id
         else None
     )
-    candidate_cv_resume = (
-        frappe.db.get_value(_application_dt, application_id, _resume_field)
-        if application_id
-        else None
-    )
 
-    # Same official templates as create_interview_event, just noting the
-    # reschedule up front rather than re-sending a generic "scheduled" line.
+    # Same template as create_interview_event's invite body, just with the
+    # new date/time — this replaces the invite's body in place, so it's the
+    # only thing the interviewer receives for a reschedule.
     interviewer_body = f"""
     <p>Hi {InterviewersName},</p>
-    <p>The discussion below has been <strong>rescheduled</strong>:</p>
+    <p>Kindly find the details of the discussion scheduled:</p>
     <p><strong>Applicant name:</strong> {Applicants_name}</p>
     <p><strong>Role:</strong> {Applicants_Role}</p>
-    <p><strong>New Date:</strong> {interview_date}</p>
-    <p><strong>New Time:</strong> {start_time} – {end_time}</p>
+    <p><strong>Date:</strong> {interview_date}</p>
+    <p><strong>Time:</strong> {start_time} – {end_time}</p>
     <p><strong>Mode:</strong> {mode_label}</p>
     {mode_link_html}
     {meeting_room_html}
@@ -1023,10 +1046,45 @@ def update_interview_event(
     <p><strong>New Time:</strong> {start_time} – {end_time}</p>
     <p><strong>Mode:</strong> {mode_label}</p>
     {mode_link_html}
+    {meeting_id_html}
     <p>Kindly reach out to us if you have any questions.</p>
     <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
     """
 
+    # Attach BEFORE the time/attendees PATCH below — see
+    # ms_philanthropy.py's update_interview_event for the full reasoning
+    # (PATCHing is what triggers Exchange's "meeting updated" notice, and a
+    # freshly-attached file only shows up in it if it's already on the
+    # event by the time this PATCH fires).
+    _attach_files_to_event(
+        headers,
+        Organizer_email,
+        doc.event_id,
+        attachment_paths,
+        _document_attachment_paths(application_id),
+    )
+
+    res = requests.patch(
+        event_url,
+        headers=headers,
+        json={
+            "start": {"dateTime": start_datetime, "timeZone": "Asia/Kolkata"},
+            "end": {"dateTime": end_datetime, "timeZone": "Asia/Kolkata"},
+            "location": {"displayName": meeting_room} if meeting_room else None,
+            "locations": (
+                [{"displayName": meeting_room, "locationType": "conferenceRoom"}]
+                if meeting_room
+                else []
+            ),
+            "attendees": attendees,
+            "body": {"contentType": "HTML", "content": interviewer_body},
+            "showAs": "busy",
+        },
+    )
+    res.raise_for_status()
+
+    # The candidate isn't an attendee on the Outlook event, so the updated
+    # invite never reaches them — this email is their only notice.
     frappe.sendmail(
         recipients=[interviewee_email],
         sender=Organizer_email,
@@ -1034,17 +1092,18 @@ def update_interview_event(
         message=candidate_body,
         delayed=False,
     )
-    if interviewer_list:
-        frappe.sendmail(
-            recipients=interviewer_list,
-            cc=cc_list or None,
-            sender=Organizer_email,
-            subject=f"{Applicants_Role} - {Applicants_name} (Rescheduled)",
-            message=interviewer_body,
-            delayed=False,
-        )
 
-    frappe.msgprint("✅ Interview rescheduled — candidate and interviewer(s) notified.")
+    # New date/time → the candidate's 24-hour reminder must fire again for
+    # it, even if one already went out for the old slot.
+    frappe.db.set_value(
+        "Health Interview Schedule",
+        name,
+        "candidate_reminder_sent",
+        0,
+        update_modified=False,
+    )
+
+    frappe.msgprint("✅ Interview rescheduled — Outlook invite updated and candidate notified.")
 
     return {"event_id": doc.event_id, "rescheduled": True}
 
@@ -1382,6 +1441,8 @@ def send_candidate_interview_reminders():
             continue
 
         join_url = ""
+        join_meeting_id = ""
+        join_passcode = ""
         if s.interview_type and s.event_id and s.organizer_email:
             try:
                 headers = _graph_headers()
@@ -1392,6 +1453,32 @@ def send_candidate_interview_reminders():
                 ev = requests.get(event_url, headers=headers).json()
                 if ev.get("onlineMeeting"):
                     join_url = ev["onlineMeeting"].get("joinUrl", "")
+
+                html_body = ev.get("body", {}).get("content", "")
+                m1 = re.search(r"Meeting ID:\s*</span><span[^>]*>([\d\s]+)<", html_body)
+                if not m1:
+                    m1 = re.search(r"Meeting ID:\s*([\d\s]+)", html_body)
+                if m1:
+                    join_meeting_id = m1.group(1).strip()
+
+                m2 = re.search(r"Passcode:\s*</span><span[^>]*>([\w\d]+)<", html_body)
+                if not m2:
+                    m2 = re.search(r"Passcode:\s*([\w\d]+)", html_body)
+                if m2:
+                    join_passcode = m2.group(1).strip()
+
+                if join_url and (not join_meeting_id or not join_passcode):
+                    filter_url = (
+                        f"https://graph.microsoft.com/v1.0/users/{s.organizer_email}"
+                        f"/onlineMeetings?$filter=JoinWebUrl eq '{join_url}'"
+                    )
+                    om = requests.get(filter_url, headers=headers)
+                    if om.status_code == 200:
+                        values = om.json().get("value", [])
+                        if values:
+                            m = values[0]
+                            join_meeting_id = m.get("joinMeetingId", "") or join_meeting_id
+                            join_passcode = m.get("passcode", "") or join_passcode
             except Exception:
                 pass
 
@@ -1405,6 +1492,12 @@ def send_candidate_interview_reminders():
             if link
             else ""
         )
+        meeting_id_html = (
+            f'<p style="margin:6px 0;"><strong>Meeting ID:</strong> {join_meeting_id}<br>'
+            f'<strong>Passcode:</strong> {join_passcode}</p>'
+            if join_url and (join_meeting_id or join_passcode)
+            else ""
+        )
 
         reminder_body = f"""
         <p>Hi {s.applicants_name or "there"},</p>
@@ -1412,6 +1505,7 @@ def send_candidate_interview_reminders():
         position scheduled on <strong>{interview_date_fmt}</strong> at
         <strong>{interview_time_fmt}</strong>.</p>
         {link_html}
+        {meeting_id_html}
         <p>Looking forward to speaking with you.</p>
         <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
         {_logo_html()}
@@ -1421,7 +1515,7 @@ def send_candidate_interview_reminders():
             frappe.sendmail(
                 recipients=[s.attendees],
                 sender=s.organizer_email,
-                subject=f"Reminder: Your Interview Tomorrow – Azim Premji Foundation ({interview_date_fmt})",
+                subject=f"Reminder: Your Interview – Azim Premji Foundation ({interview_date_fmt})",
                 message=reminder_body,
                 delayed=False,
             )
