@@ -125,9 +125,9 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		$el.html(
 			'<div class="rpt-ms-box"><span class="rpt-ms-ph">' + escHtml(placeholder) + '</span></div>' +
 			'<div class="rpt-ms-panel">' +
-				'<div class="rpt-ms-search"><input type="text" placeholder="Search…"/></div>' +
-				'<div class="rpt-ms-actions"><a class="rpt-ms-all">Select all</a><a class="rpt-ms-none">Clear</a></div>' +
-				'<div class="rpt-ms-list"></div>' +
+			'<div class="rpt-ms-search"><input type="text" placeholder="Search…"/></div>' +
+			'<div class="rpt-ms-actions"><a class="rpt-ms-all">Select all</a><a class="rpt-ms-none">Clear</a></div>' +
+			'<div class="rpt-ms-list"></div>' +
 			'</div>'
 		);
 		var $box = $el.find('.rpt-ms-box');
@@ -145,7 +145,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				var esc = escHtml(v);
 				$box.append(
 					'<span class="rpt-ms-chip" title="' + esc + '">' +
-						'<span class="txt">' + esc + '</span><span class="x" data-v="' + esc + '">&times;</span>' +
+					'<span class="txt">' + esc + '</span><span class="x" data-v="' + esc + '">&times;</span>' +
 					'</span>'
 				);
 			});
@@ -167,7 +167,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				var esc = escHtml(v);
 				$list.append(
 					'<label class="rpt-ms-opt"><input type="checkbox" data-v="' + esc + '"' + (checked ? ' checked' : '') + '/>' +
-						'<span>' + esc + '</span></label>'
+					'<span>' + esc + '</span></label>'
 				);
 			});
 		}
@@ -250,184 +250,312 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 
 	// ── Styles ────────────────────────────────────────────────────────────
 	$(wrapper).find('.page-content').append(`<style>
-		.rpt-wrap { padding: 16px 20px 40px; }
-		/* ── Hub cards ── */
-		.rpt-hub-title { font-size:15px; font-weight:700; color:#374151; margin-bottom:16px;
-			padding-bottom:10px; border-bottom:2px solid #e5e7eb; }
-		.rpt-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:16px; }
-		.rpt-card { border-radius:10px; border:1.5px solid #ddd; padding:18px 16px 14px;
-			cursor:pointer; transition:box-shadow .18s,transform .15s;
-			display:flex; flex-direction:column; gap:5px; position:relative; }
-		.rpt-card:hover { box-shadow:0 4px 18px rgba(0,0,0,.13); transform:translateY(-2px); }
-		.rpt-card.unavailable { opacity:.5; cursor:not-allowed; }
-		.rpt-card.unavailable:hover { box-shadow:none; transform:none; }
-		.rpt-card-icon { font-size:24px; margin-bottom:3px; }
-		.rpt-card-title { font-size:13px; font-weight:700; }
-		.rpt-card-desc { font-size:11px; color:#6b7280; line-height:1.4; }
-		.rpt-badge { display:inline-block; margin-top:7px; padding:2px 10px; border-radius:20px;
-			font-size:11px; font-weight:600; }
-		.rpt-badge.open { background:#D1FAE5; color:#065F46; }
-		.rpt-badge.soon { background:#F3F4F6; color:#9CA3AF; }
-		/* ── Report view ── */
-		.rpt-view-toolbar { display:flex; align-items:center; gap:10px; padding:0 0 12px; flex-wrap:wrap; }
-		.rpt-back { display:inline-flex; align-items:center; gap:5px; padding:5px 14px;
-			border-radius:6px; background:#e5e7eb; color:#374151; font-weight:600;
-			font-size:12px; border:1px solid #d1d5db; cursor:pointer; }
-		.rpt-back:hover { background:#d1d5db; }
-		.rpt-view-title { font-size:15px; font-weight:700; color:#1F497D; }
-		.rpt-toolbar-label { font-size:12px; color:#374151; font-weight:600; }
-		.rpt-toolbar-date { border:1px solid #d1d5db; border-radius:4px; padding:4px 8px;
-			font-size:12px; }
-		.rpt-btn-refresh { display:inline-flex; align-items:center; gap:5px; padding:5px 13px;
-			border-radius:5px; background:#e5e7eb; color:#374151; font-weight:600;
-			font-size:12px; border:1px solid #d1d5db; cursor:pointer; }
-		.rpt-btn-refresh:hover { background:#d1d5db; }
-		.rpt-btn-dl { display:inline-flex; align-items:center; gap:5px; padding:5px 14px;
-			border-radius:5px; background:#1a7f4f; color:#fff; font-weight:600;
-			font-size:12px; border:none; cursor:pointer; }
-		.rpt-btn-dl:hover { background:#145e3a; }
-		.rpt-tbl-wrap { overflow-x:auto; overflow-y:auto; max-height:calc(100vh - 200px); }
-		.rpt-tbl { border-collapse:collapse; font-size:11px; white-space:nowrap;
+		/* ── Page ── */
+		.rpt-wrap { padding: 20px 24px 48px; color:#1F2937; }
+		/* ── Hub ── */
+		.rpt-hub-head { display:flex; align-items:flex-end; justify-content:space-between; gap:16px;
+			margin-bottom:22px; padding-bottom:16px; border-bottom:1px solid #E5E7EB; }
+		.rpt-hub-title { font-size:20px; font-weight:700; color:#111827; letter-spacing:-.01em; }
+		.rpt-hub-sub { font-size:13px; color:#6B7280; margin-top:4px; }
+		.rpt-hub-count { font-size:12px; font-weight:500; color:#475569; background:#F1F5F9;
+			padding:4px 12px; border-radius:999px; white-space:nowrap; }
+		.rpt-group { margin-bottom:26px; }
+		.rpt-group-title { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+			color:#6B7280; margin:0 0 10px; }
+		.rpt-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:14px; }
+		.rpt-card { --acc:#1F3A5F; background:#fff; border:1px solid #E5E7EB; border-radius:12px;
+			padding:16px 16px 12px; cursor:pointer; display:flex; flex-direction:column; gap:6px;
+			box-shadow:0 1px 2px rgba(16,24,40,.04);
+			transition:border-color .15s, box-shadow .15s, transform .15s; }
+		.rpt-card:hover { border-color:var(--acc); transform:translateY(-1px);
+			box-shadow:0 10px 24px -12px rgba(16,24,40,.25); }
+		.rpt-card:focus-visible { outline:2px solid var(--acc); outline-offset:2px; }
+		.rpt-card.unavailable { cursor:not-allowed; opacity:.55; }
+		.rpt-card.unavailable:hover { border-color:#E5E7EB; transform:none; box-shadow:0 1px 2px rgba(16,24,40,.04); }
+		.rpt-card-top { display:flex; align-items:center; gap:12px; margin-bottom:2px; }
+		.rpt-card-icon { flex:none; width:38px; height:38px; border-radius:10px; display:grid; place-items:center;
+			color:var(--acc); background:color-mix(in srgb, var(--acc) 11%, #fff); }
+		.rpt-card-icon svg { width:20px; height:20px; }
+		.rpt-card-title { font-size:14px; font-weight:600; color:#111827; line-height:1.3; }
+		.rpt-card-desc { font-size:12.5px; color:#6B7280; line-height:1.45; flex:1; }
+		.rpt-card-foot { margin-top:8px; padding-top:10px; border-top:1px solid #F1F5F9; }
+		.rpt-badge { font-size:12px; font-weight:600; }
+		.rpt-badge.open { color:var(--acc); }
+		.rpt-badge.open .arr { display:inline-block; transition:transform .15s; }
+		.rpt-card:hover .rpt-badge.open .arr { transform:translateX(3px); }
+		.rpt-badge.soon { color:#9CA3AF; background:#F3F4F6; padding:2px 10px; border-radius:999px; font-weight:500; }
+		/* ── Report toolbar ── */
+		.rpt-view-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; background:#fff;
+			border:1px solid #E5E7EB; border-radius:12px; padding:10px 12px; margin-bottom:12px;
+			box-shadow:0 1px 2px rgba(16,24,40,.04); }
+		.rpt-back { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 12px;
+			border-radius:8px; background:#fff; color:#374151; font-weight:500; font-size:12.5px;
+			border:1px solid #D1D5DB; cursor:pointer; }
+		.rpt-back:hover { background:#F9FAFB; border-color:#9CA3AF; }
+		.rpt-view-title { font-size:15px; font-weight:700; color:#111827; padding:0 12px 0 6px;
+			margin-right:4px; border-right:1px solid #E5E7EB; line-height:24px; }
+		.rpt-toolbar-label { font-size:12px; color:#6B7280; font-weight:500; }
+		.rpt-toolbar-date { height:32px; border:1px solid #D1D5DB; border-radius:8px; padding:0 10px;
+			font-size:12.5px; color:#111827; background:#fff; }
+		.rpt-toolbar-date:focus { outline:none; border-color:#274C77; box-shadow:0 0 0 3px rgba(39,76,119,.15); }
+		.rpt-btn-refresh { display:inline-flex; align-items:center; justify-content:center; gap:6px; height:32px;
+			padding:0 14px; border-radius:8px; background:#1F3A5F; color:#fff; font-weight:500;
+			font-size:12.5px; border:1px solid #1F3A5F; cursor:pointer; transition:background .15s; }
+		.rpt-btn-refresh:hover { background:#274C77; border-color:#274C77; }
+		.rpt-btn-dl { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 14px;
+			border-radius:8px; background:#15803D; color:#fff; font-weight:500;
+			font-size:12.5px; border:1px solid #15803D; cursor:pointer; }
+		.rpt-btn-dl:hover { background:#166534; }
+		.rpt-info { margin-left:auto; font-size:12px; color:#475569; background:#F8FAFC;
+			border:1px solid #E5E7EB; padding:4px 10px; border-radius:999px; }
+		/* ── Tables ── */
+		.rpt-tbl-wrap { overflow:auto; max-height:calc(100vh - 210px); background:#fff;
+			border:1px solid #E5E7EB; border-radius:12px; box-shadow:0 1px 2px rgba(16,24,40,.04); }
+		.rpt-tbl-wrap > .rpt-tbl { border-style:hidden; }
+		.rpt-tbl { border-collapse:collapse; font-size:12px; white-space:nowrap; color:#1F2937;
 			width:max-content; min-width:100%; }
-		.rpt-tbl th, .rpt-tbl td { border:1px solid #bbb; padding:4px 6px;
+		.rpt-tbl th, .rpt-tbl td { border:1px solid #E5E7EB; padding:4px 8px;
 			text-align:center; vertical-align:middle; }
-		.rpt-tbl thead tr:first-child th { background:#1F497D; color:#fff; font-weight:700;
-			font-size:12px; position:sticky; top:0; z-index:20; }
-		.rpt-tbl thead tr:nth-child(2) th { position:sticky; top:33px; z-index:19;
-			font-weight:700; font-size:11px; }
-		.rpt-tbl thead tr:nth-child(3) th { position:sticky; top:60px; z-index:18;
-			font-weight:600; font-size:10px; }
+		.rpt-tbl td { padding:6px 8px; }
+		.rpt-tbl tbody tr:hover td { box-shadow:inset 0 0 0 9999px rgba(31,58,95,.04); }
+		.rpt-tbl thead tr:first-child th { background:#1F3A5F; color:#fff; font-weight:600;
+			font-size:12px; position:sticky; top:0; z-index:20; border-color:#2F4B70; }
+		/* Older reports colour some header cells with an inline pastel background only —
+		   give those dark text (white on pastel was unreadable); navy ones set color:#fff inline. */
+		.rpt-tbl thead th[style*="background"]:not([style*="color"]) { color:#1F2937; }
+		.rpt-tbl thead tr:nth-child(2) th { position:sticky; top:33px; z-index:19; background:#EEF2F7;
+			color:#1F2937; font-weight:600; font-size:11.5px; }
+		.rpt-tbl thead tr:nth-child(3) th { position:sticky; top:60px; z-index:18; background:#F8FAFC;
+			color:#475569; font-weight:600; font-size:10.5px; }
 		.rpt-tbl .col-month { min-width:72px; font-weight:700; position:sticky; left:0; z-index:10; }
 		.rpt-tbl .col-status { min-width:200px; text-align:left; position:sticky;
 			left:80px; z-index:10; white-space:normal; }
 		.rpt-tbl .col-src { min-width:160px; max-width:180px; text-align:left; position:sticky;
 			left:0; z-index:10; white-space:normal; background:inherit; }
 		.rpt-tbl .col-num { min-width:46px; font-variant-numeric:tabular-nums; }
-		.rpt-tbl .row-grand td { background:#BDD7EE !important; font-weight:700; }
-		.rpt-tbl .col-total-rp,.rpt-tbl .col-total-st { background:#D9D9D9 !important; font-weight:700; }
-		.rpt-loading { padding:50px; text-align:center; color:#6b7280; font-size:14px; }
-		.rpt-info { font-size:11px; color:#6b7280; margin-left:auto; }
+		.rpt-tbl .row-grand td { background:#EEF2F7 !important; font-weight:700; color:#111827;
+			border-top:2px solid #CBD5E1; }
+		.rpt-tbl .col-total-rp,.rpt-tbl .col-total-st { background:#F1F5F9 !important; font-weight:700; }
+		.rpt-loading { padding:56px 20px; text-align:center; color:#6B7280; font-size:13px; }
+		.rpt-loading.is-busy::before { content:""; display:block; width:26px; height:26px; margin:0 auto 12px;
+			border:3px solid #E5E7EB; border-top-color:#1F3A5F; border-radius:50%; animation:rpt-spin .8s linear infinite; }
+		@keyframes rpt-spin { to { transform:rotate(360deg); } }
 		/* ── Month multi-select ── */
 		.ar-month-picker { position:relative; }
-		.ar-month-btn { padding:5px 12px; border-radius:5px; border:1px solid #d1d5db;
-			background:#fff; font-size:12px; font-weight:600; cursor:pointer; color:#374151; }
-		.ar-month-btn:hover { background:#f3f4f6; }
+		.ar-month-btn { height:32px; padding:0 12px; border-radius:8px; border:1px solid #D1D5DB;
+			background:#fff; font-size:12.5px; font-weight:500; cursor:pointer; color:#374151; }
+		.ar-month-btn:hover { background:#F9FAFB; }
 		.ar-month-drop { position:absolute; top:calc(100% + 4px); left:0; z-index:100;
-			background:#fff; border:1px solid #d1d5db; border-radius:8px;
-			box-shadow:0 4px 16px rgba(0,0,0,.12); min-width:160px; padding-bottom:2px; }
+			background:#fff; border:1px solid #E5E7EB; border-radius:10px;
+			box-shadow:0 10px 24px -8px rgba(16,24,40,.2); min-width:170px; padding-bottom:2px; }
 		.ar-month-actions { display:flex; gap:12px; padding:8px 10px 6px;
-			border-bottom:1px solid #e5e7eb; }
-		.ar-month-link { font-size:11px; color:#2563eb; cursor:pointer; font-weight:600; }
+			border-bottom:1px solid #E5E7EB; }
+		.ar-month-link { font-size:11px; color:#274C77; cursor:pointer; font-weight:600; }
 		.ar-month-link:hover { text-decoration:underline; }
 		#ar-month-checks { max-height:220px; overflow-y:auto; padding:6px 4px; }
 		.ar-month-item { display:flex; align-items:center; gap:6px; padding:4px 10px;
-			font-size:12px; color:#374151; cursor:pointer; border-radius:4px; }
-		.ar-month-item:hover { background:#f3f4f6; }
+			font-size:12px; color:#374151; cursor:pointer; border-radius:6px; }
+		.ar-month-item:hover { background:#F3F4F6; }
 		/* ── Records drill-down dialog: full screen ── */
 		.rec-dlg-fullscreen { width:96vw !important; max-width:96vw !important;
 			height:92vh; margin:4vh auto !important; }
 		.rec-dlg-fullscreen .modal-content { height:92vh; display:flex; flex-direction:column; }
 		.rec-dlg-fullscreen .modal-body { flex:1 1 auto; overflow:auto; }
 		.rec-dlg-fullscreen .modal-header,.rec-dlg-fullscreen .modal-footer { flex:0 0 auto; }
-		.ar-month-item input { cursor:pointer; accent-color:#1F497D; }
-		/* ── Chip multiselect (State / School filters) ── */
+		.ar-month-item input { cursor:pointer; accent-color:#1F3A5F; }
+		/* ── Chip multiselect (State / School / Department / Role filters) ── */
 		.rpt-ms{position:relative;min-width:150px;max-width:230px}
-		.rpt-ms-box{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:3px 6px;border:1px solid #d1d5db;border-radius:5px;background:#fff;cursor:pointer;min-height:26px}
-		.rpt-ms-box:hover{border-color:#9ca3af}
-		.rpt-ms.open .rpt-ms-box{border-color:#1e40af;box-shadow:0 0 0 2px rgba(30,64,175,.12)}
-		.rpt-ms-ph{font-size:12px;color:#9ca3af;padding:2px 2px}
-		.rpt-ms-chip{display:inline-flex;align-items:center;gap:4px;background:#e0e7ff;color:#1e3a8a;border-radius:4px;padding:1px 5px 1px 7px;font-size:11px;font-weight:600;max-width:120px}
+		.rpt-ms-box{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:3px 8px;border:1px solid #D1D5DB;border-radius:8px;background:#fff;cursor:pointer;min-height:32px}
+		.rpt-ms-box:hover{border-color:#9CA3AF}
+		.rpt-ms.open .rpt-ms-box{border-color:#274C77;box-shadow:0 0 0 3px rgba(39,76,119,.15)}
+		.rpt-ms-ph{font-size:12.5px;color:#9CA3AF;padding:2px 2px}
+		.rpt-ms-chip{display:inline-flex;align-items:center;gap:4px;background:#EEF2F7;color:#1F3A5F;border-radius:6px;padding:1px 5px 1px 7px;font-size:11px;font-weight:600;max-width:120px}
 		.rpt-ms-chip span.txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 		.rpt-ms-chip .x{cursor:pointer;font-size:12px;line-height:1;opacity:.7;padding:0 1px}
 		.rpt-ms-chip .x:hover{opacity:1}
-		.rpt-ms-more{font-size:11px;color:#6b7280;font-weight:600;padding:1px 4px}
-		.rpt-ms-panel{display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:60;background:#fff;border:1px solid #d1d5db;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.15);width:max(100%,270px);max-width:min(360px,90vw);max-height:300px;overflow-y:auto;overflow-x:hidden}
+		.rpt-ms-more{font-size:11px;color:#6B7280;font-weight:600;padding:1px 4px}
+		.rpt-ms-panel{display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:60;background:#fff;border:1px solid #E5E7EB;border-radius:10px;box-shadow:0 10px 24px -8px rgba(16,24,40,.2);width:max(100%,270px);max-width:min(360px,90vw);max-height:300px;overflow-y:auto;overflow-x:hidden}
 		.rpt-ms.open .rpt-ms-panel{display:block}
-		.rpt-ms-search{position:sticky;top:0;background:#fff;padding:6px;border-bottom:1px solid #eee}
-		.rpt-ms-search input{width:100%;padding:4px 7px;border:1px solid #d1d5db;border-radius:4px;font-size:12px}
-		.rpt-ms-actions{display:flex;justify-content:space-between;padding:5px 8px;border-bottom:1px solid #eee;font-size:11px}
-		.rpt-ms-actions a{color:#1e40af;cursor:pointer;font-weight:600}
+		.rpt-ms-search{position:sticky;top:0;background:#fff;padding:6px;border-bottom:1px solid #F1F5F9}
+		.rpt-ms-search input{width:100%;padding:5px 8px;border:1px solid #D1D5DB;border-radius:6px;font-size:12px}
+		.rpt-ms-actions{display:flex;justify-content:space-between;padding:5px 8px;border-bottom:1px solid #F1F5F9;font-size:11px}
+		.rpt-ms-actions a{color:#274C77;cursor:pointer;font-weight:600}
 		.rpt-ms-opt{display:flex;align-items:flex-start;gap:8px;padding:6px 10px;font-size:12px;cursor:pointer;white-space:normal;line-height:1.35}
-		.rpt-ms-opt:hover{background:#f3f4f6}
-		.rpt-ms-opt input{margin:2px 0 0;flex:none}
+		.rpt-ms-opt:hover{background:#F3F4F6}
+		.rpt-ms-opt input{margin:2px 0 0;flex:none;accent-color:#1F3A5F}
 		.rpt-ms-opt span{overflow-wrap:anywhere}
-		.rpt-ms-empty{padding:10px;font-size:12px;color:#9ca3af;text-align:center}
+		.rpt-ms-empty{padding:10px;font-size:12px;color:#9CA3AF;text-align:center}
+		/* ── Shared bits for the newer reports (Cycle Time → Interviewers) ── */
+		.ct-note { margin:0; padding:12px 14px 14px; font-size:11.5px; color:#6B7280; line-height:1.6;
+			border-top:1px solid #F1F5F9; background:#FCFCFD; }
+		.cmp-title, .iv-title { font-size:13px; font-weight:700; color:#1F3A5F; margin:0; padding:14px 14px 10px; }
+		.cmp-offers, .iv-sec { margin-top:6px; border-top:1px solid #E5E7EB; padding:0 14px 14px; }
+		.cmp-offers .cmp-title, .iv-sec .iv-title { padding-left:0; padding-right:0; }
+		/* ── Cycle Time ── */
+		.ct-tbl th { white-space:normal; min-width:130px; max-width:170px; }
+		.ct-tbl .ct-stage { background:#F8FAFC !important; font-weight:600; color:#1F2937; text-align:left; min-width:110px; }
+		.ct-tbl thead th.ct-stage { background:#1F3A5F !important; color:#fff !important; }
+		.ct-tbl .ct-cell { cursor:pointer; min-width:130px; }
+		.ct-tbl .ct-cell:hover { background:#EEF2FF; }
+		.ct-tbl .ct-na { background:#F3F4F6 !important; color:#9CA3AF; cursor:help; }
+		.ct-tbl .ct-year td { font-weight:700; border-top:2px solid #CBD5E1; background:#F8FAFC; }
+		.ct-avg { font-size:13px; font-weight:700; color:#1F3A5F; }
+		.ct-n { font-size:10.5px; color:#6B7280; }
+		/* ── Conversion ── */
+		.cv-tbl thead tr:first-child th.cv-state { background:#1F3A5F; color:#fff; }
+		.cv-tbl thead tr:first-child th.cv-corner { background:#1F3A5F; color:#fff; left:0; z-index:25; text-align:left; }
+		.cv-tbl thead tr:nth-child(2) th { background:#EEF2F7; color:#1F2937; }
+		.cv-tbl thead tr:nth-child(2) th.cv-tot { background:#E2E8F0; }
+		.cv-tbl thead tr:nth-child(2) th.cv-corner { background:#EEF2F7; left:0; z-index:24; text-align:left; }
+		.cv-tbl .cv-stage { background:#F8FAFC; font-weight:600; text-align:left; min-width:170px; position:sticky; left:0; z-index:10; }
+		.cv-tbl .cv-cell { cursor:pointer; min-width:52px; }
+		.cv-tbl .cv-cell:hover { background:#EEF2FF; }
+		.cv-tbl .cv-cell.cv-tot { background:#F1F5F9; font-weight:700; }
+		.cv-tbl .cv-all { border-left:2px solid #1F3A5F; }
+		.cv-n { font-size:12px; font-weight:700; color:#111827; }
+		.cv-pct { font-size:9.5px; color:#6B7280; }
+		/* ── Compare Qs & Last Year ── */
+		.cmp-tbl thead tr:first-child th { background:#1F3A5F; }
+		.cmp-tbl thead tr:first-child th.cmp-corner { background:#1F3A5F; color:#fff; text-align:left; left:0; z-index:25; }
+		.cmp-tbl thead tr:nth-child(2) th { background:#EEF2F7; color:#334155; font-weight:500; }
+		.cmp-tbl thead tr:nth-child(3) th { background:#F8FAFC; color:#475569; }
+		.cmp-tbl thead th.cmp-corner2 { left:0; z-index:24; }
+		.cmp-tbl .cmp-stage { background:#F8FAFC; font-weight:600; text-align:left; min-width:150px; position:sticky; left:0; z-index:10; }
+		.cmp-tbl .cmp-cell { cursor:pointer; min-width:60px; font-weight:700; color:#111827; }
+		.cmp-tbl .cmp-cell:hover { background:#EEF2FF; }
+		.cmp-tbl .cmp-pct { min-width:52px; color:#6B7280; }
+		.cmp-tbl .cmp-yr { background:#F5F8FC; }
+		.cmp-tbl .cmp-prev { background:#F9FAFB; }
+		.cmp-tbl .cmp-split { border-left:2px solid #1F3A5F; }
+		.cmp-offers .rpt-tbl { min-width:0; }
+		.cmp-offers .rpt-tbl thead tr:first-child th { background:#1F3A5F; }
+		.cmp-offers .cmp-state { background:#F8FAFC; font-weight:600; }
+		.cmp-offers .row-grand td { cursor:pointer; }
+		.cmp-up { color:#15803D; font-size:10.5px; font-weight:600; }
+		.cmp-down { color:#B91C1C; font-size:10.5px; font-weight:600; }
+		/* ── Interviewers Data ── */
+		.iv-tbl thead tr:first-child th { background:#1F3A5F; color:#fff; white-space:normal; }
+		.iv-tbl .iv-state { background:#F8FAFC; font-weight:600; text-align:left; }
+		.iv-tbl .iv-name { text-align:left; min-width:200px; }
+		.iv-tbl .iv-cell { cursor:pointer; font-weight:600; min-width:70px; }
+		.iv-tbl .iv-cell:hover { background:#EEF2FF; }
+		.iv-tbl .iv-group { background:#fff; font-weight:700; text-align:center; vertical-align:middle; color:#1F3A5F; }
+		.iv-tbl .iv-lbl { background:#F8FAFC; font-weight:600; text-align:left; }
+		.iv-tbl .iv-year td { font-weight:700; border-bottom:2px solid #CBD5E1; }
+		.iv-tbl .iv-tot { background:#F1F5F9; font-weight:700; }
 	</style>
 	<div class="rpt-wrap" id="rpt-main"></div>`);
+
+	// Line icons for the hub cards (24×24, stroke = currentColor, so each
+	// card's accent colour tints its own icon).
+	var RPT_ICONS = {
+		chart:    '<path d="M3 3v18h18"/><path d="M7 16v-5"/><path d="M12 16V8"/><path d="M17 16V7"/>',
+		inbox:    '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+		share:    '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>',
+		timer:    '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M9 2h6"/>',
+		funnel:   '<path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/>',
+		trend:    '<path d="m22 7-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/>',
+		users:    '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+		fileok:   '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="m9 15 2 2 4-4"/>',
+		calday:   '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><rect x="8" y="14" width="3" height="3" rx=".5"/>',
+		calweek:  '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M7 15h10"/>',
+		school:   '<path d="M22 10 12 5 2 10l10 5 10-5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>',
+		pin:      '<path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/>',
+	};
+	var RPT_GROUPS = ['Funnel & Conversion', 'Interviews & Offers', 'Daily & Weekly', 'School Teacher'];
 
 	// ── REPORTS definition ────────────────────────────────────────────────
 	const REPORTS = [
 		{
-			key: 'pipeline', title: 'Pipeline', icon: '📊', color: '#1F497D', bg: '#EBF3FB', border: '#1F497D',
+			key: 'pipeline', title: 'Pipeline', icon: 'chart', color: '#1F3A5F', group: 'Funnel & Conversion',
 			desc: 'Overall recruitment pipeline across all states & roles', available: true
 		},
 		{
-			key: 'apps_received', title: 'Applications Received', icon: '📥', color: '#7D4F00', bg: '#FFF8E1', border: '#F9A825',
+			key: 'apps_received', title: 'Applications Received', icon: 'inbox', color: '#B45309', group: 'Funnel & Conversion',
 			desc: 'Month-wise CV stage breakdown by state & role', available: true
 		},
 		{
-			key: 'source', title: 'Source', icon: '🔗', color: '#6A1B9A', bg: '#F3E5F5', border: '#8E24AA',
+			key: 'source', title: 'Source', icon: 'share', color: '#7C3AED', group: 'Funnel & Conversion',
 			desc: 'Candidate source breakdown by role type', available: true
 		},
 		{
-			key: 'cycle', title: 'Cycle Time', icon: '⏱️', color: '#1B4F72', bg: '#E3F2FD', border: '#1565C0',
-			desc: 'Stage-to-stage cycle times by quarter', available: false
+			key: 'conversion', title: 'Conversion', icon: 'funnel', color: '#C2410C', group: 'Funnel & Conversion',
+			desc: 'Stage conversion rates by state and quarter', available: true
 		},
 		{
-			key: 'conversion', title: 'Conversion', icon: '🔄', color: '#7E2E0E', bg: '#FBE9E7', border: '#BF360C',
-			desc: 'Stage conversion rates by state and quarter', available: false
+			key: 'compare', title: 'Compare Qs & Last Year', icon: 'trend', color: '#047857', group: 'Funnel & Conversion',
+			desc: 'Quarter-on-quarter and year-on-year comparison', available: true
 		},
 		{
-			key: 'compare', title: 'Compare Qs & Last Year', icon: '📈', color: '#117A65', bg: '#E8F8F5', border: '#117A65',
-			desc: 'Quarter-on-quarter and year-on-year comparison', available: false
+			key: 'cycle', title: 'Cycle Time', icon: 'timer', color: '#0369A1', group: 'Funnel & Conversion',
+			desc: 'Stage-to-stage cycle times by quarter', available: true
 		},
 		{
-			key: 'interviewers', title: 'Interviewers Data', icon: '👥', color: '#424242', bg: '#F5F5F5', border: '#757575',
-			desc: 'Interviewer-wise feedback and selection statistics', available: false
+			key: 'interviewers', title: 'Interviewers Data', icon: 'users', color: '#475569', group: 'Interviews & Offers',
+			desc: 'Interviewer-wise feedback and selection statistics', available: true
 		},
 		{
-			key: 'offers', title: 'Offers', icon: '📋', color: '#4A2C0A', bg: '#FFF3E0', border: '#E65100',
+			key: 'offers', title: 'Offers', icon: 'fileok', color: '#BE185D', group: 'Interviews & Offers',
 			desc: 'Offer pipeline — made, accepted, declined, joined', available: true
 		},
 		{
-			key: 'daily', title: 'Daily (Recruiters)', icon: '🗓️', color: '#0B5345', bg: '#E9F7EF', border: '#0E6655',
+			key: 'daily', title: 'Daily (Recruiters)', icon: 'calday', color: '#0F766E', group: 'Daily & Weekly',
 			desc: 'New applications, status changes & pending actions — today', available: true
 		},
 		{
-			key: 'weekly', title: 'Weekly (Recruitment)', icon: '📅', color: '#7B241C', bg: '#FDEDEC', border: '#943126',
+			key: 'weekly', title: 'Weekly (Recruitment)', icon: 'calweek', color: '#B91C1C', group: 'Daily & Weekly',
 			desc: 'Pipeline funnel, role/location breakdown & conversion — this week', available: true
 		},
 		{
-			key: 'st_weekly', title: 'School Teacher — Week wise', icon: '🏫', color: '#6D4C00', bg: '#FFF3D6', border: '#F5A623',
+			key: 'st_weekly', title: 'School Teacher — Week wise', icon: 'school', color: '#A16207', group: 'School Teacher',
 			desc: 'Week-by-week (Mon–Sun) application breakdown for School Teacher, by stage', available: true
 		},
 		{
-			key: 'st_district', title: 'School Teacher — District Funnel', icon: '📌', color: '#7D4F00', bg: '#FFF8E1', border: '#F5A623',
+			key: 'st_district', title: 'School Teacher — District Funnel', icon: 'pin', color: '#A16207', group: 'School Teacher',
 			desc: 'District-wise full funnel — CV, Test, Recruiter/Subject/Demo/Leader Rounds', available: true
 		},
 	];
 
-	// ── Render hub (card grid) ────────────────────────────────────────────
+	// ── Render hub (card grid, grouped) ───────────────────────────────────
 	function showHub() {
+		var live = REPORTS.filter(function (r) { return r.available; }).length;
 		$('#rpt-main').html(`
-			<div class="rpt-hub-title">Field Recruitment — All Reports</div>
-			<div class="rpt-grid" id="rpt-grid"></div>
+			<div class="rpt-hub-head">
+				<div>
+					<div class="rpt-hub-title">Reports</div>
+					<div class="rpt-hub-sub">Field Recruitment analytics — choose a report to open it.</div>
+				</div>
+				<span class="rpt-hub-count">${live} of ${REPORTS.length} reports available</span>
+			</div>
+			<div id="rpt-groups"></div>
 		`);
-		REPORTS.forEach(function (r) {
-			var badge = r.available
-				? '<span class="rpt-badge open">Open →</span>'
-				: '<span class="rpt-badge soon">Coming soon</span>';
-			var card = $(`<div class="rpt-card ${r.available ? '' : 'unavailable'}"
-				style="background:${r.bg};border-color:${r.border};">
-				<div class="rpt-card-icon">${r.icon}</div>
-				<div class="rpt-card-title" style="color:${r.color};">${r.title}</div>
-				<div class="rpt-card-desc">${r.desc}</div>
-				${badge}
-			</div>`);
-			if (r.available) {
-				card.on('click', function () { loadReport(r.key); });
-			}
-			$('#rpt-grid').append(card);
+		RPT_GROUPS.forEach(function (g) {
+			var items = REPORTS.filter(function (r) { return r.group === g; });
+			if (!items.length) return;
+			var $group = $('<section class="rpt-group"><div class="rpt-group-title">' + g + '</div><div class="rpt-grid"></div></section>');
+			items.forEach(function (r) {
+				var badge = r.available
+					? '<span class="rpt-badge open">Open report <span class="arr">→</span></span>'
+					: '<span class="rpt-badge soon">Coming soon</span>';
+				var card = $(`<div class="rpt-card ${r.available ? '' : 'unavailable'}" style="--acc:${r.color};"
+					${r.available ? 'role="button" tabindex="0"' : 'aria-disabled="true"'}>
+					<div class="rpt-card-top">
+						<span class="rpt-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+							stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${RPT_ICONS[r.icon] || ''}</svg></span>
+						<div class="rpt-card-title">${r.title}</div>
+					</div>
+					<div class="rpt-card-desc">${r.desc}</div>
+					<div class="rpt-card-foot">${badge}</div>
+				</div>`);
+				if (r.available) {
+					card.on('click', function () { loadReport(r.key); });
+					card.on('keydown', function (e) {
+						if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); loadReport(r.key); }
+					});
+				}
+				$group.find('.rpt-grid').append(card);
+			});
+			$('#rpt-groups').append($group);
 		});
 	}
 
@@ -436,6 +564,10 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		if (key === 'pipeline') { frappe.set_route('field-over-all-dashb'); return; }
 		if (key === 'apps_received') { showAppsReceived(); return; }
 		if (key === 'source') { showSource(); return; }
+		if (key === 'cycle') { showCycleTime(); return; }
+		if (key === 'conversion') { showConversion(); return; }
+		if (key === 'compare') { showCompare(); return; }
+		if (key === 'interviewers') { showInterviewers(); return; }
 		if (key === 'offers') { showOffers(); return; }
 		if (key === 'daily') { showDaily(); return; }
 		if (key === 'weekly') { showWeekly(); return; }
@@ -452,42 +584,42 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		doctype = doctype || 'Field Registration Form';
 		function csvDownload() {
 			var lines = [headers.join(',')];
-			records.forEach(function(r) {
-				lines.push(rowFn(r).map(function(v) {
-					return '"' + (v || '').toString().replace(/"/g,'""') + '"';
+			records.forEach(function (r) {
+				lines.push(rowFn(r).map(function (v) {
+					return '"' + (v || '').toString().replace(/"/g, '""') + '"';
 				}).join(','));
 			});
-			var blob = new Blob([lines.join('\n')], {type:'text/csv'});
+			var blob = new Blob([lines.join('\n')], { type: 'text/csv' });
 			var url = URL.createObjectURL(blob);
-			var a = document.createElement('a'); a.href=url;
-			a.download = title.replace(/[^a-z0-9]/gi,'_').slice(0,40) + '.csv';
+			var a = document.createElement('a'); a.href = url;
+			a.download = title.replace(/[^a-z0-9]/gi, '_').slice(0, 40) + '.csv';
 			document.body.appendChild(a); a.click();
 			document.body.removeChild(a); URL.revokeObjectURL(url);
 		}
 
-		var rows = records.map(function(r) {
+		var rows = records.map(function (r) {
 			var vals = rowFn(r);
 			var link = frappe.utils.get_url_to_form
 				? frappe.utils.get_url_to_form(doctype, r.name)
 				: '/app/' + frappe.router.slug(doctype) + '/' + encodeURIComponent(r.name);
-			var cells = vals.map(function(v, i) {
+			var cells = vals.map(function (v, i) {
 				if (i === 0) {
 					return '<td style="padding:4px 8px;white-space:nowrap;">'
 						+ '<a href="' + link + '" target="_blank" '
-						+ 'style="color:#1F497D;font-weight:600;">' + (v||'') + '</a>'
+						+ 'style="color:#1F3A5F;font-weight:600;">' + (v || '') + '</a>'
 						+ '</td>';
 				}
-				return '<td style="padding:4px 8px;">' + (v||'') + '</td>';
+				return '<td style="padding:4px 8px;">' + (v || '') + '</td>';
 			}).join('');
 			return '<tr>' + cells + '</tr>';
 		}).join('');
 
-		var thCells = headers.map(function(h) {
+		var thCells = headers.map(function (h) {
 			return '<th style="padding:6px 8px;white-space:nowrap;">' + h + '</th>';
 		}).join('');
 
 		var tbl = '<table id="rec-dlg-tbl" style="width:100%;border-collapse:collapse;font-size:12px;">'
-			+ '<thead><tr style="background:#1F497D;color:#fff;">' + thCells + '</tr></thead>'
+			+ '<thead><tr style="background:#1F3A5F;color:#fff;">' + thCells + '</tr></thead>'
 			+ '<tbody>' + rows + '</tbody></table>';
 
 		var html = '<div style="margin-bottom:8px;display:flex;gap:8px;align-items:center;">'
@@ -508,14 +640,14 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		d.show();
 
 		// Bind buttons after dialog renders
-		setTimeout(function() {
+		setTimeout(function () {
 			$('#rec-csv-btn').off('click').on('click', csvDownload);
-			$('#rec-print-btn').off('click').on('click', function() {
+			$('#rec-print-btn').off('click').on('click', function () {
 				var w = window.open('', '_blank');
 				w.document.write('<html><head><title>' + title + '</title>'
 					+ '<style>table{border-collapse:collapse;font-size:12px;width:100%}'
 					+ 'th,td{border:1px solid #ccc;padding:4px 8px;text-align:left}'
-					+ 'th{background:#1F497D;color:#fff}</style></head><body>'
+					+ 'th{background:#1F3A5F;color:#fff}</style></head><body>'
 					+ '<h3>' + title + '</h3>' + document.getElementById('rec-dlg-tbl').outerHTML
 					+ '</body></html>');
 				w.document.close(); w.focus(); w.print();
@@ -562,8 +694,8 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 	// records listed when you click it can never disagree.
 	var AR_STATUS_KEYS = {
 		cv_shortlist: ['CV Shortlist', 'Shortlisted'],
-		cv_regret:    ['CV Reject', 'Rejected'],
-		cv_pending:   ['New Applicant', 'Applied', 'On Hold'],
+		cv_regret: ['CV Reject', 'Rejected'],
+		cv_pending: ['New Applicant', 'Applied', 'On Hold'],
 	};
 
 	function showAppsReceived() {
@@ -596,7 +728,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				<span class="rpt-info" id="ar-info"></span>
 			</div>
 			<div class="rpt-tbl-wrap" id="ar-tbl-wrap">
-				<div class="rpt-loading">Loading…</div>
+				<div class="rpt-loading is-busy">Loading…</div>
 			</div>
 		`);
 
@@ -655,7 +787,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 	}
 
 	function fetchArData() {
-		$('#ar-tbl-wrap').html('<div class="rpt-loading">Loading…</div>');
+		$('#ar-tbl-wrap').html('<div class="rpt-loading is-busy">Loading…</div>');
 		var from = $('#ar-from').val() || '';
 		var to = $('#ar-to').val() || '';
 
@@ -826,19 +958,19 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			var bg = STATE_COLORS[si % STATE_COLORS.length];
 			thead += '<th colspan="2" style="background:' + bg + ';">' + s + '</th>';
 		});
-		thead += '<th colspan="2" style="background:#1F497D;color:#fff;">Total</th></tr>';
+		thead += '<th colspan="2" style="background:#1F3A5F;color:#fff;">Total</th></tr>';
 		thead += '<tr>';
 		_arStates.forEach(function (_s, si) {
 			var bg = STATE_COLORS[si % STATE_COLORS.length];
 			thead += '<th style="background:' + bg + ';font-size:10px;">Role</th><th style="background:' + bg + ';font-size:10px;">Role</th>';
 		});
-		thead += '<th style="background:#2a5fa0;color:#fff;font-size:10px;">Role</th><th style="background:#2a5fa0;color:#fff;font-size:10px;">Role</th></tr>';
+		thead += '<th style="background:#274C77;color:#fff;font-size:10px;">Role</th><th style="background:#274C77;color:#fff;font-size:10px;">Role</th></tr>';
 		thead += '<tr>';
 		_arStates.forEach(function (_s, si) {
 			var bg = STATE_COLORS[si % STATE_COLORS.length];
 			thead += '<th style="background:' + bg + ';">RP</th><th style="background:' + bg + ';">ST</th>';
 		});
-		thead += '<th style="background:#2a5fa0;color:#fff;">RP</th><th style="background:#2a5fa0;color:#fff;">ST</th></tr></thead>';
+		thead += '<th style="background:#274C77;color:#fff;">RP</th><th style="background:#274C77;color:#fff;">ST</th></tr></thead>';
 
 		var tbody = '<tbody>';
 		selectedMonths.forEach(function (ml) {
@@ -876,9 +1008,9 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 
 		// Click handler: filter raw records and show dialog
 		$('#ar-tbl-wrap').off('click.arCell').on('click.arCell', '.ar-cell', function () {
-			var ml     = $(this).data('month');
-			var state  = $(this).data('state');
-			var col    = $(this).data('col');
+			var ml = $(this).data('month');
+			var state = $(this).data('state');
+			var col = $(this).data('col');
 			var rowkey = $(this).data('rowkey');
 			if (!ml) return;
 
@@ -930,22 +1062,22 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				callback: function (r2) {
 					var full = (r2 && r2.message) ? r2.message : [];
 					showRecordsDialog(title, full,
-						['ID','Full Name','Status','Role','Department',
-						 'Work State','Work Location','Native State','Native District','Source',
-						 'Email','Phone','Alt Phone','Gender','DOB','Age',
-						 'Education','Teaching Degree','Teaching Exp(Yr)','Teaching Exp(Mo)',
-						 'Health Exp(Yr)','Health Exp(Mo)','Languages','Written Subject',
-						 'Test Location','APF Associated','Former Employee',
-						 'Shortlist Reason','Reject Reason','Hold Reason','Blocklist Reason','Date'],
-						function(r) {
+						['ID', 'Full Name', 'Status', 'Role', 'Department',
+							'Work State', 'Work Location', 'Native State', 'Native District', 'Source',
+							'Email', 'Phone', 'Alt Phone', 'Gender', 'DOB', 'Age',
+							'Education', 'Teaching Degree', 'Teaching Exp(Yr)', 'Teaching Exp(Mo)',
+							'Health Exp(Yr)', 'Health Exp(Mo)', 'Languages', 'Written Subject',
+							'Test Location', 'APF Associated', 'Former Employee',
+							'Shortlist Reason', 'Reject Reason', 'Hold Reason', 'Blocklist Reason', 'Date'],
+						function (r) {
 							return [r.name, r.full_name_aadhaar, r.application_status, r.role, r.department,
-								r.location, r.worklocation, r.native_state, r.native_district, r.opportunity,
-								r.email_address, r.phone_number, r.alternate_no, r.gender, r.dob, r.age,
-								r.highest_education, r.teaching_degrees, r.teaching_year, r.teachingexp_month,
-								r.health_expyear, r.health_expmonth, r.languages_known, r.written_subject,
-								r.test_location, r.apf_associated, r.former_employee,
-								r.reasons_for_shortlist, r.reasons_for_reject, r.hold_reason, r.blocklist_reason,
-								r.creation ? r.creation.split(' ')[0] : ''];
+							r.location, r.worklocation, r.native_state, r.native_district, r.opportunity,
+							r.email_address, r.phone_number, r.alternate_no, r.gender, r.dob, r.age,
+							r.highest_education, r.teaching_degrees, r.teaching_year, r.teachingexp_month,
+							r.health_expyear, r.health_expmonth, r.languages_known, r.written_subject,
+							r.test_location, r.apf_associated, r.former_employee,
+							r.reasons_for_shortlist, r.reasons_for_reject, r.hold_reason, r.blocklist_reason,
+							r.creation ? r.creation.split(' ')[0] : ''];
 						});
 				},
 				error: function () {
@@ -992,7 +1124,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				<span class="rpt-info" id="src-info"></span>
 			</div>
 			<div class="rpt-tbl-wrap" id="src-tbl-wrap">
-				<div class="rpt-loading">Loading…</div>
+				<div class="rpt-loading is-busy">Loading…</div>
 			</div>
 		`);
 		(function () {
@@ -1010,7 +1142,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 	}
 
 	function fetchSrcData() {
-		$('#src-tbl-wrap').html('<div class="rpt-loading">Loading…</div>');
+		$('#src-tbl-wrap').html('<div class="rpt-loading is-busy">Loading…</div>');
 		var from = $('#src-from').val() || '';
 		var to = $('#src-to').val() || '';
 		var filters = [];
@@ -1052,7 +1184,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 
 	function renderSourceTable(records) {
 		var selState = $('#src-state').val() || '';
-		var selDist  = $('#src-district').val() || '';
+		var selDist = $('#src-district').val() || '';
 		if (selState || selDist) {
 			records = records.filter(function (r) {
 				var st = (r.location || r.worklocation || r.native_state || '').trim();
@@ -1087,15 +1219,15 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 
 		// Header
 		var thead = '<thead><tr>';
-		thead += '<th class="col-src" rowspan="2" style="background:#1F497D;color:#fff;z-index:25;top:0;">Source</th>';
+		thead += '<th class="col-src" rowspan="2" style="background:#1F3A5F;color:#fff;z-index:25;top:0;">Source</th>';
 		SRC_GROUPS.forEach(function (g) {
-			var bg = g === 'Total' ? '#1F497D' : SRC_COLORS[g];
+			var bg = g === 'Total' ? '#1F3A5F' : SRC_COLORS[g];
 			var fg = g === 'Total' ? '#fff' : '#000';
 			thead += '<th colspan="2" style="background:' + bg + ';color:' + fg + ';">' + g + '</th>';
 		});
 		thead += '</tr><tr>';
 		SRC_GROUPS.forEach(function (g) {
-			var bg = g === 'Total' ? '#2a5fa0' : SRC_COLORS[g];
+			var bg = g === 'Total' ? '#274C77' : SRC_COLORS[g];
 			var fg = g === 'Total' ? '#fff' : '#333';
 			thead += '<th style="background:' + bg + ';color:' + fg + ';font-size:11px;">Count</th>';
 			thead += '<th style="background:' + bg + ';color:' + fg + ';font-size:11px;">%</th>';
@@ -1178,7 +1310,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				<span class="rpt-info" id="off-info"></span>
 			</div>
 			<div id="off-content">
-				<div class="rpt-loading">Loading…</div>
+				<div class="rpt-loading is-busy">Loading…</div>
 			</div>
 		`);
 
@@ -1195,7 +1327,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 	}
 
 	function fetchOfferData() {
-		$('#off-content').html('<div class="rpt-loading">Loading…</div>');
+		$('#off-content').html('<div class="rpt-loading is-busy">Loading…</div>');
 		var from = $('#off-from').val() || '';
 		var to = $('#off-to').val() || '';
 		var filters = [['application_status', 'in', OFFER_STATUSES]];
@@ -1273,11 +1405,11 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		if (lastQ) rows.push({ type: 'q', label: lastQ, data: qTotals[lastQ] });
 
 		var head = '<thead><tr>';
-		head += '<th class="col-month" style="z-index:25;top:0;background:#1F497D;color:#fff;">Month</th>';
+		head += '<th class="col-month" style="z-index:25;top:0;background:#1F3A5F;color:#fff;">Month</th>';
 		states.forEach(function (s, si) {
 			head += '<th style="background:' + STATE_COLORS[si % STATE_COLORS.length] + ';">' + s + '</th>';
 		});
-		head += '<th style="background:#1F497D;color:#fff;">Total</th></tr></thead>';
+		head += '<th style="background:#1F3A5F;color:#fff;">Total</th></tr></thead>';
 
 		var body = '<tbody>';
 		rows.forEach(function (row) {
@@ -1291,11 +1423,11 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			body += '<td class="col-num" style="background:#D9D9D9;font-weight:700;">' + (rTotal || '') + '</td></tr>';
 		});
 		var yTotal = states.reduce(function (a, s) { return a + (yearTotals[s] || 0); }, 0);
-		body += '<tr style="font-weight:700;"><td class="col-month" style="background:#1F497D;color:#fff;">Total</td>';
+		body += '<tr style="font-weight:700;"><td class="col-month" style="background:#1F3A5F;color:#fff;">Total</td>';
 		states.forEach(function (s) {
 			body += '<td class="col-num" style="background:#D9D9D9;">' + (yearTotals[s] || '') + '</td>';
 		});
-		body += '<td class="col-num" style="background:#1F497D;color:#fff;">' + (yTotal || '') + '</td></tr></tbody>';
+		body += '<td class="col-num" style="background:#1F3A5F;color:#fff;">' + (yTotal || '') + '</td></tr></tbody>';
 
 		return '<div style="margin-bottom:20px;">'
 			+ '<div style="font-weight:700;font-size:13px;color:' + titleColor + ';margin-bottom:6px;padding:6px 8px;background:' + titleBg + ';border-radius:6px;">' + title + '</div>'
@@ -1341,9 +1473,9 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		});
 
 		var SC = ['#DDEBF7', '#E2EFDA', '#FFF2CC', '#FCE4D6', '#D9E1F2', '#EAF4E2', '#FDE9D9', '#EBE9F3'];
-		var s1Head = '<thead><tr><th class="col-src" style="background:#1F497D;color:#fff;z-index:25;top:0;">Role</th>';
+		var s1Head = '<thead><tr><th class="col-src" style="background:#1F3A5F;color:#fff;z-index:25;top:0;">Role</th>';
 		states.forEach(function (s, si) { s1Head += '<th style="background:' + SC[si % SC.length] + ';">' + s + '</th>'; });
-		s1Head += '<th style="background:#1F497D;color:#fff;">Total</th></tr></thead>';
+		s1Head += '<th style="background:#1F3A5F;color:#fff;">Total</th></tr></thead>';
 
 		var s1Body = '<tbody>';
 		OFFER_ROLES.forEach(function (rl) {
@@ -1354,10 +1486,10 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		});
 		s1Body += '<tr style="font-weight:700;"><td class="col-src" style="background:#D9D9D9;">Total Offers</td>';
 		states.forEach(function (s) { s1Body += '<td class="col-num" style="background:#D9D9D9;">' + (stateTotals[s] || '') + '</td>'; });
-		s1Body += '<td class="col-num" style="background:#1F497D;color:#fff;">' + (grandTotal || '') + '</td></tr></tbody>';
+		s1Body += '<td class="col-num" style="background:#1F3A5F;color:#fff;">' + (grandTotal || '') + '</td></tr></tbody>';
 
 		var table1 = '<div style="margin-bottom:24px;">'
-			+ '<div style="font-weight:700;font-size:13px;color:#1F497D;margin-bottom:6px;padding:6px 8px;background:#EBF3FB;border-radius:6px;">Offers in ' + monthName + '</div>'
+			+ '<div style="font-weight:700;font-size:13px;color:#1F3A5F;margin-bottom:6px;padding:6px 8px;background:#EBF3FB;border-radius:6px;">Offers in ' + monthName + '</div>'
 			+ '<div class="rpt-tbl-wrap" style="max-height:none;"><table class="rpt-tbl">' + s1Head + s1Body + '</table></div></div>';
 
 		var noteRow = '<div style="margin-bottom:16px;padding:6px 10px;background:#FFFDE7;'
@@ -1372,7 +1504,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			{ grp: 'Resource Person', title: 'Resource Person — Monthly Offers by State', bg: '#EBF5E8', fg: '#1E5E1E' },
 			{ grp: 'School Teacher', title: 'School Teacher — Monthly Offers by State', bg: '#FFF8E1', fg: '#7D4F00' },
 			{ grp: 'Health', title: 'Health — Monthly Offers by State', bg: '#FBE9E7', fg: '#7E2E0E' },
-			{ grp: 'Livelihoods', title: 'Livelihoods — Monthly Offers by State', bg: '#EBF3FB', fg: '#1F497D' },
+			{ grp: 'Livelihoods', title: 'Livelihoods — Monthly Offers by State', bg: '#EBF3FB', fg: '#1F3A5F' },
 		];
 		roleConfig.forEach(function (cfg) {
 			var grpRecs = offerRecs.filter(function (r) { return getOfferRoleGroup(r) === cfg.grp; });
@@ -1398,7 +1530,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				<button class="rpt-btn-refresh" id="daily-refresh">&#x21bb; Refresh</button>
 				<span class="rpt-info" id="daily-info"></span>
 			</div>
-			<div id="daily-content"><div class="rpt-loading">Loading…</div></div>
+			<div id="daily-content"><div class="rpt-loading is-busy">Loading…</div></div>
 		`);
 		$('#daily-date-label').text('Date: ' + frappe.datetime.get_today());
 		$('#rpt-back').on('click', showHub);
@@ -1407,7 +1539,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 	}
 
 	function fetchDailyData() {
-		$('#daily-content').html('<div class="rpt-loading">Loading…</div>');
+		$('#daily-content').html('<div class="rpt-loading is-busy">Loading…</div>');
 		var today = frappe.datetime.get_today();
 
 		frappe.call({
@@ -1497,7 +1629,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				['ID', 'Full Name', 'Current Status', 'Role', 'Department', 'Last Modified'],
 				function (r) { return [r.name, r.full_name_aadhaar, r.application_status, r.role, r.department, r.modified]; });
 		}));
-		$grid.append(statCard("Today's Interviews", interviewsToday.length, '#1F497D', '#EBF3FB', interviewsToday, function () {
+		$grid.append(statCard("Today's Interviews", interviewsToday.length, '#1F3A5F', '#EBF3FB', interviewsToday, function () {
 			showRecordsDialog("Today's Interviews", interviewsToday,
 				['ID', 'Applicant', 'Round', 'Role', 'Department', 'Interview Date'],
 				function (r) { return [r.name, r.applicants_name, r.interview_round, r.role, r.department, r.interview_date]; },
@@ -1520,8 +1652,8 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			}).join('');
 			roleTbl = '<div style="font-weight:700;font-size:13px;color:#0E6655;margin:6px 0;">New Applications Today — by Role</div>'
 				+ '<div class="rpt-tbl-wrap" style="max-height:none;"><table class="rpt-tbl">'
-				+ '<thead><tr><th class="col-src" style="background:#1F497D;color:#fff;">Role</th>'
-				+ '<th style="background:#1F497D;color:#fff;">Count</th></tr></thead>'
+				+ '<thead><tr><th class="col-src" style="background:#1F3A5F;color:#fff;">Role</th>'
+				+ '<th style="background:#1F3A5F;color:#fff;">Count</th></tr></thead>'
 				+ '<tbody>' + roleRows + '</tbody></table></div>';
 		}
 
@@ -1544,7 +1676,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				<button class="rpt-btn-refresh" id="weekly-refresh">&#x21bb; Refresh</button>
 				<span class="rpt-info" id="weekly-info"></span>
 			</div>
-			<div id="weekly-content"><div class="rpt-loading">Loading…</div></div>
+			<div id="weekly-content"><div class="rpt-loading is-busy">Loading…</div></div>
 		`);
 		$('#weekly-range-label').text('Week: ' + fmtDate(thisWk.from) + ' to ' + fmtDate(thisWk.to) + ' (Mon–Sun)');
 		$('#rpt-back').on('click', showHub);
@@ -1553,7 +1685,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 	}
 
 	function fetchWeeklyData() {
-		$('#weekly-content').html('<div class="rpt-loading">Loading…</div>');
+		$('#weekly-content').html('<div class="rpt-loading is-busy">Loading…</div>');
 		var thisWk = getWeekBounds(0);
 		var lastWk = getWeekBounds(-1);
 
@@ -1608,9 +1740,9 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		var totalDelta = _weeklyThisRecs.length - _weeklyLastRecs.length;
 		var funnelTbl = '<div style="font-weight:700;font-size:13px;color:#7B241C;margin:6px 0;">Pipeline Funnel — This Week vs Last Week</div>'
 			+ '<div class="rpt-tbl-wrap" style="max-height:none;margin-bottom:20px;"><table class="rpt-tbl">'
-			+ '<thead><tr><th class="col-src" style="background:#1F497D;color:#fff;">Stage</th>'
-			+ '<th style="background:#1F497D;color:#fff;">This Week</th><th style="background:#1F497D;color:#fff;">Last Week</th>'
-			+ '<th style="background:#1F497D;color:#fff;">Δ</th></tr></thead><tbody>' + funnelRows
+			+ '<thead><tr><th class="col-src" style="background:#1F3A5F;color:#fff;">Stage</th>'
+			+ '<th style="background:#1F3A5F;color:#fff;">This Week</th><th style="background:#1F3A5F;color:#fff;">Last Week</th>'
+			+ '<th style="background:#1F3A5F;color:#fff;">Δ</th></tr></thead><tbody>' + funnelRows
 			+ '<tr style="font-weight:700;"><td class="col-src" style="background:#D9D9D9;">Total</td>'
 			+ '<td class="col-num" style="background:#D9D9D9;">' + _weeklyThisRecs.length + '</td>'
 			+ '<td class="col-num" style="background:#D9D9D9;">' + _weeklyLastRecs.length + '</td>'
@@ -1630,9 +1762,9 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		var roles = Object.keys(rl).sort();
 		var rlTbl = '';
 		if (roles.length) {
-			var rlHead = '<th class="col-src" style="background:#1F497D;color:#fff;">Role</th>'
-				+ locs.map(function (l) { return '<th style="background:#1F497D;color:#fff;">' + l + '</th>'; }).join('')
-				+ '<th style="background:#2a5fa0;color:#fff;">Total</th>';
+			var rlHead = '<th class="col-src" style="background:#1F3A5F;color:#fff;">Role</th>'
+				+ locs.map(function (l) { return '<th style="background:#1F3A5F;color:#fff;">' + l + '</th>'; }).join('')
+				+ '<th style="background:#274C77;color:#fff;">Total</th>';
 			var rlBody = roles.map(function (role) {
 				var rowTotal = 0;
 				var cells = locs.map(function (l) {
@@ -1669,8 +1801,8 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		var avgTurnaround = n ? (totalDays / n).toFixed(1) + ' days' : '—';
 
 		var convCards = '<div class="rpt-grid" style="margin-bottom:20px;">'
-			+ '<div class="rpt-card" style="cursor:default;background:#EBF3FB;border-color:#1F497D;">'
-			+ '<div class="rpt-card-title" style="color:#1F497D;font-size:24px;">' + convRate + '</div>'
+			+ '<div class="rpt-card" style="cursor:default;background:#EBF3FB;border-color:#1F3A5F;">'
+			+ '<div class="rpt-card-title" style="color:#1F3A5F;font-size:24px;">' + convRate + '</div>'
 			+ '<div class="rpt-card-desc" style="font-weight:600;">Conversion rate — moved past CV stage, this week</div></div>'
 			+ '<div class="rpt-card" style="cursor:default;background:#FDEDEC;border-color:#943126;">'
 			+ '<div class="rpt-card-title" style="color:#943126;font-size:24px;">' + avgTurnaround + '</div>'
@@ -1705,7 +1837,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				<button class="rpt-btn-refresh" id="stw-refresh">&#x21bb; Refresh</button>
 				<span class="rpt-info" id="stw-info"></span>
 			</div>
-			<div class="rpt-tbl-wrap" id="stw-tbl-wrap"><div class="rpt-loading">Loading…</div></div>
+			<div class="rpt-tbl-wrap" id="stw-tbl-wrap"><div class="rpt-loading is-busy">Loading…</div></div>
 		`);
 
 		// Default: last 8 weeks — a week-wise view is for recent activity,
@@ -1726,7 +1858,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 	}
 
 	function fetchSTWeeklyData() {
-		$('#stw-tbl-wrap').html('<div class="rpt-loading">Loading…</div>');
+		$('#stw-tbl-wrap').html('<div class="rpt-loading is-busy">Loading…</div>');
 		var from = $('#stw-from').val() || '';
 		var to = $('#stw-to').val() || '';
 		var filters = [];
@@ -1800,7 +1932,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		}
 
 		var thead = '<thead><tr>'
-			+ '<th class="col-month" style="background:#1F497D;color:#fff;">Week (Mon–Sun)</th>'
+			+ '<th class="col-month" style="background:#1F3A5F;color:#fff;">Week (Mon–Sun)</th>'
 			+ '<th style="background:#DDEEFF;">Applications Received</th>'
 			+ '<th style="background:#EAF4E2;">CV Shortlisted</th>'
 			+ '<th style="background:#FDEDEC;">CV Rejected</th>'
@@ -1870,7 +2002,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				['ID', 'Full Name', 'Status', 'Role', 'Department', 'State', 'District', 'Date'],
 				function (r) {
 					return [r.name, r.full_name_aadhaar, r.application_status, r.role, r.department,
-						getState(r), r.native_district, r.creation ? r.creation.split(' ')[0] : ''];
+					getState(r), r.native_district, r.creation ? r.creation.split(' ')[0] : ''];
 				});
 		});
 	}
@@ -2078,7 +2210,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				<button class="rpt-btn-dl" id="stf-download">⬇ Download Excel</button>
 				<span class="rpt-info" id="stf-info"></span>
 			</div>
-			<div class="rpt-tbl-wrap" id="stf-tbl-wrap"><div class="rpt-loading">Loading…</div></div>
+			<div class="rpt-tbl-wrap" id="stf-tbl-wrap"><div class="rpt-loading is-busy">Loading…</div></div>
 		`);
 
 		(function () {
@@ -2133,7 +2265,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 	}
 
 	function fetchSTDistrictData() {
-		$('#stf-tbl-wrap').html('<div class="rpt-loading">Loading…</div>');
+		$('#stf-tbl-wrap').html('<div class="rpt-loading is-busy">Loading…</div>');
 		var from = $('#stf-from').val() || '';
 		var to = $('#stf-to').val() || '';
 		var appliedFrom = $('#stf-applied-from').val() || '';
@@ -2224,7 +2356,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			return;
 		}
 
-		var thead = '<thead><tr><th class="col-src" style="background:#1F497D;color:#fff;z-index:25;top:0;">School</th>';
+		var thead = '<thead><tr><th class="col-src" style="background:#1F3A5F;color:#fff;z-index:25;top:0;">School</th>';
 		STF_COLS.forEach(function (c) {
 			thead += '<th style="background:#F5A623;color:#3B2C00;">' + c.label + '</th>';
 		});
@@ -2282,8 +2414,1158 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				['ID', 'Full Name', 'Status', 'Role', 'Department', 'School', 'Date'],
 				function (r) {
 					return [r.name, r.full_name_aadhaar, r.application_status, r.role, r.department,
-						districtOf(r), r.creation ? r.creation.split(' ')[0] : ''];
+					districtOf(r), r.creation ? r.creation.split(' ')[0] : ''];
 				});
+		});
+	}
+
+	// ── CYCLE TIME ────────────────────────────────────────────────────────
+	// Stage-to-stage cycle time (average days) by financial-year quarter,
+	// laid out like the recruiter's "Cycle Time" sheet: rows Q1–Q4 + Year,
+	// one column per stage transition.
+	//
+	// Each stage's date comes from a Field Registration Form field. Written
+	// test and Offer release have no date field on that doctype yet
+	// (checked 2026-09-28: date_offer is a Data field that is empty on
+	// every record, the Field Application Status Log child table has no
+	// rows, and MeritTrac test results link to Scholarship Recruitment
+	// Form, not this doctype) — their `field` is null, so every column that
+	// needs them renders greyed out instead of showing a made-up number.
+	// Once a date is captured, set `field` here and the columns fill in.
+	var CT_STAGES = {
+		applied: { label: 'Application', field: 'date_of_applied' },
+		test: { label: 'Written test', field: null },
+		recruiter: { label: 'Recruiter screening', field: 'date_of_recruiter_round' },
+		ec: { label: 'EC/Subject interview', field: 'date_of_functional_round' },
+		final: { label: 'Final interview', field: 'date_of_final_round' },
+		offer: { label: 'Offer release', field: null },
+	};
+	var CT_COLS = [
+		{ key: 'app_test', label: 'Application to Written test', from: 'applied', to: 'test' },
+		{ key: 'test_rr', label: 'Written test to Recruiter screening', from: 'test', to: 'recruiter' },
+		{ key: 'rr_ec', label: 'Recruiter screening to EC/Subject interview', from: 'recruiter', to: 'ec' },
+		{ key: 'test_ec', label: 'Written test to EC/Subject Interview', from: 'test', to: 'ec' },
+		{ key: 'ec_final', label: 'EC/Subject to Final interview', from: 'ec', to: 'final' },
+		{ key: 'final_offer', label: 'Final interview to Offer release', from: 'final', to: 'offer' },
+		{ key: 'app_offer', label: 'Application to offer', from: 'applied', to: 'offer' },
+	];
+	var CT_QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4'];
+
+	var _ctAllRecs = [];   // everything fetched for the selected financial year
+	var _ctViewRecs = [];  // after the State / Role type filters
+	var _ctMsState = null;
+
+	function ctColAvailable(col) {
+		return !!(CT_STAGES[col.from].field && CT_STAGES[col.to].field);
+	}
+
+	// Stage date as 'YYYY-MM-DD', or '' if not captured. Application falls
+	// back to application_date, then creation, when date_of_applied is blank.
+	function ctStageDate(r, stageKey) {
+		var f = CT_STAGES[stageKey].field;
+		if (!f) return '';
+		var v = r[f] || '';
+		if (stageKey === 'applied' && !v) v = r.application_date || r.creation || '';
+		return v ? String(v).slice(0, 10) : '';
+	}
+
+	function ctDays(fromStr, toStr) {
+		var a = fromStr.split('-'), b = toStr.split('-');
+		return Math.round((Date.UTC(b[0], b[1] - 1, b[2]) - Date.UTC(a[0], a[1] - 1, a[2])) / 86400000);
+	}
+
+	// Financial year starting April of `startYear`: Q1 Apr–Jun … Q4 Jan–Mar.
+	function ctFyBounds(startYear) {
+		return { from: startYear + '-04-01', to: (startYear + 1) + '-03-31' };
+	}
+	function ctQuarterOf(dateStr) {
+		var m = parseInt(dateStr.slice(5, 7), 10);
+		if (m >= 4 && m <= 6) return 'Q1';
+		if (m >= 7 && m <= 9) return 'Q2';
+		if (m >= 10) return 'Q3';
+		return 'Q4';
+	}
+
+	// One entry per (record, column) where both stage dates exist, the
+	// transition finished inside the selected FY, and the dates are in
+	// order. A transition is bucketed into the quarter its LATER stage
+	// happened in (when that step was completed). Out-of-order pairs
+	// (later stage dated before the earlier one — data-entry errors) are
+	// counted separately and shown in the info line, not averaged in.
+	function ctTransitions(recs, col, fy) {
+		var out = [], bad = 0;
+		recs.forEach(function (r) {
+			var f = ctStageDate(r, col.from), t = ctStageDate(r, col.to);
+			if (!f || !t || t < fy.from || t > fy.to) return;
+			var d = ctDays(f, t);
+			if (d < 0) { bad++; return; }
+			out.push({ rec: r, from: f, to: t, days: d, q: ctQuarterOf(t) });
+		});
+		return { items: out, bad: bad };
+	}
+
+	function showCycleTime() {
+		var t = new Date();
+		var curFy = t.getMonth() >= 3 ? t.getFullYear() : t.getFullYear() - 1;
+		var fyOpts = '';
+		for (var y = curFy; y >= curFy - 3; y--) {
+			fyOpts += '<option value="' + y + '">FY ' + y + '-' + String(y + 1).slice(2) + '</option>';
+		}
+
+		$('#rpt-main').html(`
+			<div class="rpt-view-toolbar">
+				<button class="rpt-back" id="rpt-back">← Reports</button>
+				<span class="rpt-view-title">Cycle Time</span>
+				<span class="rpt-toolbar-label">Year:</span>
+				<select class="rpt-toolbar-date" id="ct-fy">${fyOpts}</select>
+				<select class="rpt-toolbar-date" id="ct-role">
+					<option value="">All Roles</option>
+					<option value="RP">Resource Person</option>
+					<option value="ST">School Teacher</option>
+				</select>
+				<div class="rpt-ms" id="ct-state" data-placeholder="All States"></div>
+				<button class="rpt-btn-refresh" id="ct-refresh">&#x21bb; Refresh</button>
+				<span class="rpt-info" id="ct-info"></span>
+			</div>
+			<div class="rpt-tbl-wrap" id="ct-tbl-wrap"><div class="rpt-loading is-busy">Loading…</div></div>
+		`);
+
+		_ctMsState = makeMultiselect($('#ct-state'), applyCTFilters);
+		$('#rpt-back').on('click', showHub);
+		$('#ct-refresh').on('click', fetchCycleTimeData);
+		$('#ct-fy').on('change', fetchCycleTimeData);
+		$('#ct-role').on('change', applyCTFilters);
+		fetchCycleTimeData();
+	}
+
+	function fetchCycleTimeData() {
+		$('#ct-tbl-wrap').html('<div class="rpt-loading is-busy">Loading…</div>');
+		var fy = ctFyBounds(parseInt($('#ct-fy').val(), 10));
+
+		// Only records whose transition END date falls in the selected FY
+		// can contribute to any cell, so fetch just those (OR across each
+		// available column's end-stage field) instead of all 126k+ Field
+		// Registration Forms — a few thousand rows at most.
+		var orFilters = [], seen = {};
+		CT_COLS.filter(ctColAvailable).forEach(function (c) {
+			var f = CT_STAGES[c.to].field;
+			if (seen[f]) return;
+			seen[f] = true;
+			orFilters.push([f, 'between', [fy.from, fy.to]]);
+		});
+
+		var fields = ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
+			'location', 'native_state', 'application_date', 'creation'];
+		Object.keys(CT_STAGES).forEach(function (k) {
+			var f = CT_STAGES[k].field;
+			if (f && fields.indexOf(f) === -1) fields.push(f);
+		});
+
+		frappe.call({
+			method: 'frappe.client.get_list',
+			args: {
+				doctype: 'Field Registration Form',
+				fields: fields,
+				or_filters: orFilters,
+				limit_page_length: 0,
+				order_by: 'creation asc'
+			},
+			callback: function (r) {
+				_ctAllRecs = (r && r.message) ? r.message : [];
+				var stSet = {};
+				_ctAllRecs.forEach(function (rec) {
+					var st = getState(rec);
+					if (st) stSet[st] = true;
+				});
+				_ctMsState.setOptions(Object.keys(stSet).sort());
+				applyCTFilters();
+			},
+			error: function () {
+				$('#ct-tbl-wrap').html('<div class="rpt-loading">Failed to load. Please refresh.</div>');
+			}
+		});
+	}
+
+	function applyCTFilters() {
+		var stF = _ctMsState.val();
+		var roleF = $('#ct-role').val() || '';
+		_ctViewRecs = _ctAllRecs.filter(function (r) {
+			if (stF.length && stF.indexOf(getState(r)) === -1) return false;
+			if (roleF && getCol(r.role) !== roleF) return false;
+			return true;
+		});
+		renderCycleTimeBody();
+	}
+
+	function renderCycleTimeBody() {
+		var fyStart = parseInt($('#ct-fy').val(), 10);
+		var fy = ctFyBounds(fyStart);
+		var yearLabel = 'Year-' + fyStart + '-' + String(fyStart + 1).slice(2);
+
+		// Pre-compute every column's transitions once; cells + drill-down reuse them.
+		var colData = {}, badTotal = 0;
+		CT_COLS.forEach(function (c) {
+			if (!ctColAvailable(c)) return;
+			colData[c.key] = ctTransitions(_ctViewRecs, c, fy);
+			badTotal += colData[c.key].bad;
+		});
+
+		function bucket(colKey, q) {
+			var items = colData[colKey].items;
+			return q ? items.filter(function (it) { return it.q === q; }) : items;
+		}
+		function cellHtml(col, q) {
+			if (!ctColAvailable(col)) {
+				var missing = [col.from, col.to].filter(function (k) { return !CT_STAGES[k].field; })
+					.map(function (k) { return CT_STAGES[k].label; }).join(' & ');
+				return '<td class="ct-na" title="No ' + escHtml(missing) + ' date is captured on Field Registration Form yet">—</td>';
+			}
+			var items = bucket(col.key, q);
+			if (!items.length) return '<td class="ct-cell" data-col="' + col.key + '" data-q="' + (q || '') + '"></td>';
+			var sum = items.reduce(function (s, it) { return s + it.days; }, 0);
+			var avg = Math.round((sum / items.length) * 10) / 10;
+			return '<td class="ct-cell" data-col="' + col.key + '" data-q="' + (q || '') + '">'
+				+ '<div class="ct-avg">' + avg + ' days</div>'
+				+ '<div class="ct-n">n = ' + items.length + '</div></td>';
+		}
+
+		var thead = '<thead><tr><th class="ct-stage">Stages</th>';
+		CT_COLS.forEach(function (c) {
+			var style = ctColAvailable(c) ? '' : ' style="background:#94A3B8;"';
+			thead += '<th' + style + '>' + c.label + '</th>';
+		});
+		thead += '</tr></thead>';
+
+		var tbody = '<tbody>';
+		CT_QUARTERS.forEach(function (q) {
+			tbody += '<tr><td class="ct-stage">' + q + '</td>';
+			CT_COLS.forEach(function (c) { tbody += cellHtml(c, q); });
+			tbody += '</tr>';
+		});
+		tbody += '<tr class="ct-year"><td class="ct-stage">' + yearLabel + '</td>';
+		CT_COLS.forEach(function (c) { tbody += cellHtml(c, null); });
+		tbody += '</tr></tbody>';
+
+		var missingStages = Object.keys(CT_STAGES).filter(function (k) { return !CT_STAGES[k].field; })
+			.map(function (k) { return CT_STAGES[k].label; });
+		var note = '<div class="ct-note">'
+			+ 'Each cell is the average number of days between the two stages, for candidates who completed the later stage in that quarter '
+			+ '(FY quarters: Q1 Apr–Jun, Q2 Jul–Sep, Q3 Oct–Dec, Q4 Jan–Mar). Click a cell to see the candidates.<br>'
+			+ 'Stage dates: Recruiter screening = Date of Recruiter Round, EC/Subject interview = Date of Functional Round, '
+			+ 'Final interview = Date of Final Round, Application = Date of Applied.'
+			+ (missingStages.length
+				? '<br><b>Greyed columns:</b> no ' + missingStages.join(' / ') + ' date is recorded on Field Registration Form yet, so those cycle times can\'t be calculated.'
+				: '')
+			+ '</div>';
+
+		$('#ct-tbl-wrap').html('<table class="rpt-tbl ct-tbl">' + thead + tbody + '</table>' + note);
+
+		var info = 'Candidates: ' + _ctViewRecs.length;
+		if (_ctViewRecs.length !== _ctAllRecs.length) info += ' of ' + _ctAllRecs.length;
+		if (badTotal) info += ' | ' + badTotal + ' skipped (later stage dated before earlier stage)';
+		$('#ct-info').text(info);
+
+		$('#ct-tbl-wrap').off('click.ctCell').on('click.ctCell', '.ct-cell', function () {
+			var col = CT_COLS.filter(function (c) { return c.key === $(this).data('col'); }.bind(this))[0];
+			var q = $(this).data('q') || null;
+			if (!col) return;
+			var items = bucket(col.key, q);
+			if (!items.length) { frappe.msgprint('No records found.'); return; }
+			var title = col.label + ' | ' + (q || yearLabel);
+			showRecordsDialog(title, items.map(function (it) {
+				return $.extend({}, it.rec, { _from: it.from, _to: it.to, _days: it.days });
+			}),
+				['ID', 'Full Name', 'Role', 'State', CT_STAGES[col.from].label + ' Date', CT_STAGES[col.to].label + ' Date', 'Days', 'Status'],
+				function (r) {
+					return [r.name, r.full_name_aadhaar, r.role, getState(r), r._from, r._to, r._days, r.application_status];
+				});
+		});
+	}
+
+	// ── CONVERSION ────────────────────────────────────────────────────────
+	// Stage-wise funnel, laid out like the recruiter's "Conversion" sheet:
+	// one row per stage, one column group per state (Q1–Q4 + Total) plus
+	// All State. Each cell counts candidates who APPLIED in that quarter
+	// (date_of_applied, falling back to application_date) and got at least
+	// as far as that stage, so every row is a subset of the row above and
+	// the small % under each count is the conversion from the previous
+	// stage.
+	var CV_STAGES = [
+		'Applications received',
+		'CV screening',
+		'Written test',
+		'Recruiter screening',
+		'Education capacity round',
+		'Leader/Final round',
+		'Offers released',
+	];
+
+	// State columns are built from the data, not a fixed list: every Indian
+	// state / UT that at least one candidate in the selected year maps to
+	// gets its own column automatically (sorted by applications, most
+	// first), so a new state starts showing the moment candidates from it
+	// apply. State text on Field Registration Form is free-form ("Rajasthan,
+	// India", "Itki, Ranchi, Jharkhand, India", "Lucknow, Uttar Pradesh",
+	// "Ranchi, Dhanbad and Jamshedpur", ...), so it's matched against every
+	// state/UT name first, then against district/city names that show up
+	// without their state. Anything left (blank, "All States", unknown
+	// text) goes to CV_OTHER so the state columns always add up to All State.
+	var CV_INDIA_STATES = [
+		'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat',
+		'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh',
+		'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Punjab', 'Rajasthan',
+		'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
+		'Andaman and Nicobar Islands', 'Chandigarh', 'Dadra and Nagar Haveli and Daman and Diu', 'Delhi',
+		'Jammu and Kashmir', 'Ladakh', 'Lakshadweep', 'Puducherry',
+	];
+	// Spelling variants and district/city names seen without a state name.
+	var CV_STATE_ALIASES = {
+		'Chhattisgarh': ['chattisgarh', 'dhamtari', 'raigarh', 'raipur'],
+		'Karnataka': ['bengaluru', 'bangalore', 'kalaburagi', 'yadgir'],
+		'Madhya Pradesh': ['khargone', 'bhopal'],
+		'Rajasthan': ['tonk', 'sirohi', 'barmer', 'udaipur'],
+		'Uttarakhand': ['uttaranchal', 'udham singh', 'uttarkashi', 'dehradun'],
+		'Jharkhand': ['ranchi', 'dhanbad', 'jamshedpur', 'deoghar', 'pakur', 'sahibganj'],
+		'Uttar Pradesh': ['lucknow', 'varanasi'],
+		'Odisha': ['orissa'],
+		'Puducherry': ['pondicherry'],
+		'Maharashtra': ['nagpur', 'mumbai', 'pune'],
+		'Jammu and Kashmir': ['jammu', 'kashmir'],
+	};
+	var CV_OTHER = 'Other / Not specified';
+	var CV_ALL = 'All State';
+
+	function cvStateOf(r) {
+		var s = getState(r).toLowerCase();
+		if (!s) return CV_OTHER;
+		for (var i = 0; i < CV_INDIA_STATES.length; i++) {
+			if (s.indexOf(CV_INDIA_STATES[i].toLowerCase()) !== -1) return CV_INDIA_STATES[i];
+		}
+		for (var st in CV_STATE_ALIASES) {
+			if (CV_STATE_ALIASES[st].some(function (k) { return s.indexOf(k) !== -1; })) return st;
+		}
+		return CV_OTHER;
+	}
+
+	// Furthest stage index (into CV_STAGES) a candidate reached. Built from
+	// the current application_status (keyword rules, so both naming eras of
+	// the ~85 status options are covered — see the STF_COLS comment), then
+	// raised by the round dates: a Recruiter/Functional/Final round date
+	// means the candidate reached that round even if their status later
+	// moved on or was overwritten.
+	//   "No Show", "Test Initiated", "Test Process" = CV passed, test not
+	//     taken (yet) → CV screening. "Test Select/Reject" = sat the test.
+	//   "Interview No Show" = passed the test, missed the interview.
+	//   Rejects count at the stage they were rejected in (they reached it).
+	function cvStageOf(r) {
+		var s = (r.application_status || '').trim().toLowerCase();
+		var idx = 0;
+		if (/offer|pre joining|joined|document|boarding|cbt/.test(s)) idx = 6;
+		else if (/leader|fitment|final|round three|round 3/.test(s)) idx = 5;
+		else if (/functional|subject|demo|education capacity|round one|round two|round 1|round 2/.test(s)) idx = 4;
+		else if (/recruiter/.test(s)) idx = 3;
+		else if (/interview.no show|test select|test reject|assessment pass|assessment fail/.test(s)) idx = 2;
+		else if (/shortlist|no show|test initiated|test process|admit card/.test(s)) idx = 1;
+		if (r.date_of_final_round) idx = Math.max(idx, 5);
+		else if (r.date_of_functional_round) idx = Math.max(idx, 4);
+		else if (r.date_of_recruiter_round) idx = Math.max(idx, 3);
+		return idx;
+	}
+
+	function cvAppliedOf(r) {
+		return String(r.date_of_applied || r.application_date || '').slice(0, 10);
+	}
+
+	var _cvAllRecs = [];   // fetched + tagged with _state/_stage/_q for the selected FY
+	var _cvViewRecs = [];  // after the Role type / Department / Role filters
+	var _cvMsDept = null, _cvMsRole = null;   // chip-multiselect widgets (built in showConversion)
+
+	function showConversion() {
+		var t = new Date();
+		var curFy = t.getMonth() >= 3 ? t.getFullYear() : t.getFullYear() - 1;
+		var fyOpts = '';
+		for (var y = curFy; y >= curFy - 3; y--) {
+			fyOpts += '<option value="' + y + '">FY ' + y + '-' + String(y + 1).slice(2) + '</option>';
+		}
+
+		$('#rpt-main').html(`
+			<div class="rpt-view-toolbar">
+				<button class="rpt-back" id="rpt-back">← Reports</button>
+				<span class="rpt-view-title">Conversion</span>
+				<span class="rpt-toolbar-label">Year:</span>
+				<select class="rpt-toolbar-date" id="cv-fy">${fyOpts}</select>
+				<select class="rpt-toolbar-date" id="cv-role">
+					<option value="RP">Resource Person-Education</option>
+					<option value="ST">School Teacher</option>
+					<option value="">All Role Types</option>
+				</select>
+				<div class="rpt-ms" id="cv-dept" data-placeholder="All Departments"></div>
+				<div class="rpt-ms" id="cv-roles" data-placeholder="All Roles"></div>
+				<button class="rpt-btn-refresh" id="cv-refresh">&#x21bb; Refresh</button>
+				<span class="rpt-info" id="cv-info"></span>
+			</div>
+			<div class="rpt-tbl-wrap" id="cv-tbl-wrap"><div class="rpt-loading is-busy">Loading…</div></div>
+		`);
+
+		// Department / Role lists come from the fetched data, so every value
+		// that exists shows up automatically. Changing Role type or
+		// Department narrows the Role list to roles that still match.
+		_cvMsDept = makeMultiselect($('#cv-dept'), function () { populateCVRoleOptions(); applyCVFilters(); });
+		_cvMsRole = makeMultiselect($('#cv-roles'), applyCVFilters);
+		$('#rpt-back').on('click', showHub);
+		$('#cv-refresh').on('click', fetchConversionData);
+		$('#cv-fy').on('change', fetchConversionData);
+		$('#cv-role').on('change', function () { populateCVRoleOptions(); applyCVFilters(); });
+		fetchConversionData();
+	}
+
+	function cvDeptOf(r) { return (r.department || '').trim() || 'Not specified'; }
+	function cvRoleOf(r) { return (r.role || '').trim() || 'Not specified'; }
+
+	function populateCVDeptOptions() {
+		var set = {};
+		_cvAllRecs.forEach(function (r) { set[cvDeptOf(r)] = true; });
+		_cvMsDept.setOptions(Object.keys(set).sort());
+	}
+
+	// Roles matching the current Role type + Department choice (not the Role
+	// selection itself), so the list only offers roles that can return rows.
+	// setOptions() keeps any selected role that is still in the new list.
+	function populateCVRoleOptions() {
+		var typeF = $('#cv-role').val() || '';
+		var deptF = _cvMsDept.val();
+		var set = {};
+		_cvAllRecs.forEach(function (r) {
+			if (typeF && getCol(r.role) !== typeF) return;
+			if (deptF.length && deptF.indexOf(cvDeptOf(r)) === -1) return;
+			set[cvRoleOf(r)] = true;
+		});
+		_cvMsRole.setOptions(Object.keys(set).sort());
+	}
+
+	function fetchConversionData() {
+		$('#cv-tbl-wrap').html('<div class="rpt-loading is-busy">Loading…</div>');
+		var fy = ctFyBounds(parseInt($('#cv-fy').val(), 10));
+
+		// Applied in the FY by either date field — the exact bucket is
+		// decided per record below (date_of_applied wins when both exist).
+		frappe.call({
+			method: 'frappe.client.get_list',
+			args: {
+				doctype: 'Field Registration Form',
+				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
+					'location', 'native_state', 'date_of_applied', 'application_date',
+					'date_of_recruiter_round', 'date_of_functional_round', 'date_of_final_round'],
+				or_filters: [
+					['date_of_applied', 'between', [fy.from, fy.to]],
+					['application_date', 'between', [fy.from + ' 00:00:00', fy.to + ' 23:59:59']]
+				],
+				limit_page_length: 0,
+				order_by: 'creation asc'
+			},
+			callback: function (r) {
+				var all = (r && r.message) ? r.message : [];
+				_cvAllRecs = [];
+				all.forEach(function (rec) {
+					var applied = cvAppliedOf(rec);
+					if (!applied || applied < fy.from || applied > fy.to) return;
+					rec._applied = applied;
+					rec._q = ctQuarterOf(applied);
+					rec._state = cvStateOf(rec);
+					rec._stage = cvStageOf(rec);
+					_cvAllRecs.push(rec);
+				});
+				populateCVDeptOptions();
+				populateCVRoleOptions();
+				applyCVFilters();
+			},
+			error: function () {
+				$('#cv-tbl-wrap').html('<div class="rpt-loading">Failed to load. Please refresh.</div>');
+			}
+		});
+	}
+
+	function applyCVFilters() {
+		var typeF = $('#cv-role').val() || '';
+		var deptF = _cvMsDept.val();
+		var roleF = _cvMsRole.val();
+		_cvViewRecs = _cvAllRecs.filter(function (r) {
+			if (typeF && getCol(r.role) !== typeF) return false;
+			if (deptF.length && deptF.indexOf(cvDeptOf(r)) === -1) return false;
+			if (roleF.length && roleF.indexOf(cvRoleOf(r)) === -1) return false;
+			return true;
+		});
+		renderConversionBody();
+	}
+
+	function renderConversionBody() {
+		// counts[state][q][stageIdx], q in Q1..Q4 / 'Total'. Each record adds
+		// to every stage up to the one it reached (funnel, not exclusive buckets).
+		// Columns = every state present in the current data, most applications
+		// first, then Other / Not specified, then All State.
+		var stateCount = {};
+		_cvViewRecs.forEach(function (r) { stateCount[r._state] = (stateCount[r._state] || 0) + 1; });
+		var groups = Object.keys(stateCount)
+			.filter(function (s) { return s !== CV_OTHER; })
+			.sort(function (a, b) { return stateCount[b] - stateCount[a] || a.localeCompare(b); });
+		if (stateCount[CV_OTHER]) groups.push(CV_OTHER);
+		groups.push(CV_ALL);
+
+		var periods = CT_QUARTERS.concat(['Total']);
+		var counts = {};
+		groups.forEach(function (g) {
+			counts[g] = {};
+			periods.forEach(function (p) { counts[g][p] = CV_STAGES.map(function () { return 0; }); });
+		});
+		_cvViewRecs.forEach(function (r) {
+			[r._state, CV_ALL].forEach(function (g) {
+				for (var i = 0; i <= r._stage; i++) {
+					counts[g][r._q][i]++;
+					counts[g].Total[i]++;
+				}
+			});
+		});
+
+		var roleLabel = $('#cv-role option:selected').text();
+		var thead = '<thead><tr><th class="cv-corner">Conversion</th>';
+		groups.forEach(function (g) {
+			thead += '<th class="cv-state' + (g === CV_ALL ? ' cv-all' : '') + '" colspan="5">' + g + '</th>';
+		});
+		thead += '</tr><tr><th class="cv-corner">' + escHtml(roleLabel) + '</th>';
+		groups.forEach(function (g) {
+			periods.forEach(function (p, i) {
+				var cls = (p === 'Total' ? 'cv-tot' : '') + (g === CV_ALL && i === 0 ? ' cv-all' : '');
+				thead += '<th class="' + cls + '">' + p + '</th>';
+			});
+		});
+		thead += '</tr></thead>';
+
+		var tbody = '<tbody>';
+		CV_STAGES.forEach(function (stage, si) {
+			tbody += '<tr><td class="cv-stage">' + stage + '</td>';
+			groups.forEach(function (g) {
+				periods.forEach(function (p, i) {
+					var n = counts[g][p][si];
+					var prev = si ? counts[g][p][si - 1] : 0;
+					var pct = si && prev ? '<div class="cv-pct">' + Math.round((n / prev) * 1000) / 10 + '%</div>' : '';
+					var cls = 'cv-cell col-num' + (p === 'Total' ? ' cv-tot' : '') + (g === CV_ALL && i === 0 ? ' cv-all' : '');
+					tbody += '<td class="' + cls + '" data-g="' + escHtml(g) + '" data-p="' + p + '" data-s="' + si + '">'
+						+ (n ? '<div class="cv-n">' + n + '</div>' + pct : '') + '</td>';
+				});
+			});
+			tbody += '</tr>';
+		});
+		tbody += '</tbody>';
+
+		var note = '<div class="ct-note">'
+			+ 'Each cell counts candidates who <b>applied</b> in that quarter (Date of Applied; FY quarters Q1 Apr–Jun … Q4 Jan–Mar) '
+			+ 'and reached at least that stage — rejected candidates count at the stage they were rejected in. '
+			+ 'The % under a count is the conversion from the stage above. Click a cell to see the candidates.<br>'
+			+ 'CV screening = passed CV screening · Written test = appeared for the test · '
+			+ 'Recruiter / Education capacity / Leader-Final = reached that round (status or round date) · Offers released = Offer and later.<br>'
+			+ 'State columns are added automatically for every state found in the data (most applications first). '
+			+ CV_OTHER + ' = state blank or not recognisable. All State = sum of all columns.'
+			+ '</div>';
+
+		$('#cv-tbl-wrap').html('<table class="rpt-tbl cv-tbl">' + thead + tbody + '</table>' + note);
+
+		var info = 'Candidates applied: ' + _cvViewRecs.length;
+		if (_cvViewRecs.length !== _cvAllRecs.length) info += ' of ' + _cvAllRecs.length;
+		info += ' | Date: ' + frappe.datetime.now_date();
+		$('#cv-info').text(info);
+
+		$('#cv-tbl-wrap').off('click.cvCell').on('click.cvCell', '.cv-cell', function () {
+			var g = $(this).data('g'), p = $(this).data('p'), si = parseInt($(this).data('s'), 10);
+			var matched = _cvViewRecs.filter(function (r) {
+				if (g !== CV_ALL && r._state !== g) return false;
+				if (p !== 'Total' && r._q !== p) return false;
+				return r._stage >= si;
+			});
+			if (!matched.length) { frappe.msgprint('No records found.'); return; }
+			showRecordsDialog(g + ' | ' + p + ' | ' + CV_STAGES[si], matched,
+				['ID', 'Full Name', 'Status', 'Furthest Stage', 'Role', 'State', 'Applied On'],
+				function (r) {
+					return [r.name, r.full_name_aadhaar, r.application_status, CV_STAGES[r._stage], r.role,
+					getState(r), r._applied];
+				});
+		});
+	}
+
+	// ── COMPARE QS & LAST YEAR ────────────────────────────────────────────
+	// Two tables from the recruiter's "Compare Qs & last year" sheet:
+	//  1. Stage funnel for Q1–Q4 of the selected FY, the full FY, and the
+	//     previous FY — each a count (#) and % conversion from the stage
+	//     above. Same counting as the Conversion report (applied-date
+	//     cohort, candidate counts in every stage up to the furthest one
+	//     reached), except Leader round and Final round are separate rows
+	//     here, matching the sheet.
+	//  2. Total offers per state, previous FY vs selected FY. State columns
+	//     come from the data (cvStateOf), so new states appear by themselves.
+	// Shares the Conversion helpers (cvStateOf, cvAppliedOf, cvDeptOf,
+	// cvRoleOf) and filters, so both reports always agree.
+	var CMP_STAGES = ['Applications received', 'CV Shortlist', 'Written test', 'Recruiter screening',
+		'EC round', 'Leader round', 'Final round'];
+	var CMP_OFFER_RE = /offer|pre joining|joined|document|boarding|cbt/;
+
+	// Furthest CMP_STAGES index reached — cvStageOf()'s rules with its
+	// combined Leader/Final stage split in two: Leader Round 1/2/3 statuses
+	// or a Final round date = Leader round; a Final/Fitment status or an
+	// offer-and-later status = Final round. date_of_final_round only lifts
+	// to Leader round: on real data (checked 2026-09-28) it is filled for
+	// candidates in the Leader rounds, so treating it as "Final round"
+	// made that row ~99% of Leader round and meaningless.
+	function cmpStageOf(r) {
+		var s = (r.application_status || '').trim().toLowerCase();
+		var idx = 0;
+		if (CMP_OFFER_RE.test(s) || /final|fitment/.test(s)) idx = 6;
+		else if (/leader|round three|round 3/.test(s)) idx = 5;
+		else if (/functional|subject|demo|education capacity|round one|round two|round 1|round 2/.test(s)) idx = 4;
+		else if (/recruiter/.test(s)) idx = 3;
+		else if (/interview.no show|test select|test reject|assessment pass|assessment fail/.test(s)) idx = 2;
+		else if (/shortlist|no show|test initiated|test process|admit card/.test(s)) idx = 1;
+		if (r.date_of_final_round) idx = Math.max(idx, 5);
+		else if (r.date_of_functional_round) idx = Math.max(idx, 4);
+		else if (r.date_of_recruiter_round) idx = Math.max(idx, 3);
+		return idx;
+	}
+
+	var _cmpAllRecs = [];   // both FYs, tagged with _fy ('cur'/'prev'), _q, _stage, _offer, _state
+	var _cmpViewRecs = [];
+	var _cmpMsDept = null, _cmpMsRole = null;
+
+	function cmpFyLabel(y) { return y + '-' + String(y + 1).slice(2); }
+	function cmpRange(from, to) {
+		var f = function (s) {
+			var d = new Date(s + 'T00:00:00');
+			return d.getDate() + ' ' + d.toLocaleString('en', { month: 'short' }) + ' ' + d.getFullYear();
+		};
+		return f(from) + ' – ' + f(to);
+	}
+
+	function showCompare() {
+		var t = new Date();
+		var curFy = t.getMonth() >= 3 ? t.getFullYear() : t.getFullYear() - 1;
+		var fyOpts = '';
+		for (var y = curFy; y >= curFy - 3; y--) {
+			fyOpts += '<option value="' + y + '">FY ' + cmpFyLabel(y) + ' vs ' + cmpFyLabel(y - 1) + '</option>';
+		}
+
+		$('#rpt-main').html(`
+			<div class="rpt-view-toolbar">
+				<button class="rpt-back" id="rpt-back">← Reports</button>
+				<span class="rpt-view-title">Compare Qs &amp; Last Year</span>
+				<span class="rpt-toolbar-label">Year:</span>
+				<select class="rpt-toolbar-date" id="cmp-fy">${fyOpts}</select>
+				<select class="rpt-toolbar-date" id="cmp-type">
+					<option value="RP">Resource Person-Education</option>
+					<option value="ST">School Teacher</option>
+					<option value="">All Role Types</option>
+				</select>
+				<div class="rpt-ms" id="cmp-dept" data-placeholder="All Departments"></div>
+				<div class="rpt-ms" id="cmp-roles" data-placeholder="All Roles"></div>
+				<button class="rpt-btn-refresh" id="cmp-refresh">&#x21bb; Refresh</button>
+				<span class="rpt-info" id="cmp-info"></span>
+			</div>
+			<div class="rpt-tbl-wrap" id="cmp-wrap"><div class="rpt-loading is-busy">Loading…</div></div>
+		`);
+
+		_cmpMsDept = makeMultiselect($('#cmp-dept'), function () { populateCmpRoleOptions(); applyCmpFilters(); });
+		_cmpMsRole = makeMultiselect($('#cmp-roles'), applyCmpFilters);
+		$('#rpt-back').on('click', showHub);
+		$('#cmp-refresh').on('click', fetchCompareData);
+		$('#cmp-fy').on('change', fetchCompareData);
+		$('#cmp-type').on('change', function () { populateCmpRoleOptions(); applyCmpFilters(); });
+		fetchCompareData();
+	}
+
+	function fetchCompareData() {
+		$('#cmp-wrap').html('<div class="rpt-loading is-busy">Loading…</div>');
+		var y = parseInt($('#cmp-fy').val(), 10);
+		var cur = ctFyBounds(y), prev = ctFyBounds(y - 1);
+
+		frappe.call({
+			method: 'frappe.client.get_list',
+			args: {
+				doctype: 'Field Registration Form',
+				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
+					'location', 'native_state', 'date_of_applied', 'application_date',
+					'date_of_recruiter_round', 'date_of_functional_round', 'date_of_final_round'],
+				or_filters: [
+					['date_of_applied', 'between', [prev.from, cur.to]],
+					['application_date', 'between', [prev.from + ' 00:00:00', cur.to + ' 23:59:59']]
+				],
+				limit_page_length: 0,
+				order_by: 'creation asc'
+			},
+			callback: function (r) {
+				var all = (r && r.message) ? r.message : [];
+				_cmpAllRecs = [];
+				all.forEach(function (rec) {
+					var applied = cvAppliedOf(rec);
+					if (!applied) return;
+					if (applied >= cur.from && applied <= cur.to) rec._fy = 'cur';
+					else if (applied >= prev.from && applied <= prev.to) rec._fy = 'prev';
+					else return;
+					rec._applied = applied;
+					rec._q = ctQuarterOf(applied);
+					rec._stage = cmpStageOf(rec);
+					rec._offer = CMP_OFFER_RE.test((rec.application_status || '').trim().toLowerCase());
+					rec._state = cvStateOf(rec);
+					_cmpAllRecs.push(rec);
+				});
+				var dSet = {};
+				_cmpAllRecs.forEach(function (rec) { dSet[cvDeptOf(rec)] = true; });
+				_cmpMsDept.setOptions(Object.keys(dSet).sort());
+				populateCmpRoleOptions();
+				applyCmpFilters();
+			},
+			error: function () {
+				$('#cmp-wrap').html('<div class="rpt-loading">Failed to load. Please refresh.</div>');
+			}
+		});
+	}
+
+	function populateCmpRoleOptions() {
+		var typeF = $('#cmp-type').val() || '';
+		var deptF = _cmpMsDept.val();
+		var set = {};
+		_cmpAllRecs.forEach(function (r) {
+			if (typeF && getCol(r.role) !== typeF) return;
+			if (deptF.length && deptF.indexOf(cvDeptOf(r)) === -1) return;
+			set[cvRoleOf(r)] = true;
+		});
+		_cmpMsRole.setOptions(Object.keys(set).sort());
+	}
+
+	function applyCmpFilters() {
+		var typeF = $('#cmp-type').val() || '';
+		var deptF = _cmpMsDept.val();
+		var roleF = _cmpMsRole.val();
+		_cmpViewRecs = _cmpAllRecs.filter(function (r) {
+			if (typeF && getCol(r.role) !== typeF) return false;
+			if (deptF.length && deptF.indexOf(cvDeptOf(r)) === -1) return false;
+			if (roleF.length && roleF.indexOf(cvRoleOf(r)) === -1) return false;
+			return true;
+		});
+		renderCompareBody();
+	}
+
+	function renderCompareBody() {
+		var y = parseInt($('#cmp-fy').val(), 10);
+		var cur = ctFyBounds(y), prev = ctFyBounds(y - 1);
+		var curLbl = cmpFyLabel(y), prevLbl = cmpFyLabel(y - 1);
+		var typeLbl = $('#cmp-type option:selected').text();
+
+		// Column periods: key -> record matcher
+		var qRanges = {
+			Q1: [y + '-04-01', y + '-06-30'], Q2: [y + '-07-01', y + '-09-30'],
+			Q3: [y + '-10-01', y + '-12-31'], Q4: [(y + 1) + '-01-01', (y + 1) + '-03-31'],
+		};
+		var periods = CT_QUARTERS.map(function (q) {
+			return {
+				key: q, title: q + ' (' + curLbl + ')', range: cmpRange(qRanges[q][0], qRanges[q][1]),
+				match: function (r) { return r._fy === 'cur' && r._q === q; }, cls: ''
+			};
+		}).concat([
+			{
+				key: 'cur', title: 'Year (' + curLbl + ')', range: cmpRange(cur.from, cur.to),
+				match: function (r) { return r._fy === 'cur'; }, cls: 'cmp-yr cmp-split'
+			},
+			{
+				key: 'prev', title: 'Year (' + prevLbl + ')', range: cmpRange(prev.from, prev.to),
+				match: function (r) { return r._fy === 'prev'; }, cls: 'cmp-prev cmp-split'
+			},
+		]);
+
+		// counts[periodKey][stageIdx]
+		var counts = {};
+		periods.forEach(function (p) { counts[p.key] = CMP_STAGES.map(function () { return 0; }); });
+		_cmpViewRecs.forEach(function (r) {
+			periods.forEach(function (p) {
+				if (!p.match(r)) return;
+				for (var i = 0; i <= r._stage; i++) counts[p.key][i]++;
+			});
+		});
+
+		// ── Table 1: stage funnel ──
+		var h1 = '<tr><th class="cmp-corner" rowspan="3">' + escHtml(typeLbl) + '</th>';
+		var h2 = '<tr>', h3 = '<tr>';
+		periods.forEach(function (p) {
+			h1 += '<th colspan="2" class="' + (p.cls.indexOf('cmp-split') !== -1 ? 'cmp-split' : '') + '">' + p.title + '</th>';
+			h2 += '<th colspan="2" class="' + (p.cls.indexOf('cmp-split') !== -1 ? 'cmp-split' : '') + '">' + p.range + '</th>';
+			h3 += '<th class="' + (p.cls.indexOf('cmp-split') !== -1 ? 'cmp-split' : '') + '">#</th><th>%</th>';
+		});
+		var thead1 = '<thead>' + h1 + '</tr>' + h2 + '</tr>' + h3 + '</tr></thead>';
+
+		var tbody1 = '<tbody>';
+		CMP_STAGES.forEach(function (stage, si) {
+			tbody1 += '<tr><td class="cmp-stage">' + stage + '</td>';
+			periods.forEach(function (p) {
+				var n = counts[p.key][si];
+				var prevN = si ? counts[p.key][si - 1] : 0;
+				var pct = si ? (prevN ? (Math.round((n / prevN) * 1000) / 10) + '%' : '') : (n ? '100%' : '');
+				tbody1 += '<td class="cmp-cell col-num ' + p.cls + '" data-p="' + p.key + '" data-s="' + si + '">' + (n || '') + '</td>'
+					+ '<td class="cmp-pct col-num ' + p.cls.replace('cmp-split', '') + '">' + pct + '</td>';
+			});
+			tbody1 += '</tr>';
+		});
+		tbody1 += '</tbody>';
+
+		// ── Table 2: total offers by state, prev FY vs selected FY ──
+		var offers = {};   // state -> {prev, cur}
+		_cmpViewRecs.forEach(function (r) {
+			if (!r._offer) return;
+			offers[r._state] = offers[r._state] || { prev: 0, cur: 0 };
+			offers[r._state][r._fy]++;
+		});
+		var states = Object.keys(offers).filter(function (s) { return s !== CV_OTHER; })
+			.sort(function (a, b) {
+				return (offers[b].cur + offers[b].prev) - (offers[a].cur + offers[a].prev) || a.localeCompare(b);
+			});
+		if (offers[CV_OTHER]) states.push(CV_OTHER);
+		var tot = { prev: 0, cur: 0 };
+		states.forEach(function (s) { tot.prev += offers[s].prev; tot.cur += offers[s].cur; });
+
+		function changeHtml(a, b) {
+			if (!a && !b) return '';
+			if (!a) return '<span class="cmp-up">new</span>';
+			var pct = Math.round(((b - a) / a) * 1000) / 10;
+			return '<span class="' + (pct >= 0 ? 'cmp-up' : 'cmp-down') + '">' + (pct >= 0 ? '▲ +' : '▼ ') + pct + '%</span>';
+		}
+		var thead2 = '<thead><tr><th class="col-src">State</th>'
+			+ '<th>' + prevLbl + '</th><th>' + curLbl + '</th><th>Change</th></tr></thead>';
+		var tbody2 = '<tbody>';
+		states.forEach(function (s) {
+			tbody2 += '<tr><td class="col-src cmp-state">' + escHtml(s) + '</td>'
+				+ '<td class="col-num cmp-cell" data-off="' + escHtml(s) + '" data-fy="prev">' + (offers[s].prev || '') + '</td>'
+				+ '<td class="col-num cmp-cell" data-off="' + escHtml(s) + '" data-fy="cur">' + (offers[s].cur || '') + '</td>'
+				+ '<td class="col-num">' + changeHtml(offers[s].prev, offers[s].cur) + '</td></tr>';
+		});
+		tbody2 += '<tr class="row-grand"><td class="col-src">Total</td>'
+			+ '<td class="col-num cmp-cell" data-off="" data-fy="prev">' + (tot.prev || '') + '</td>'
+			+ '<td class="col-num cmp-cell" data-off="" data-fy="cur">' + (tot.cur || '') + '</td>'
+			+ '<td class="col-num">' + changeHtml(tot.prev, tot.cur) + '</td></tr></tbody>';
+		var offersHtml = states.length
+			? '<table class="rpt-tbl">' + thead2 + tbody2 + '</table>'
+			: '<div class="rpt-loading" style="padding:16px;text-align:left;">No offers for these filters.</div>';
+
+		var note = '<div class="ct-note">'
+			+ 'Candidates are grouped by the quarter / year they <b>applied</b> (Date of Applied). # = candidates who reached at least that stage; '
+			+ '% = conversion from the stage above. Click a number to see the candidates.<br>'
+			+ 'CV Shortlist = passed CV screening · Written test = appeared for the test · Leader round = Leader Round 1/2/3 or a Final round date · '
+			+ 'Final round = Final/Fitment round or an offer. Offers = status Offer and later. '
+			+ 'Current year quarters that haven\'t finished yet will be low.'
+			+ '</div>';
+
+		$('#cmp-wrap').html(
+			'<table class="rpt-tbl cmp-tbl">' + thead1 + tbody1 + '</table>'
+			+ '<div class="cmp-offers"><div class="cmp-title">Total Offers — ' + escHtml(typeLbl)
+			+ ': Comparison with Last Year (' + prevLbl + ' vs ' + curLbl + ')</div>' + offersHtml + '</div>'
+			+ note
+		);
+
+		var curN = _cmpViewRecs.filter(function (r) { return r._fy === 'cur'; }).length;
+		$('#cmp-info').text('Applied ' + curLbl + ': ' + curN + ' | ' + prevLbl + ': ' + (_cmpViewRecs.length - curN)
+			+ ' | Date: ' + frappe.datetime.now_date());
+
+		var cols = ['ID', 'Full Name', 'Status', 'Furthest Stage', 'Role', 'State', 'Applied On'];
+		var rowFn = function (r) {
+			return [r.name, r.full_name_aadhaar, r.application_status, CMP_STAGES[r._stage], r.role, getState(r), r._applied];
+		};
+		$('#cmp-wrap').off('click.cmpCell').on('click.cmpCell', '.cmp-cell', function () {
+			var $td = $(this), matched, title;
+			if ($td.is('[data-fy]')) {
+				var st = $td.data('off'), fy = $td.data('fy');
+				matched = _cmpViewRecs.filter(function (r) { return r._offer && r._fy === fy && (!st || r._state === st); });
+				title = 'Offers | ' + (st || 'All states') + ' | ' + (fy === 'cur' ? curLbl : prevLbl);
+			} else {
+				var p = periods.filter(function (x) { return x.key === $td.data('p'); })[0];
+				var si = parseInt($td.data('s'), 10);
+				matched = _cmpViewRecs.filter(function (r) { return p.match(r) && r._stage >= si; });
+				title = p.title + ' | ' + CMP_STAGES[si];
+			}
+			if (!matched.length) { frappe.msgprint('No records found.'); return; }
+			showRecordsDialog(title, matched, cols, rowFn);
+		});
+	}
+
+	// ── INTERVIEWERS DATA ─────────────────────────────────────────────────
+	// The recruiter's "Interviewers Data" sheet, from Field Interview
+	// Schedule (non-cancelled, interview_date in the selected FY):
+	//  1. One row per state + panel member: interviews done, and how many
+	//     of the candidates they interviewed were later selected in the
+	//     Functional round / Final round.
+	//  2. Per state: number of panel members, number of interview slots per
+	//     quarter + year, and average slots per panel member.
+	// Rows come from ms_calendar.api.reports.get_interviewer_data — one per
+	// (interview, interviewer), see that method for why it's SQL.
+	// State is the candidate's (Field Registration Form, via cvStateOf, so
+	// new states show up automatically); falls back to the schedule's own
+	// location when the candidate's form is missing.
+	var IV_ROUNDS = {
+		ec: 'EC/Subject (Functional) Round',
+		recruiter: 'Recruiter Round',
+		leader: 'Leader / Final Round',
+		'': 'All Rounds',
+	};
+	function ivRoundOf(r) {
+		var s = (r.interview_round || '').trim().toLowerCase();
+		if (/leader|final|round three|round 3/.test(s)) return 'leader';
+		if (/functional|subject|demo|education capacity|round one|round two|round 1|round 2/.test(s)) return 'ec';
+		if (/recruiter/.test(s)) return 'recruiter';
+		return 'other';
+	}
+	// Selected in Functional round = candidate moved past it (reached the
+	// Leader/Final round or later) or has an explicit Functional/Subject/
+	// EC/Demo "Select" status. Selected in Final round = offer and later.
+	function ivSelFunctional(r) {
+		var s = (r.application_status || '').trim().toLowerCase();
+		return cmpStageOf(r) >= 5
+			|| /(functional|subject|education capacity|demo|round one|round two).*select/.test(s);
+	}
+	function ivSelFinal(r) {
+		return CMP_OFFER_RE.test((r.application_status || '').trim().toLowerCase());
+	}
+
+	var _ivAllRows = [];    // one per (interview, interviewer), tagged
+	var _ivViewRows = [];
+
+	function showInterviewers() {
+		var t = new Date();
+		var curFy = t.getMonth() >= 3 ? t.getFullYear() : t.getFullYear() - 1;
+		var fyOpts = '';
+		for (var y = curFy; y >= curFy - 3; y--) {
+			fyOpts += '<option value="' + y + '">FY ' + cmpFyLabel(y) + '</option>';
+		}
+		var roundOpts = Object.keys(IV_ROUNDS).map(function (k) {
+			return '<option value="' + k + '">' + IV_ROUNDS[k] + '</option>';
+		}).join('');
+
+		$('#rpt-main').html(`
+			<div class="rpt-view-toolbar">
+				<button class="rpt-back" id="rpt-back">← Reports</button>
+				<span class="rpt-view-title">Interviewers Data</span>
+				<span class="rpt-toolbar-label">Year:</span>
+				<select class="rpt-toolbar-date" id="iv-fy">${fyOpts}</select>
+				<select class="rpt-toolbar-date" id="iv-round">${roundOpts}</select>
+				<select class="rpt-toolbar-date" id="iv-type">
+					<option value="EDU">Education (RP &amp; ST)</option>
+					<option value="RP">Resource Person</option>
+					<option value="ST">School Teacher</option>
+					<option value="">All Role Types</option>
+				</select>
+				<button class="rpt-btn-refresh" id="iv-refresh">&#x21bb; Refresh</button>
+				<span class="rpt-info" id="iv-info"></span>
+			</div>
+			<div class="rpt-tbl-wrap" id="iv-wrap"><div class="rpt-loading is-busy">Loading…</div></div>
+		`);
+
+		$('#rpt-back').on('click', showHub);
+		$('#iv-refresh').on('click', fetchInterviewerData);
+		$('#iv-fy').on('change', fetchInterviewerData);
+		$('#iv-round,#iv-type').on('change', applyIvFilters);
+		fetchInterviewerData();
+	}
+
+	function fetchInterviewerData() {
+		$('#iv-wrap').html('<div class="rpt-loading is-busy">Loading…</div>');
+		var fy = ctFyBounds(parseInt($('#iv-fy').val(), 10));
+		frappe.call({
+			method: 'ms_calendar.api.reports.get_interviewer_data',
+			args: { from_date: fy.from, to_date: fy.to },
+			callback: function (r) {
+				var rows = (r && r.message) ? r.message : [];
+				var seen = {};
+				_ivAllRows = [];
+				rows.forEach(function (row) {
+					// Same interviewer in both interviewer fields = one row.
+					var key = row.name + '|' + (row.interviewer || '');
+					if (seen[key]) return;
+					seen[key] = true;
+					var hasFrf = !!row.application_status || !!row.role;
+					row._state = cvStateOf(hasFrf ? row
+						: { department: row.fis_department, location: row.fis_location });
+					row._role = row.role || row.fis_role || '';
+					row._round = ivRoundOf(row);
+					row._q = ctQuarterOf(String(row.interview_date).slice(0, 10));
+					row._iv = row.interviewer || '';
+					row._ivName = (row.interviewer_name || '').trim() || row._iv || 'Not assigned';
+					_ivAllRows.push(row);
+				});
+				applyIvFilters();
+			},
+			error: function () {
+				$('#iv-wrap').html('<div class="rpt-loading">Failed to load. Please refresh.</div>');
+			}
+		});
+	}
+
+	function applyIvFilters() {
+		var roundF = $('#iv-round').val() || '';
+		var typeF = $('#iv-type').val() || '';
+		_ivViewRows = _ivAllRows.filter(function (r) {
+			if (roundF && r._round !== roundF) return false;
+			var col = getCol(r._role);
+			if (typeF === 'EDU' && col !== 'RP' && col !== 'ST') return false;
+			if ((typeF === 'RP' || typeF === 'ST') && col !== typeF) return false;
+			return true;
+		});
+		renderInterviewersBody();
+	}
+
+	function renderInterviewersBody() {
+		var fyStart = parseInt($('#iv-fy').val(), 10);
+		var yearLbl = 'Year ' + cmpFyLabel(fyStart);
+		var roundLbl = IV_ROUNDS[$('#iv-round').val() || ''];
+		var typeLbl = $('#iv-type option:selected').text();
+
+		function uniq(rows, keyFn) {
+			var s = {};
+			rows.forEach(function (r) { s[keyFn(r)] = r; });
+			return Object.keys(s).map(function (k) { return s[k]; });
+		}
+		var byInterview = function (r) { return r.name; };
+		var byCandidate = function (r) { return r.application_id || r.name; };
+
+		// ── Table 1: state × panel member ──
+		var groups = {};   // "state||email" -> rows
+		_ivViewRows.forEach(function (r) {
+			var k = r._state + '||' + r._iv;
+			(groups[k] = groups[k] || []).push(r);
+		});
+		var t1 = Object.keys(groups).map(function (k) {
+			var rows = groups[k];
+			var cands = uniq(rows, byCandidate);
+			return {
+				key: k, state: rows[0]._state, name: rows[0]._ivName, rows: rows,
+				interviews: uniq(rows, byInterview).length,
+				selF: cands.filter(ivSelFunctional).length,
+				selFinal: cands.filter(ivSelFinal).length,
+			};
+		}).sort(function (a, b) {
+			var sa = a.state === CV_OTHER ? 1 : 0, sb = b.state === CV_OTHER ? 1 : 0;
+			return sa - sb || a.state.localeCompare(b.state) || b.interviews - a.interviews;
+		});
+
+		var allCands = uniq(_ivViewRows, byCandidate);
+		var tbl1 = '<table class="rpt-tbl iv-tbl"><thead><tr><th>State</th><th>Name of ' + escHtml(roundLbl)
+			+ ' Panel Members</th><th>Total Interviews done</th><th>No of Candidates Selected in Functional Round</th>'
+			+ '<th>No of Candidates Selected in Final Round</th></tr></thead><tbody>';
+		var lastState = null;
+		t1.forEach(function (g) {
+			var stateCell = g.state !== lastState ? escHtml(g.state) : '';
+			lastState = g.state;
+			tbl1 += '<tr><td class="iv-state">' + stateCell + '</td>'
+				+ '<td class="iv-name" title="' + escHtml(g.rows[0]._iv) + '">' + escHtml(g.name) + '</td>'
+				+ '<td class="col-num iv-cell" data-t1="' + escHtml(g.key) + '" data-k="int">' + (g.interviews || '') + '</td>'
+				+ '<td class="col-num iv-cell" data-t1="' + escHtml(g.key) + '" data-k="selF">' + (g.selF || '') + '</td>'
+				+ '<td class="col-num iv-cell" data-t1="' + escHtml(g.key) + '" data-k="selFinal">' + (g.selFinal || '') + '</td></tr>';
+		});
+		tbl1 += '<tr class="row-grand"><td colspan="2" class="iv-name">Total</td>'
+			+ '<td class="col-num">' + uniq(_ivViewRows, byInterview).length + '</td>'
+			+ '<td class="col-num">' + allCands.filter(ivSelFunctional).length + '</td>'
+			+ '<td class="col-num">' + allCands.filter(ivSelFinal).length + '</td></tr></tbody></table>';
+
+		// ── Table 2: panel members / slots / averages by state ──
+		var TOTAL = 'Total';
+		var stCount = {};
+		_ivViewRows.forEach(function (r) { stCount[r._state] = (stCount[r._state] || 0) + 1; });
+		var states = Object.keys(stCount).filter(function (s) { return s !== CV_OTHER; })
+			.sort(function (a, b) { return stCount[b] - stCount[a] || a.localeCompare(b); });
+		if (stCount[CV_OTHER]) states.push(CV_OTHER);
+		var cols = states.concat([TOTAL]);
+		var periods = CT_QUARTERS.concat(['Year']);
+
+		function rowsFor(state, period) {
+			return _ivViewRows.filter(function (r) {
+				if (state !== TOTAL && r._state !== state) return false;
+				return period === 'Year' || r._q === period;
+			});
+		}
+		function members(rows) { return uniq(rows.filter(function (r) { return r._iv; }), function (r) { return r._iv; }).length; }
+
+		var tbl2 = '<table class="rpt-tbl iv-tbl"><thead><tr><th colspan="2">State</th>';
+		cols.forEach(function (c) { tbl2 += '<th' + (c === TOTAL ? ' class="iv-tot"' : '') + '>' + escHtml(c) + '</th>'; });
+		tbl2 += '</tr></thead><tbody>';
+		tbl2 += '<tr><td colspan="2" class="iv-lbl">' + escHtml(typeLbl) + ' ' + escHtml(roundLbl) + ' Panel Members</td>';
+		cols.forEach(function (c) {
+			tbl2 += '<td class="col-num' + (c === TOTAL ? ' iv-tot' : '') + '">' + (members(rowsFor(c, 'Year')) || '') + '</td>';
+		});
+		tbl2 += '</tr>';
+		[['slots', 'No of Slots'], ['avg', 'Averages']].forEach(function (sec) {
+			periods.forEach(function (p, pi) {
+				var isYear = p === 'Year';
+				tbl2 += '<tr' + (isYear ? ' class="iv-year"' : '') + '>';
+				if (pi === 0) tbl2 += '<td class="iv-group" rowspan="' + periods.length + '">' + sec[1] + '</td>';
+				tbl2 += '<td class="iv-lbl">' + (isYear ? yearLbl : p) + '</td>';
+				cols.forEach(function (c) {
+					var rows = rowsFor(c, p);
+					var slots = uniq(rows, byInterview).length;
+					var val;
+					// Average = interviews each panel member took: (interview,
+					// member) pairs ÷ members. Interviews with no panel member
+					// on the schedule are left out — they belong to nobody.
+					if (sec[0] === 'slots') val = slots || '';
+					else {
+						var m = members(rows);
+						var taken = rows.filter(function (r) { return r._iv; }).length;
+						val = m ? Math.round((taken / m) * 10) / 10 : '';
+					}
+					var cls = 'col-num' + (c === TOTAL ? ' iv-tot' : '') + (sec[0] === 'slots' && slots ? ' iv-cell' : '');
+					tbl2 += '<td class="' + cls + '"' + (sec[0] === 'slots' ? ' data-st="' + escHtml(c) + '" data-p="' + p + '"' : '') + '>' + val + '</td>';
+				});
+				tbl2 += '</tr>';
+			});
+		});
+		tbl2 += '</tbody></table>';
+
+		var note = '<div class="ct-note">'
+			+ 'From Field Interview Schedule (cancelled interviews excluded), interview date in ' + cmpFyLabel(fyStart)
+			+ '. A slot = one scheduled interview; Averages = interviews per panel member in that period '
+			+ '(an interview with 2 panel members counts once in slots and once for each member). '
+			+ '"Not assigned" = interviews with no panel member saved on the schedule — not included in Averages.<br>'
+			+ 'Selected in Functional Round = candidate went on to the Leader/Final round or later (or has a Functional/Subject/EC Select status). '
+			+ 'Selected in Final Round = candidate reached Offer or later. Candidate status is read from their Field Registration Form today. '
+			+ 'State = candidate\'s state (new states appear automatically). Click a number to see the list.'
+			+ '</div>';
+
+		if (!_ivViewRows.length) {
+			$('#iv-wrap').html('<div class="rpt-loading">No interviews match these filters.</div>' + note);
+		} else {
+			$('#iv-wrap').html(
+				'<div class="iv-title">' + escHtml(typeLbl) + ' — ' + escHtml(roundLbl) + ' Panel Members</div>' + tbl1
+				+ '<div class="iv-sec"><div class="iv-title">Slots &amp; Averages by State</div>' + tbl2 + '</div>' + note
+			);
+		}
+		$('#iv-info').text('Interviews: ' + uniq(_ivViewRows, byInterview).length
+			+ ' | Panel members: ' + members(_ivViewRows) + ' | Date: ' + frappe.datetime.now_date());
+
+		var ivCols = ['ID', 'Candidate', 'Round', 'Interview Date', 'Panel Member', 'Role', 'State', 'Candidate Status'];
+		var ivRow = function (r) {
+			return [r.name, r.applicants_name, r.interview_round, r.interview_date, r._ivName, r._role, r._state, r.application_status];
+		};
+		$('#iv-wrap').off('click.ivCell').on('click.ivCell', '.iv-cell', function () {
+			var $td = $(this);
+			if ($td.is('[data-t1]')) {
+				var g = t1.filter(function (x) { return x.key === $td.data('t1'); })[0];
+				if (!g) return;
+				var k = $td.data('k');
+				if (k === 'int') {
+					showRecordsDialog(g.name + ' | Interviews', uniq(g.rows, byInterview), ivCols, ivRow, 'Field Interview Schedule');
+				} else {
+					var sel = uniq(g.rows, byCandidate).filter(k === 'selF' ? ivSelFunctional : ivSelFinal)
+						.filter(function (r) { return r.application_id; });
+					if (!sel.length) { frappe.msgprint('No records found.'); return; }
+					showRecordsDialog(g.name + ' | Selected in ' + (k === 'selF' ? 'Functional' : 'Final') + ' Round',
+						sel.map(function (r) { return $.extend({}, r, { name: r.application_id }); }),
+						['ID', 'Candidate', 'Candidate Status', 'Role', 'State', 'Interview Date'],
+						function (r) { return [r.name, r.applicants_name, r.application_status, r._role, r._state, r.interview_date]; });
+				}
+			} else {
+				var st = $td.data('st'), p = $td.data('p');
+				var rows = uniq(rowsFor(st, p), byInterview);
+				showRecordsDialog(st + ' | ' + (p === 'Year' ? yearLbl : p) + ' | Slots', rows, ivCols, ivRow, 'Field Interview Schedule');
+			}
 		});
 	}
 

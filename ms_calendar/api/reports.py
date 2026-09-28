@@ -387,3 +387,42 @@ def download_st_district_funnel(
 	frappe.local.response.filename = "School_Teacher_District_Funnel.xlsx"
 	frappe.local.response.filecontent = buf.getvalue()
 	frappe.local.response.type = "binary"
+
+
+@frappe.whitelist()
+def get_interviewer_data(from_date, to_date):
+	"""Rows for the "Interviewers Data" report in reports.js — one row per
+	(interview, interviewer) for non-cancelled Field Interview Schedules
+	dated from_date..to_date, joined to the candidate's Field Registration
+	Form for state / status.
+
+	Done in SQL rather than frappe.client.get_list because interviewers
+	live in two Table MultiSelect fields (interviewer_email and
+	hybrid_interviewers_email) on the same child doctype — get_list's
+	child-field syntax joins that child table without telling the two
+	fields apart (checked 2026-09-28: both came back identical). Here the
+	join is on parentfield explicitly. An interview with no interviewer
+	still returns one row, with interviewer NULL.
+	"""
+	frappe.has_permission("Field Interview Schedule", "read", throw=True)
+	return frappe.db.sql(
+		"""
+		select
+			s.name, s.application_id, s.applicants_name, s.interview_round, s.interview_date,
+			s.role as fis_role, s.department as fis_department, s.location as fis_location,
+			c.interviewer_email as interviewer, l.interviewer_name,
+			f.application_status, f.role, f.department, f.location, f.native_state,
+			f.date_of_final_round
+		from `tabField Interview Schedule` s
+		left join `tabInterviewer Email Child` c
+			on c.parent = s.name and c.parenttype = 'Field Interview Schedule'
+			and c.parentfield in ('interviewer_email', 'hybrid_interviewers_email')
+		left join `tabInterviewer Email List` l on l.name = c.interviewer_email
+		left join `tabField Registration Form` f on f.name = s.application_id
+		where ifnull(s.is_cancelled, 0) = 0
+			and s.interview_date between %(from_date)s and %(to_date)s
+		order by s.interview_date
+		""",
+		{"from_date": from_date, "to_date": to_date},
+		as_dict=True,
+	)
