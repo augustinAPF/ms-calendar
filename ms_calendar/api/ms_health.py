@@ -149,6 +149,20 @@ def _resolve_sub_unit(role):
     return SUB_UNIT
 
 
+def _health_feedback_round(interview_round, role=None):
+    """The round whose feedback form this interview actually uses: the
+    application_status at scheduling time, mapped through ROUND_ALIASES,
+    falling back to "Round One" when the applicant's sub-unit has no form
+    for that round (PG/MBBS Fellowship have no Round Three or Visit form).
+    Shared by _health_feedback_url and send_interviewer_feedback_reminders
+    so the reminder checks the same form the interviewer's link opens."""
+    status = str(interview_round or "").strip()
+    round_name = ROUND_ALIASES.get(status, status)
+    if round_name not in FEEDBACK_FORM_URLS[_resolve_sub_unit(role)]:
+        return "Round One"
+    return round_name
+
+
 def _health_feedback_url(interview_round, application_id, applicants_name, role=None):
     """Maps this interview's round (the application_status value at
     scheduling time) to the correct public feedback form — which table it
@@ -156,10 +170,8 @@ def _health_feedback_url(interview_round, application_id, applicants_name, role=
     with application_id/applicants_name pre-filled as query params (same
     pattern as every other feedback-form link already sent from this app,
     e.g. ms_philanthropy.py's feedback_url)."""
-    status = str(interview_round or "").strip()
-    round_name = ROUND_ALIASES.get(status, status)
     table = FEEDBACK_FORM_URLS[_resolve_sub_unit(role)]
-    base_url = table.get(round_name) or table["Round One"]
+    base_url = table[_health_feedback_round(interview_round, role)]
     return f"{base_url}?applicant_id={application_id}&applicant_name={applicants_name}"
 
 
@@ -673,7 +685,12 @@ def create_interview_event(
     join_passcode = ""
 
     if is_online == 1:
-        for _ in range(10):
+        # Only wait for the Teams join link itself (usually ready on the
+        # 1st/2nd poll). Meeting ID/Passcode often never appear in the body
+        # at all, and waiting for them used to burn the full 10 x 1s here
+        # on every single schedule — the onlineMeetings lookup below
+        # fills them in instead.
+        for attempt in range(10):
             ev = requests.get(event_url, headers=headers).json()
 
             if ev.get("onlineMeeting"):
@@ -697,10 +714,10 @@ def create_interview_event(
             except Exception:
                 pass
 
-            if join_web_url and join_meeting_id and join_passcode:
+            if join_web_url and ((join_meeting_id and join_passcode) or attempt >= 1):
                 break
 
-            time.sleep(1)
+            time.sleep(0.5)
 
     if is_online == 1 and join_web_url and (not join_meeting_id or not join_passcode):
         filter_url = (
@@ -805,15 +822,18 @@ def create_interview_event(
         },
     )
 
-    frappe.sendmail(
+    # Sent from a background worker so scheduling doesn't wait on the SMTP
+    # round-trip — see cancel_interview_event's matching comment.
+    frappe.enqueue(
+        "frappe.sendmail",
+        queue="short",
+        enqueue_after_commit=True,
         recipients=[interviewee_email],
         sender=Organizer_email,
         subject=f"APF - {Applicants_Role} - {Applicants_name}",
         message=candidate_body,
         delayed=False,
     )
-
-    frappe.msgprint("✅ Event created successfully — Outlook notified automatically.")
 
     if name:
         frappe.db.set_value(
@@ -1084,8 +1104,12 @@ def update_interview_event(
     res.raise_for_status()
 
     # The candidate isn't an attendee on the Outlook event, so the updated
-    # invite never reaches them — this email is their only notice.
-    frappe.sendmail(
+    # invite never reaches them — this email is their only notice. Sent
+    # from a background worker, same as create_interview_event's.
+    frappe.enqueue(
+        "frappe.sendmail",
+        queue="short",
+        enqueue_after_commit=True,
         recipients=[interviewee_email],
         sender=Organizer_email,
         subject=f"APF - {Applicants_Role} - {Applicants_name} (Rescheduled)",
@@ -1168,18 +1192,47 @@ def _remove_event_from_attendee_calendars(headers, ical_uid, attendee_emails):
             )
 
 
+def _remove_cancelled_event_in_background(ical_uid, attendee_emails):
+    """Background half of cancel_interview_event — see its comment."""
+    _remove_event_from_attendee_calendars(_graph_headers(), ical_uid, attendee_emails)
+
+
 @frappe.whitelist()
-def cancel_interview_event(name):
+def cancel_interview_event(name, reason=None):
     """
     Cancels an already-scheduled interview. Mirrors
     ms_philanthropy.py's cancel_interview_event exactly — cancels via Graph,
     then actively deletes it off each attendee's own calendar too rather
     than leaving that to Outlook's manual "Remove event" prompt.
+
+    `reason` is mandatory (prompted for by health_interview_schedule.js's
+    "Cancel The Schedule" button) and goes out to both sides: interviewers
+    see it in Outlook's own cancellation notice (Graph's /cancel "comment"),
+    the candidate in their cancellation email.
     """
     doc = frappe.get_doc("Health Interview Schedule", name)
 
     if doc.is_cancelled:
         frappe.throw("This interview is already cancelled.")
+
+    reason = (reason or "").strip()
+    if not reason:
+        frappe.throw("Please enter the reason for cancelling this interview.")
+    reason_html = frappe.utils.escape_html(reason).replace("\n", "<br>")
+
+    # Kept on the record itself too — only if the field exists on this
+    # site, since Health Interview Schedule is a custom (DB-only) doctype
+    # and the field may not have been added everywhere yet.
+    if frappe.get_meta("Health Interview Schedule").has_field("reson_for_canceling_event"):
+        doc.db_set("reson_for_canceling_event", reason, update_modified=False)
+
+    interview_date = (
+        formatdate(doc.interview_date, "dd MMMM yyyy") if doc.interview_date else ""
+    )
+    # "hh:mm a" → "10:00 AM" (plain format_time() printed "10:00:02").
+    start_time = format_time(doc.start_time, "hh:mm a") if doc.start_time else ""
+    end_time = format_time(doc.end_time, "hh:mm a") if doc.end_time else ""
+    logo_html = _logo_html()
 
     if doc.event_id and doc.organizer_email:
         headers = _graph_headers()
@@ -1187,6 +1240,22 @@ def cancel_interview_event(name):
             f"https://graph.microsoft.com/v1.0/users/{doc.organizer_email}"
             f"/events/{doc.event_id}"
         )
+
+        # Outlook renders the /cancel "comment" as HTML (plain "\n" line
+        # breaks all collapsed onto one line), so format it the same way as
+        # the candidate's cancellation email below.
+        interviewer_names = frappe.utils.escape_html(
+            (doc.interviewer_name or "").strip()
+        )
+        interviewer_comment = f"""
+        <p>Hi {interviewer_names or "there"},</p>
+        <p>This is to inform you that the interview with
+        <strong>{frappe.utils.escape_html(doc.applicants_name or "")}</strong>
+        scheduled on <strong>{interview_date}</strong> ({start_time} – {end_time})
+        has been <strong>cancelled</strong>.</p>
+        <p><strong>Reason:</strong> {reason_html}</p>
+        <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+        """
 
         ical_uid = None
         try:
@@ -1202,7 +1271,7 @@ def cancel_interview_event(name):
         res = requests.post(
             f"{event_url}/cancel",
             headers=headers,
-            json={"comment": "This interview has been cancelled."},
+            json={"comment": interviewer_comment},
         )
         if res.status_code not in (202, 204, 404):
             frappe.log_error(
@@ -1210,16 +1279,18 @@ def cancel_interview_event(name):
                 message=f"Graph cancel failed | status={res.status_code} | body={res.text[:800]}",
             )
 
-        _remove_event_from_attendee_calendars(
-            headers, ical_uid, _attendee_emails_for(doc)
-        )
-
-    interview_date = (
-        formatdate(doc.interview_date, "dd MMMM yyyy") if doc.interview_date else ""
-    )
-    start_time = format_time(doc.start_time) if doc.start_time else ""
-    end_time = format_time(doc.end_time) if doc.end_time else ""
-    logo_html = _logo_html()
+        # Per-attendee calendar cleanup is 2 Graph calls PER attendee — the
+        # main reason cancelling used to hang for a long time. The /cancel
+        # above has already notified everyone, so this is just tidying up
+        # their calendars and can safely run in the background.
+        if ical_uid:
+            frappe.enqueue(
+                "ms_calendar.api.ms_health._remove_cancelled_event_in_background",
+                queue="short",
+                ical_uid=ical_uid,
+                attendee_emails=list(_attendee_emails_for(doc)),
+                enqueue_after_commit=True,
+            )
 
     if doc.attendees:
         candidate_body = f"""
@@ -1227,11 +1298,18 @@ def cancel_interview_event(name):
         <p>This is to inform you that your interview scheduled on
         <strong>{interview_date}</strong> ({start_time} – {end_time}) has been
         <strong>cancelled</strong>.</p>
+        <p><strong>Reason:</strong> {reason_html}</p>
         <p>We will reach out separately if the interview needs to be rescheduled.</p>
         <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
         {logo_html}
         """
-        frappe.sendmail(
+        # Sent from a background worker so the Cancel button doesn't wait
+        # on the SMTP round-trip (delayed=False / now=True both still send
+        # inside this same request, just after commit).
+        frappe.enqueue(
+            "frappe.sendmail",
+            queue="short",
+            enqueue_after_commit=True,
             recipients=[doc.attendees],
             sender=doc.organizer_email,
             subject=f"Interview Cancelled – Azim Premji Foundation ({interview_date})",
@@ -1241,55 +1319,61 @@ def cancel_interview_event(name):
 
     # Interviewers/CC are Graph attendees on this event, and Graph's
     # /events/{id}/cancel action already sends them a native cancellation
-    # notice in the same meeting thread — a separate frappe.sendmail here
-    # would be a redundant second email.
+    # notice (carrying the reason above as its comment) in the same meeting
+    # thread — a separate frappe.sendmail here would be a redundant second
+    # email.
 
     doc.db_set("is_cancelled", 1, update_modified=False)
     doc.db_set("event_id", "", update_modified=False)
 
-    frappe.msgprint("✅ Interview cancelled — candidate and interviewer(s) notified.")
-
+    # No frappe.msgprint here — health_interview_schedule.js already shows
+    # its own alert plus a red "Interview Cancelled" banner on the form, a
+    # modal on top of that was just an extra click.
     return {"cancelled": True}
 
 
 # Round -> which of the four real feedback doctypes to check for a
-# submission, and which field on it holds the panelist name(s) — used by
-# send_interviewer_feedback_reminders below. This used to check
-# "Health Common Feedback Form Round 1"/"Round 2 3 4" (the orphaned
-# doctypes noted above, never actually written to since the real forms
-# are the four MBBS ones) and a "panelist_names" field that doesn't exist
-# on any of them — meaning it never found a real submission and kept
-# reminding interviewers forever, even after they'd already submitted
-# feedback through the real forms. Field names genuinely differ per
-# doctype ("panal_name" on Round One's own form is a typo baked into that
-# real doctype, not a mistake introduced here).
+# submission — used by send_interviewer_feedback_reminders below. Every
+# feedback web form in FEEDBACK_FORM_URLS (PG Fellowship, MBBS Fellowship
+# and Hospital and Urban alike) writes into one of these same four
+# doctypes, so this one map covers all three sub-units.
+#
+# These forms can't say WHICH interviewer submitted: "panal_name" /
+# "panelist_name" is free-text names ("Ivan", "Shanthini, Vinod" — one
+# form is often collated for the whole panel), and "email" is always the
+# default health.fellowship@ address. Matching interviewer emails against
+# the panelist-name field (the previous approach) therefore never matched,
+# so every interviewer was reminded daily for the full 7 days even after
+# feedback was in. Same as Field's reminder, any submission for the
+# applicant in that round's doctype now counts as the feedback being done.
 ROUND_TO_FEEDBACK_DOCTYPE = {
-    "Round One": ("Health Feedback Form one", "panal_name"),
-    "Round Two": ("Health FeedBack Form Two", "panelist_name"),
-    "Round Three": ("Health Feedback Form Three", "panelist_name"),
-    "Visit": ("Health Center Visit Form", "panelist_name"),
+    "Round One": "Health Feedback Form one",
+    "Round Two": "Health FeedBack Form Two",
+    "Round Three": "Health Feedback Form Three",
+    "Visit": "Health Center Visit Form",
 }
 
 
 def send_interviewer_feedback_reminders():
     """Runs daily (see hooks.py's scheduler_events["daily"] entry).
 
-    Starting 1 day after an interview's end time, sends a reminder to any
-    interviewer who hasn't yet submitted a matching Health feedback form —
-    checking whichever of the four real MBBS feedback doctypes
-    (MBBS_FEEDBACK_ROUND_DOCTYPES) matches this record's interview_round,
-    the same round->doctype resolution _health_feedback_url uses. Stops
-    re-checking a schedule (sets reminder_sent) once every interviewer has
-    submitted, or once 7 days have passed since the interview ended,
-    whichever comes first. Mirrors ms_philanthropy.py's version of this
-    function; the only real difference is which feedback doctype to check,
-    since Health split that across four doctypes instead of one.
+    Starting 1 day after an interview's end time, sends a daily reminder to
+    every interviewer on the schedule until feedback for that applicant has
+    been submitted in the round's feedback doctype (ROUND_TO_FEEDBACK_DOCTYPE,
+    for the same round _health_feedback_url links to), or 7
+    days have passed since the interview ended, whichever comes first — then
+    sets reminder_sent so the schedule isn't checked again. Only feedback
+    created on or after the interview date counts, so an earlier interview
+    in the same round for the same applicant doesn't close this one out.
     """
     now = frappe.utils.now_datetime()
 
+    # Cancelled interviews never happened, so there's no feedback to chase.
+    # Rescheduling one resets is_cancelled to 0 (create_interview_event),
+    # which brings it back into this queue automatically.
     schedules = frappe.get_all(
         "Health Interview Schedule",
-        filters={"reminder_sent": 0},
+        filters={"reminder_sent": 0, "is_cancelled": 0},
         fields=[
             "name",
             "application_id",
@@ -1327,25 +1411,18 @@ def send_interviewer_feedback_reminders():
             frappe.db.commit()
             continue
 
-        status = str(s.interview_round or "").strip()
-        round_name = ROUND_ALIASES.get(status, status)
-        feedback_doctype, panelist_field = ROUND_TO_FEEDBACK_DOCTYPE.get(
-            round_name, ROUND_TO_FEEDBACK_DOCTYPE["Round One"]
-        )
-        submitted_panelists = frappe.get_all(
-            feedback_doctype,
-            filters={"applicant_id": s.application_id},
-            pluck=panelist_field,
-        )
-        # The panelist-name field is one free-text field (can list multiple
-        # names), not a per-interviewer record — a submission counts as
-        # covering an interviewer if their address appears anywhere in it.
-        submitted_blob = " ".join((p or "") for p in submitted_panelists).lower()
-        pending_emails = [
-            e for e in interviewer_emails if e.strip().lower() not in submitted_blob
+        feedback_doctype = ROUND_TO_FEEDBACK_DOCTYPE[
+            _health_feedback_round(s.interview_round, s.role)
         ]
+        feedback_submitted = frappe.db.exists(
+            feedback_doctype,
+            {
+                "applicant_id": s.application_id,
+                "creation": [">=", s.interview_date],
+            },
+        )
 
-        if not pending_emails:
+        if feedback_submitted:
             frappe.db.set_value("Health Interview Schedule", s.name, "reminder_sent", 1)
             frappe.db.commit()
             continue
@@ -1374,13 +1451,15 @@ def send_interviewer_feedback_reminders():
         ):
             sender_arg = {"sender": s.organizer_email}
 
-        for email in pending_emails:
+        for email in interviewer_emails:
             try:
                 frappe.sendmail(
                     recipients=[email],
                     subject=f"Reminder: Interview Feedback Pending – {s.applicants_name}",
                     message=reminder_body,
                     delayed=False,
+                    reference_doctype="Health Interview Schedule",
+                    reference_name=s.name,
                     **sender_arg,
                 )
             except Exception:
