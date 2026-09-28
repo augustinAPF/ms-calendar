@@ -1,0 +1,757 @@
+/* Pathways login. Co-located with login.html: Frappe injects this file into the page's <style> block.
+   Palette matches the Pathways jobs page (navy #1B3F77, gold #E8B006, warm neutrals, Roboto). */
+
+:root {
+	--ms-navy: #1b3f77;
+	--ms-navy-dark: #162d57;
+	--ms-navy-deep: #0e2143;
+	--ms-gold: #e8b006;
+	--ms-gold-dark: #d39d05;
+	--ms-gold-soft: #f6ba5c;
+	--ms-cream: #faf9f7;
+	--ms-sand: #f0ebe4;
+	--ms-line: #e5e0d8;
+	--ms-input-bg: #fdfcfa;
+	--ms-text: #1a1f2b;
+	--ms-muted: #6b6f7a;
+	--ms-danger: #dc2626;
+	--ms-font: "Roboto", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+body {
+	background: var(--ms-cream);
+}
+
+.ms-login {
+	display: flex;
+	min-height: 100vh;
+	font-family: var(--ms-font);
+	color: var(--ms-text);
+}
+
+.ms-login .form-control,
+.ms-login .btn {
+	font-family: var(--ms-font);
+}
+
+/* ───────────── Brand panel ───────────── */
+
+.ms-login-brand {
+	position: relative;
+	flex: 0 0 46%;
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+	gap: 48px;
+	padding: 48px 56px;
+	overflow: hidden;
+	color: #fff;
+	background:
+		radial-gradient(circle at 88% 8%, rgba(96, 150, 230, 0.35), transparent 42%),
+		radial-gradient(circle at 0% 100%, rgba(52, 102, 182, 0.45), transparent 50%),
+		linear-gradient(160deg, var(--ms-navy) 0%, var(--ms-navy-dark) 55%, var(--ms-navy-deep) 100%);
+}
+
+/* Faint dot grid that fades out towards the bottom */
+.ms-login-brand::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	background-image: radial-gradient(rgba(255, 255, 255, 0.09) 1px, transparent 1px);
+	background-size: 22px 22px;
+	-webkit-mask-image: linear-gradient(180deg, #000 0%, transparent 85%);
+	mask-image: linear-gradient(180deg, #000 0%, transparent 85%);
+	pointer-events: none;
+}
+
+.ms-brand-top,
+.ms-brand-body,
+.ms-brand-foot {
+	position: relative;
+	z-index: 1;
+}
+
+/* Winding "pathway" on the right edge, faded out before it reaches the text */
+.ms-brand-path {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	-webkit-mask-image: linear-gradient(90deg, transparent 35%, #000 75%);
+	mask-image: linear-gradient(90deg, transparent 35%, #000 75%);
+	pointer-events: none;
+}
+
+.ms-path-line {
+	fill: none;
+	stroke: rgba(232, 176, 6, 0.55);
+	stroke-width: 3;
+	stroke-linecap: round;
+	stroke-dasharray: 1 14;
+	animation: ms-path-walk 30s linear infinite;
+}
+
+.ms-path-stop {
+	fill: var(--ms-navy-dark);
+	stroke: rgba(232, 176, 6, 0.85);
+	stroke-width: 3;
+}
+
+.ms-path-goal-ring {
+	fill: rgba(232, 176, 6, 0.2);
+	transform-box: fill-box;
+	transform-origin: center;
+	animation: ms-pulse 3.2s ease-in-out infinite;
+}
+
+.ms-path-goal {
+	fill: var(--ms-gold);
+}
+
+/* Logo + name */
+.ms-brand-top {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+}
+
+.ms-brand-mark {
+	flex: none;
+	width: 44px;
+	height: 44px;
+	filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.25));
+}
+
+.ms-brand-logo {
+	display: inline-flex;
+	align-items: center;
+	padding: 8px 12px;
+	background: #fff;
+	border-radius: 12px;
+	box-shadow: 0 6px 14px rgba(0, 0, 0, 0.18);
+}
+
+.ms-brand-logo img {
+	width: auto;
+	height: 36px;
+	max-width: 160px;
+}
+
+.ms-brand-name {
+	display: flex;
+	flex-direction: column;
+	line-height: 1.2;
+}
+
+.ms-brand-name strong {
+	font-size: 1.35rem;
+	font-weight: 700;
+	letter-spacing: 0.01em;
+}
+
+.ms-brand-name span {
+	margin-top: 3px;
+	font-size: 0.72rem;
+	font-weight: 500;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	color: rgba(255, 255, 255, 0.7);
+}
+
+/* Headline + journey */
+.ms-brand-body {
+	max-width: 460px;
+}
+
+.ms-brand-body h1 {
+	margin: 0 0 16px;
+	font-size: clamp(2rem, 3.2vw, 2.9rem);
+	font-weight: 700;
+	line-height: 1.15;
+	letter-spacing: -0.01em;
+	color: #fff;
+}
+
+.ms-brand-body h1 em {
+	display: block;
+	font-style: normal;
+	color: var(--ms-gold);
+}
+
+.ms-brand-body > p {
+	margin: 0 0 36px;
+	font-size: 1.05rem;
+	line-height: 1.6;
+	color: rgba(255, 255, 255, 0.78);
+}
+
+.ms-journey {
+	display: grid;
+	gap: 22px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.ms-journey li {
+	position: relative;
+	display: flex;
+	align-items: flex-start;
+	gap: 16px;
+}
+
+/* Dashed connector between the steps */
+.ms-journey li:not(:last-child)::after {
+	content: "";
+	position: absolute;
+	top: 40px;
+	bottom: -18px;
+	left: 17px;
+	border-left: 2px dashed rgba(232, 176, 6, 0.45);
+}
+
+.ms-journey-dot {
+	flex: none;
+	display: grid;
+	place-items: center;
+	width: 36px;
+	height: 36px;
+	font-size: 0.9rem;
+	font-weight: 700;
+	color: var(--ms-navy-deep);
+	background: var(--ms-gold);
+	border-radius: 50%;
+	box-shadow: 0 0 0 5px rgba(232, 176, 6, 0.18);
+}
+
+.ms-journey strong {
+	display: block;
+	font-size: 1rem;
+	font-weight: 500;
+	color: #fff;
+}
+
+.ms-journey li div span {
+	display: block;
+	margin-top: 2px;
+	font-size: 0.9rem;
+	color: rgba(255, 255, 255, 0.68);
+}
+
+.ms-brand-foot {
+	margin: 0;
+	font-size: 0.8rem;
+	color: rgba(255, 255, 255, 0.55);
+}
+
+/* ───────────── Form column ───────────── */
+
+.ms-login-main {
+	flex: 1 1 54%;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	padding: 48px 24px 24px;
+	background:
+		radial-gradient(circle at 100% 0%, rgba(232, 176, 6, 0.09), transparent 40%),
+		var(--ms-cream);
+}
+
+.ms-login-panel {
+	width: 100%;
+	max-width: 420px;
+	margin: auto 0;
+}
+
+.ms-login-noscript {
+	margin-bottom: 24px;
+}
+
+/* Only the login section is visible at first; login.js toggles the others by URL hash */
+.for-forgot,
+.for-login-with-email-link,
+.for-signup {
+	display: none;
+}
+
+.ms-login-panel section {
+	animation: ms-rise 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.ms-login-head {
+	margin-bottom: 24px;
+}
+
+.ms-login-title {
+	margin: 0 0 6px;
+	font-size: 1.85rem;
+	font-weight: 700;
+	letter-spacing: -0.01em;
+	color: var(--ms-navy-dark);
+}
+
+.ms-login-subtitle {
+	margin: 0;
+	font-size: 0.98rem;
+	color: var(--ms-muted);
+}
+
+.page-card .ms-login-subtitle {
+	margin-bottom: 20px;
+}
+
+/* Card with a gold accent bar on top */
+.ms-login .page-card {
+	position: relative;
+	max-width: none;
+	margin: 0;
+	padding: 32px 30px 30px;
+	overflow: hidden;
+	background: #fff;
+	border: 1px solid var(--ms-line);
+	border-radius: 18px;
+	box-shadow:
+		0 1px 2px rgba(22, 45, 87, 0.04),
+		0 18px 40px -12px rgba(22, 45, 87, 0.18);
+}
+
+.ms-login .page-card::before {
+	content: "";
+	position: absolute;
+	top: 0;
+	right: 0;
+	left: 0;
+	height: 4px;
+	background: linear-gradient(90deg, var(--ms-gold-soft) 0%, var(--ms-gold) 55%, var(--ms-gold-dark) 100%);
+}
+
+.ms-login .form-group {
+	margin-bottom: 18px;
+}
+
+.ms-login .form-label {
+	display: block;
+	margin-bottom: 7px;
+	font-size: 0.85rem;
+	font-weight: 500;
+	color: var(--ms-text);
+}
+
+.ms-label-row {
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+}
+
+.ms-label-row a {
+	font-size: 0.83rem;
+	font-weight: 500;
+}
+
+/* Inputs */
+.ms-input {
+	position: relative;
+}
+
+.ms-field-icon {
+	position: absolute;
+	top: 50%;
+	left: 14px;
+	/* Frappe's .form-control is position: relative, so lift the icon above it */
+	z-index: 2;
+	transform: translateY(-50%);
+	color: #9a9ca5;
+	pointer-events: none;
+	transition: color 0.15s;
+}
+
+.ms-input:focus-within .ms-field-icon {
+	color: var(--ms-navy);
+}
+
+.ms-login .form-control {
+	height: 48px;
+	padding: 10px 14px;
+	font-size: 0.95rem;
+	color: var(--ms-text);
+	background: var(--ms-input-bg);
+	border: 1.5px solid var(--ms-line);
+	border-radius: 12px;
+	transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
+}
+
+.ms-input .form-control {
+	padding-left: 44px;
+}
+
+.ms-login .form-control::placeholder {
+	color: #a9abb3;
+}
+
+.ms-login .form-control:hover {
+	border-color: #d3ccc1;
+}
+
+.ms-login .form-control:focus {
+	background: #fff;
+	border-color: var(--ms-navy);
+	box-shadow: 0 0 0 4px rgba(27, 63, 119, 0.12);
+	outline: none;
+}
+
+/* Keep Chrome's autofill from painting the inputs blue/yellow */
+.ms-login .form-control:-webkit-autofill {
+	-webkit-box-shadow: 0 0 0 40px #fff inset;
+	-webkit-text-fill-color: var(--ms-text);
+}
+
+.page-card-body.invalid .form-control {
+	background: #fef6f6;
+	border-color: var(--ms-danger);
+}
+
+.password-field .form-control {
+	padding-right: 68px;
+}
+
+.toggle-password {
+	position: absolute;
+	top: 50%;
+	right: 8px;
+	transform: translateY(-50%);
+	padding: 5px 9px;
+	font-size: 0.78rem;
+	font-weight: 500;
+	color: var(--ms-navy);
+	border-radius: 8px;
+	cursor: pointer;
+	user-select: none;
+}
+
+.toggle-password:hover {
+	background: var(--ms-sand);
+}
+
+/* Buttons */
+.ms-login .btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+	height: 48px;
+	font-size: 0.97rem;
+	font-weight: 500;
+	border-radius: 12px;
+	transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s, color 0.15s, filter 0.15s;
+}
+
+.ms-login .btn-block {
+	display: flex;
+	width: 100%;
+}
+
+.ms-login .btn-block + .btn-block {
+	margin-top: 12px;
+}
+
+.ms-login .btn-primary,
+.ms-login .btn-primary:focus {
+	color: #fff;
+	background: linear-gradient(135deg, #22508f 0%, var(--ms-navy) 50%, var(--ms-navy-dark) 100%);
+	border: 0;
+	box-shadow: 0 10px 20px -10px rgba(27, 63, 119, 0.8);
+}
+
+.ms-login .btn-primary:hover {
+	color: #fff;
+	transform: translateY(-1px);
+	filter: brightness(1.08);
+	box-shadow: 0 14px 24px -10px rgba(27, 63, 119, 0.85);
+}
+
+.ms-login .btn-primary:active {
+	transform: translateY(0);
+}
+
+.ms-login .btn:focus-visible {
+	outline: 3px solid rgba(232, 176, 6, 0.65);
+	outline-offset: 2px;
+}
+
+/* Arrow on the Login button. A pseudo-element survives login.js replacing the button text. */
+.ms-login .btn-login.btn-primary::after {
+	content: "";
+	width: 18px;
+	height: 18px;
+	background: currentColor;
+	-webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12h14M13 6l6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12h14M13 6l6 6-6 6'/%3E%3C/svg%3E") center / contain no-repeat;
+	transition: transform 0.2s;
+}
+
+.ms-login .btn-login.btn-primary:hover::after {
+	transform: translateX(3px);
+}
+
+.ms-login .btn-default {
+	color: var(--ms-text);
+	background: #fff;
+	border: 1.5px solid var(--ms-line);
+}
+
+.ms-login .btn-default:hover {
+	color: var(--ms-navy);
+	background: #fbfaf8;
+	border-color: var(--ms-navy);
+}
+
+.ms-login .btn-default .ms-field-icon {
+	position: static;
+	transform: none;
+	color: inherit;
+}
+
+.btn-login-option img,
+.btn-login-option svg {
+	width: 18px;
+	height: 18px;
+}
+
+/* Links: navy text with a gold underline on hover */
+.ms-login a {
+	color: var(--ms-navy);
+	text-decoration: none;
+}
+
+.ms-login a:hover {
+	color: var(--ms-navy-dark);
+	text-decoration: underline;
+	text-decoration-color: var(--ms-gold);
+	text-decoration-thickness: 2px;
+	text-underline-offset: 3px;
+}
+
+.ms-login a.btn:hover,
+.ms-login a.ms-login-jobs:hover {
+	text-decoration: none;
+}
+
+.ms-login-divider {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin: 22px 0;
+	font-size: 0.8rem;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: #9a9ca5;
+}
+
+.ms-login-divider::before,
+.ms-login-divider::after {
+	content: "";
+	flex: 1;
+	height: 1px;
+	background: var(--ms-line);
+}
+
+.ms-login-switch,
+.ms-login .sign-up-message {
+	margin: 18px 0 0;
+	font-size: 0.9rem;
+	text-align: center;
+	color: var(--ms-muted);
+}
+
+.ms-login-switch a {
+	font-weight: 500;
+}
+
+/* "Looking for opportunities?" card linking to /jobs */
+.ms-login-jobs {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-top: 22px;
+	padding: 14px 18px;
+	background: #fffbf0;
+	border: 1px solid rgba(232, 176, 6, 0.4);
+	border-radius: 14px;
+	transition: transform 0.15s, background-color 0.15s, border-color 0.15s;
+}
+
+.ms-login-jobs span {
+	font-size: 0.85rem;
+	color: var(--ms-muted);
+}
+
+.ms-login-jobs strong {
+	display: block;
+	font-size: 0.92rem;
+	font-weight: 500;
+	color: var(--ms-navy-dark);
+}
+
+.ms-login-jobs svg {
+	flex: none;
+	color: var(--ms-gold-dark);
+	transition: transform 0.2s;
+}
+
+.ms-login-jobs:hover {
+	background: #fff5d6;
+	border-color: var(--ms-gold);
+	transform: translateY(-1px);
+}
+
+.ms-login-jobs:hover svg {
+	transform: translateX(3px);
+}
+
+.ms-login-footer {
+	display: none;
+	margin: 32px 0 0;
+	font-size: 0.8rem;
+	color: var(--ms-muted);
+}
+
+/* 2FA / OTP form injected by login.js */
+#twofactor_div .page-card-head {
+	margin-bottom: 12px;
+}
+
+#twofactor_div #otp_div {
+	font-size: 0.9rem;
+	color: var(--ms-muted);
+}
+
+#twofactor_div #otp_div img {
+	display: block;
+	max-width: 180px;
+	margin: 0 auto 12px;
+}
+
+#twofactor_div #login_token {
+	margin-top: 8px;
+	font-size: 1.1rem;
+	letter-spacing: 0.3em;
+	text-align: center;
+}
+
+/* ───────────── Animations ───────────── */
+
+/* Shake on wrong password (login.js adds .invalid-login for 500ms) */
+.login-content.invalid-login {
+	animation: ms-shake 0.4s;
+}
+
+@keyframes ms-shake {
+	0%,
+	100% {
+		transform: translateX(0);
+	}
+	25% {
+		transform: translateX(-6px);
+	}
+	75% {
+		transform: translateX(6px);
+	}
+}
+
+@keyframes ms-rise {
+	from {
+		opacity: 0;
+		transform: translateY(10px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@keyframes ms-path-walk {
+	to {
+		stroke-dashoffset: -300;
+	}
+}
+
+@keyframes ms-pulse {
+	0%,
+	100% {
+		opacity: 0.9;
+		transform: scale(0.8);
+	}
+	50% {
+		opacity: 0.35;
+		transform: scale(1.25);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.ms-path-line,
+	.ms-path-goal-ring,
+	.ms-login-panel section {
+		animation: none;
+	}
+
+	.ms-login .btn,
+	.ms-login-jobs {
+		transition: none;
+	}
+}
+
+/* ───────────── Responsive ───────────── */
+
+@media (max-width: 1100px) {
+	.ms-login-brand {
+		padding: 40px;
+	}
+}
+
+/* Phones and small tablets: compact brand header above the form */
+@media (max-width: 900px) {
+	.ms-login {
+		flex-direction: column;
+	}
+
+	.ms-login-brand {
+		flex: none;
+		gap: 20px;
+		padding: 28px 24px 32px;
+	}
+
+	.ms-brand-body h1 {
+		margin-bottom: 8px;
+		font-size: 1.7rem;
+	}
+
+	.ms-brand-body > p {
+		margin: 0;
+		font-size: 0.95rem;
+	}
+
+	.ms-brand-path,
+	.ms-journey,
+	.ms-brand-foot {
+		display: none;
+	}
+
+	.ms-login-main {
+		justify-content: flex-start;
+		padding: 32px 16px 24px;
+	}
+
+	.ms-login-panel {
+		margin-top: 0;
+	}
+
+	.ms-login-footer {
+		display: block;
+	}
+
+	.ms-login .page-card {
+		padding: 26px 20px 22px;
+	}
+}
