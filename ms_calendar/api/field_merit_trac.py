@@ -212,7 +212,14 @@ def test_result_api():
                     "proctor_comment": proctor_comment,
                     "updated_at": updated_at,
                     "created_at": created_at,
-                    "section_wise_score": frappe.as_json([
+                    # Same child tables pull_pending_merittrac_results()
+                    # writes (Field MeritTrac Section Score / Field
+                    # MeritTrac Descriptive Response) — the old
+                    # section_wise_score/descriptive_response Long Text JSON
+                    # fields no longer exist on the doctype (see
+                    # fixtures/doctype.json), so writing JSON there was
+                    # silently dropped.
+                    "section_wise_scores": [
                         {
                             "section_name": section.get("name"),
                             "score": section.get("score"),
@@ -220,15 +227,15 @@ def test_result_api():
                         }
                         for section in section_wise_score
                         if isinstance(section, dict)
-                    ]),
-                    "descriptive_response": frappe.as_json([
+                    ],
+                    "descriptive_responses": [
                         {
                             "question_text": resp.get("questionText"),
                             "candidate_response": resp.get("candidateResponse"),
                         }
                         for resp in descriptive_response
                         if isinstance(resp, dict)
-                    ]),
+                    ],
                 }
             )
         else:
@@ -1157,6 +1164,122 @@ def get_merittrac_tickets(candidate_ids, start_utc, end_utc):
     return resp.json()
 
 
+@frappe.whitelist()
+def save_field_meritrac_test_urls(tickets, assessment_id, start_time, end_time):
+    """
+    Bulk-saves one "Field Meritrac Test URL" per MeritTrac ticket, for the
+    Initiate Test dialog (frf_list.js).
+
+    Replaces the dialog's old per-candidate loop (one frappe.db.get_value +
+    one frappe.client.insert request EACH — ~1000 browser round-trips for a
+    500-candidate batch, slow and liable to hit the site's rate limit
+    partway through, after MeritTrac had already created the tests). Here
+    it's one request: applicant details fetched in a single query, all rows
+    inserted, one commit.
+
+    Safe to call again with the same tickets — a candidate already saved for
+    this same test + start time is skipped, not duplicated. A row that fails to insert doesn't
+    stop the rest; it's logged and returned in `failed`.
+
+    tickets    : JSON list of {candidate_id|candidateId, attemptId|attempt_id, lpurl|url}
+    start_time / end_time : display strings ("DD MMM YYYY hh:mm A")
+    """
+    import json as _json
+
+    if not frappe.has_permission("Field Meritrac Test URL", "create"):
+        frappe.throw(
+            "You don't have permission to save MeritTrac test URLs.",
+            frappe.PermissionError,
+        )
+
+    if isinstance(tickets, str):
+        tickets = _json.loads(tickets)
+
+    rows = []
+    for t in tickets or []:
+        cid = t.get("candidate_id") or t.get("candidateId")
+        if cid:
+            rows.append(
+                {
+                    "candidate_id": cid,
+                    "attempt_id": t.get("attemptId") or t.get("attempt_id") or "",
+                    "test_url": t.get("lpurl") or t.get("url") or "",
+                }
+            )
+    if not rows:
+        return {"saved": 0, "skipped_existing": 0, "failed": []}
+
+    candidate_ids = list({r["candidate_id"] for r in rows})
+    info_by_id = {
+        f.name: f
+        for f in frappe.get_all(
+            "Field Registration Form",
+            filters={"name": ["in", candidate_ids]},
+            fields=["name", "full_name_aadhaar", "email_address", "role", "written_subject"],
+            limit_page_length=0,
+        )
+    }
+
+    # Duplicate check keys on (applicant, test, start time), NOT attempt_id:
+    # on both ms.local and the cloud site, attempt_id's field definition has
+    # fetch_from = applicant_id.full_name_aadhaar (confirmed 2026-09-29 —
+    # every existing row's attempt_id is the candidate's name), so whatever
+    # attempt_id is passed in gets overwritten on insert and can't be
+    # matched on afterwards.
+    existing = set(
+        (e.applicant_id, e.assessment_id, e.start_time)
+        for e in frappe.get_all(
+            "Field Meritrac Test URL",
+            filters={
+                "applicant_id": ["in", candidate_ids],
+                "assessment_id": assessment_id,
+                "start_time": start_time,
+            },
+            fields=["applicant_id", "assessment_id", "start_time"],
+            limit_page_length=0,
+        )
+    )
+
+    today = nowdate()
+    saved, skipped_existing, failed = 0, 0, []
+    for r in rows:
+        dedupe_key = (r["candidate_id"], assessment_id, start_time)
+        if dedupe_key in existing:
+            skipped_existing += 1
+            continue
+        info = info_by_id.get(r["candidate_id"]) or {}
+        frappe.db.savepoint("fmt_url_row")
+        try:
+            frappe.get_doc(
+                {
+                    "doctype": "Field Meritrac Test URL",
+                    "applicant_id": r["candidate_id"],
+                    "applicant_name": info.get("full_name_aadhaar") or "",
+                    "applicant_email": info.get("email_address") or "",
+                    "applicant_role": info.get("role") or "",
+                    "subject": info.get("written_subject") or "",
+                    "attempt_id": r["attempt_id"],
+                    "assessment_id": assessment_id,
+                    "test_url": r["test_url"],
+                    "current_date": today,
+                    "start_time": start_time,
+                    "end_time": end_time,
+                }
+            ).insert()
+            saved += 1
+            existing.add(dedupe_key)
+        except Exception as e:
+            frappe.db.rollback(save_point="fmt_url_row")
+            failed.append({"candidate_id": r["candidate_id"], "error": str(e)[:200]})
+            frappe.log_error(
+                title="FIELD_MERITTRAC_TEST_URL_SAVE_ERROR",
+                message=f"{r['candidate_id']} / {assessment_id}: {frappe.get_traceback()}",
+            )
+
+    frappe.db.commit()
+    return {"saved": saved, "skipped_existing": skipped_existing, "failed": failed}
+
+
 # ---------------------------------------------------------------------------
 # Pull pending Field MeritTrac results
 # ---------------------------------------------------------------------------
@@ -1276,11 +1399,11 @@ def pull_pending_merittrac_results():
                 # section_wise_score/descriptive_response Long Text JSON
                 # blob fields on 2026-09-01, per a request for the
                 # descriptive Q&A to render as separate, readable rows
-                # instead of raw JSON text on the form. Those two Long
-                # Text fields are left in the doctype (unused going
-                # forward) rather than deleted, since 5 earlier records'
-                # data was migrated out of them but nothing needs them
-                # removed.
+                # instead of raw JSON text on the form. The doctype
+                # definition lives in fixtures/doctype.json (re-imported
+                # with force=True on every migrate) — both Table fields
+                # must stay in that file, or the next deploy silently
+                # strips them again (happened 2026-09-06, -21 and -22).
                 "section_wise_scores": [
                     {
                         "section_name": s.get("name"),
@@ -1469,7 +1592,12 @@ def suggest_meritrac_assessment(candidate_ids):
         return {"matched": False, "reason": "mixed_or_missing_subject"}
     written_subject = subjects.pop()
 
-    roles = {r.role for r in rows if r.role}
+    # Strip region suffixes ("School Teacher - Barmer" -> "School Teacher")
+    # before comparing — every key in the override/role-map tables above is
+    # the bare category, so a suffixed role missed all of them and the
+    # scorer searched every role's tests unfiltered (e.g. a "Resource
+    # Person - Rajasthan" batch tied onto an unrelated ARP test).
+    roles = {r.role.split(" - ")[0].strip() for r in rows if r.role}
     role = roles.pop() if len(roles) == 1 else None
 
     override_name = _WRITTEN_SUBJECT_OVERRIDES.get((role, written_subject))
