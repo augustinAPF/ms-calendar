@@ -6,6 +6,10 @@ from frappe.utils import now_datetime
 _OTP_TTL = 600  # 10 minutes
 _OTP_RESEND_COOLDOWN = 60  # seconds between OTP sends to the same email
 _OTP_MAX_ATTEMPTS = 3  # failed verify attempts before the OTP is invalidated
+# How long a verified email stays valid for submission. Candidates usually
+# verify first and then fill a long form, so this must comfortably exceed
+# the time it takes to complete the form (was 30 min, which expired mid-form).
+_OTP_VERIFIED_TTL = 24 * 60 * 60
 
 
 def _normalize_mobile(phone):
@@ -89,14 +93,8 @@ def _normalize_mobile(phone):
 # now shared across Field and Health Registration Form, but each has its
 # own recruiter inbox candidates already expect replies to land in.
 _OTP_SENDER_BY_FORM = {
-    "Field Registration Form": (
-        "field.recruitment@azimpremjifoundation.org",
-        "Field Registration Form",
-    ),
-    "Health Registration Form": (
-        "health.jobs@azimpremjifoundation.org",
-        "Health Registration Form",
-    ),
+    "Field Registration Form": ("field.recruitment@azimpremjifoundation.org", "Field Registration Form"),
+    "Health Registration Form": ("health.fellowship@azimpremjifoundation.org", "Health Registration Form"),
 }
 _DEFAULT_OTP_SENDER = _OTP_SENDER_BY_FORM["Field Registration Form"]
 
@@ -160,10 +158,7 @@ def verify_email_otp(email, otp):
     stored = frappe.cache().get_value(cache_key)
 
     if not stored:
-        return {
-            "success": False,
-            "message": "OTP expired or not sent. Please request a new OTP.",
-        }
+        return {"success": False, "message": "OTP expired or not sent. Please request a new OTP."}
     if stored != otp:
         attempts = (frappe.cache().get_value(attempts_key) or 0) + 1
         if attempts >= _OTP_MAX_ATTEMPTS:
@@ -178,9 +173,7 @@ def verify_email_otp(email, otp):
 
     frappe.cache().delete_value(cache_key)
     frappe.cache().delete_value(attempts_key)
-    frappe.cache().set_value(
-        f"field_reg_email_otp_verified_{email}", "1", expires_in_sec=1800
-    )
+    frappe.cache().set_value(f"field_reg_email_otp_verified_{email}", "1", expires_in_sec=_OTP_VERIFIED_TTL)
     return {"success": True, "message": "Email address verified successfully."}
 
 
@@ -205,10 +198,11 @@ def enforce_otp_verification(doc, method=None):
     #     frappe.throw("Please verify your phone number with the OTP before submitting.")
 
     email = (doc.email_address or "").strip().lower()
-    if not email or not frappe.cache().get_value(
-        f"field_reg_email_otp_verified_{email}"
-    ):
-        frappe.throw("Please verify your email address with the OTP before submitting.")
+    if not email or not frappe.cache().get_value(f"field_reg_email_otp_verified_{email}"):
+        frappe.throw(
+            "Your email verification has expired or was not completed. "
+            "Please click \"Generate OTP\" under the Email field and verify again before submitting."
+        )
 
     # doc.phone_verified = 1
     doc.email_verified = 1
