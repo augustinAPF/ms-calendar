@@ -174,33 +174,18 @@
 					</form>
 					{% endif %}
 
-					{% if provider_logins or login_with_email_link or login_with_frappe_cloud_url %}
+					{% if provider_logins %}
 					{% if not disable_user_pass_login or (ldap_settings and ldap_settings.enabled) %}
 					<div class="ms-login-divider"><span>{{ _("or") }}</span></div>
 					{% endif %}
 					<div class="social-login-buttons">
-						{% for provider in provider_logins %}
+						{% for provider in provider_logins if provider.provider_name in ("Google", "Office 365") %}
 						<a href="{{ provider.auth_url }}"
 							class="btn btn-default btn-block btn-login-option btn-{{ provider.name }}">
 							{% if provider.icon %}{{ provider.icon }}{% endif %}
-							{{ _("Login with {0}").format(provider.provider_name) }}
+							{{ _("Login with {0}").format("Microsoft" if provider.provider_name == "Office 365" else provider.provider_name) }}
 						</a>
 						{% endfor %}
-
-						{% if login_with_frappe_cloud_url %}
-						<a href="{{ login_with_frappe_cloud_url }}"
-							class="btn btn-default btn-block btn-login-option btn-login-with-frappe-cloud">
-							{{ _("Login with Frappe Cloud") }}
-						</a>
-						{% endif %}
-
-						{% if login_with_email_link %}
-						<a href="#login-with-email-link"
-							class="btn btn-default btn-block btn-login-option btn-login-with-email-link">
-							{{ field_icon("mail") }}
-							{{ _("Login with Email Link") }}
-						</a>
-						{% endif %}
 					</div>
 					{% endif %}
 				</div>
@@ -274,7 +259,8 @@
 				</div>
 			</section>
 
-			<a class="ms-login-jobs" href="/jobs">
+			<a class="ms-login-jobs" href="https://careers.azimpremjifoundation.org/apf"
+				target="_blank" rel="noopener noreferrer">
 				<span>
 					<strong>{{ _("Looking for opportunities?") }}</strong>
 					{{ _("Explore open roles") }}
