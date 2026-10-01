@@ -1290,19 +1290,16 @@ def save_field_meritrac_test_urls(tickets, assessment_id, start_time, end_time):
 # DO arrive automatically via a separate push webhook — that's a different
 # program's integration, not this one.) MeritTrac's own API docs
 # (talent-next.com/hrms/api-docs) show the real integration point:
-# POST /hrms/get-candidates-results. This scheduled job calls that for
-# every candidate who was ever sent an online test, and records any newly
+# POST /hrms/get-candidates-results. This function calls that for every
+# candidate who was ever sent an online test, and records any newly
 # SUBMITTED attempt. Safe to run repeatedly — skips any attempt_id already
 # recorded, so nothing gets duplicated across runs.
 #
-# Also live on the cloud site right now as a "Scheduler Event" Server
-# Script ("Pull Pending Field MeritTrac Results", cron * * * * * — every
-# minute, per a 2026-08-31 request for fast same-day-demo turnaround; dial
-# back once that urgency passes) —
-# created there directly since deploying this .py file isn't possible from
-# here (no SSH/git access to that server). Keep both in sync if this
-# changes; the Server Script is the one actually running in production
-# until an app deploy picks this file up instead.
+# NOT scheduled. It used to run every minute (hooks.py cron + a cloud
+# "Scheduler Event" Server Script), and on 2026-10-01 MeritTrac blocked the
+# APF account for the repeated requests. It now runs only when a candidate
+# finishes the test, via trigger_merittrac_results_pull_on_finish (below),
+# which is rate-limited. Don't put it back on a scheduler.
 def pull_pending_merittrac_results():
     import requests as _req
 
@@ -1447,8 +1444,8 @@ def trigger_merittrac_results_pull_on_finish():
     """
     Fired by a tiny script on the "Thank You for Attending the Test" page
     (Web Page "test-completed-field", route assessment-finished-field) the
-    moment a candidate lands there right after submitting — gets the
-    result recorded far faster than waiting for the next scheduled poll,
+    moment a candidate lands there right after submitting — this is the
+    only thing that pulls Field results now (there is no scheduled poll),
     without needing MeritTrac to actually push (see the long comment on
     pull_pending_merittrac_results above — that has still never happened
     for the Field program).

@@ -660,7 +660,7 @@ app_include_js = [
     # holding onto old copies for the full 12h Cache-Control max-age even
     # across hard reloads. Bump the number any time this file changes and
     # every browser is guaranteed a fresh fetch on next page load.
-    "/assets/ms_calendar/js/frf_list.js?v=3",
+    "/assets/ms_calendar/js/frf_list.js?v=16",
     "/assets/ms_calendar/js/phil_registration_form_list.js",
     "/assets/ms_calendar/js/scholarship_recruitment_form_list.js",
     "/assets/ms_calendar/js/applicant_master_list.js?v=1",
@@ -804,17 +804,12 @@ scheduler_events = {
 			# the once-daily mistake here.
 			"ms_calendar.api.ms_health.send_candidate_interview_reminders",
 		],
-		# MeritTrac's Field-program integration is pull-only (see the long
-		# comment on pull_pending_merittrac_results itself) — nothing calls
-		# our push webhook for Field candidates, so this has to go fetch
-		# results instead. Every minute per 2026-08-31 request (fast
-		# turnaround needed for a same-day demo) — idempotent (dedupes by
-		# attempt_id), so safe to run this often; dial back to something
-		# like */15 or */30 once that urgency passes, to go easier on a
-		# third-party API.
-		"* * * * *": [
-			"ms_calendar.api.field_merit_trac.pull_pending_merittrac_results",
-		],
+		# No scheduled MeritTrac results pull on purpose. The every-minute
+		# pull_pending_merittrac_results job got the APF account blocked by
+		# MeritTrac on 2026-10-01 for repeated requests. Field results are
+		# now pulled only when a candidate finishes the test (see
+		# trigger_merittrac_results_pull_on_finish in field_merit_trac.py),
+		# or pushed by MeritTrac to field_assessment_result_api.
 	},
 }
 
