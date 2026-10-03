@@ -1254,7 +1254,7 @@ import hmac
 import json
 
 import frappe
-from frappe.utils import flt, get_datetime
+from frappe.utils import escape_html, flt, get_datetime
 
 
 # ============================================================
