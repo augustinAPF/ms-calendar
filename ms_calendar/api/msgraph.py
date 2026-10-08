@@ -605,6 +605,19 @@ def _remove_event_from_attendee_calendars(headers, ical_uid, attendee_emails):
             )
 
 
+def _scholarship_interview_subject(applicant_name, applicant_role):
+    """Subject for every Scholarship interview invite (calendar event and the
+    candidate email), e.g.
+    "Discussion With- VIKAS KUMAR RAM (Resource Person Role), Azim Premji Scholarship".
+    One place so the interviewer invite and the candidate email can't drift
+    apart again (they had "With -", "With-", "with … - (Role)" and the
+    form's Event Title / plain "Interview" before)."""
+    applicant_name = (applicant_name or "").strip()
+    applicant_role = (applicant_role or "").strip()
+    role_part = f" ({applicant_role} Role)" if applicant_role else ""
+    return f"Discussion With- {applicant_name}{role_part}, Azim Premji Scholarship"
+
+
 @frappe.whitelist()
 def create_interview_event(event_title,
                            start_datetime,
@@ -815,7 +828,7 @@ Azim Premji Foundation</p>
     # INITIAL EVENT BODY
     # ----------------------------------------
     if is_round1:
-        calendar_subject = f"Discussion With - {Applicants_name} ({Applicants_Role} Role), Azim Premji Scholarship"
+        calendar_subject = _scholarship_interview_subject(Applicants_name, Applicants_Role)
         # initial_body = round1_interviewer_template.format(
         #     Interviewer_name=InterviewersName,
         #     when_str=when_str,
@@ -834,7 +847,7 @@ Azim Premji Foundation</p>
 
 
     elif is_round2:
-        calendar_subject = f"Discussion With- {Applicants_name} ({Applicants_Role} Role), Azim Premji Scholarship"
+        calendar_subject = _scholarship_interview_subject(Applicants_name, Applicants_Role)
         initial_body = round2_interviewer_template.format(
             Interviewer_name=InterviewersName,
             Applicants_Role=Applicants_Role,    
@@ -848,7 +861,7 @@ Azim Premji Foundation</p>
         )
 
     else:
-        calendar_subject = event_title
+        calendar_subject = _scholarship_interview_subject(Applicants_name, Applicants_Role)
         initial_body = f"<p>Interview for {Applicants_name}</p><p>When: {when_str}</p>"
 
     # ----------------------------------------
@@ -1003,7 +1016,7 @@ Azim Premji Foundation</p>
     # EMAIL TO CANDIDATE
     # ----------------------------------------
     if is_round1:
-        email_subject = f"Discussion With - {Applicants_name} ({Applicants_Role} Role), Azim Premji Scholarship"
+        email_subject = _scholarship_interview_subject(Applicants_name, Applicants_Role)
         email_body = round1_candidate_template.format(
             Applicants_name=Applicants_name,
             when_str=when_str,
@@ -1014,7 +1027,7 @@ Azim Premji Foundation</p>
         )
 
     elif is_round2:
-        email_subject =f"Discussion With - {Applicants_name} ({Applicants_Role} Role), Azim Premji Scholarship"
+        email_subject = _scholarship_interview_subject(Applicants_name, Applicants_Role)
         email_body = round2_candidate_template.format(
             Applicants_name=Applicants_name,
             when_str=when_str,
@@ -1025,7 +1038,7 @@ Azim Premji Foundation</p>
         )
 
     else:
-        email_subject = f"Interview Scheduled - {event_title}"
+        email_subject = _scholarship_interview_subject(Applicants_name, Applicants_Role)
         email_body = f"<p>Hi {Applicants_name},</p><p>Your interview is scheduled on {when_str}.</p>"
 
     frappe.sendmail(
@@ -1199,16 +1212,8 @@ def update_interview_event(
         )
     res.raise_for_status()
 
-    join_web_url = ""
-    if is_online == 1:
-        ev = requests.get(event_url, headers=headers).json()
-        if ev.get("onlineMeeting"):
-            join_web_url = ev["onlineMeeting"].get("joinUrl", "")
-
-    meeting_html = (
-        f'<p><b>Join Teams Meeting:</b> <a href="{join_web_url}" target="_blank">Join Now</a></p>'
-        if is_online == 1 and join_web_url
-        else "<p><b>Mode:</b> Offline Interview</p>"
+    join_web_url, meeting_html = _interview_schedule_meeting_html(
+        is_online, Organizer_email, doc.event_id, headers
     )
 
     # Same fix as create_interview_event's map_html — only render a venue /
@@ -1406,6 +1411,30 @@ def _classify_interview_schedule_round(interview_round):
     return _INTERVIEW_SCHEDULE_FEEDBACK_SLUGS.get(str(interview_round or "").strip().lower())
 
 
+def _interview_schedule_meeting_html(is_online, Organizer_email, event_id, headers):
+    """Join link + Meeting ID + Passcode for a Scholarship interview invite.
+    Reuses ms_field's _fetch_teams_meeting_info — it polls until Graph has
+    attached the Teams meeting, then reads the numeric Meeting ID / Passcode
+    (onlineMeetings lookup, falling back to the event body). Only the Join
+    link used to be read here, so online invites went out without them."""
+    if is_online != 1:
+        return "", "<p><b>Mode:</b> Offline Interview</p>"
+
+    from ms_calendar.api.ms_field import _fetch_teams_meeting_info
+
+    join_web_url, meeting_id, passcode = _fetch_teams_meeting_info(
+        Organizer_email, event_id, headers, True
+    )
+    if not join_web_url:
+        return "", "<p><b>Mode:</b> Offline Interview</p>"
+    html = f'<p><b>Join Teams Meeting:</b> <a href="{join_web_url}" target="_blank">Join Now</a>'
+    if meeting_id:
+        html += f"<br><b>Meeting ID:</b> {meeting_id}"
+    if passcode:
+        html += f"<br><b>Passcode:</b> {passcode}"
+    return join_web_url, html + "</p>"
+
+
 def _interview_schedule_map_html(is_online, address, map_location):
     """Same venue/map-link rendering used throughout this file — only
     emits the Google Map Link line when there's an actual URL, never a
@@ -1490,7 +1519,7 @@ def create_interview_schedule(
         + [{"emailAddress": {"address": i}, "type": "required"} for i in interviewer_list]
     )
 
-    calendar_subject = event_title or f"Discussion with {Applicants_name} - ({Applicants_Role})"
+    calendar_subject = _scholarship_interview_subject(Applicants_name, Applicants_Role)
 
     create_url = f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/events"
     draft_payload = {
@@ -1512,19 +1541,8 @@ def create_interview_schedule(
     # Online-meeting join link — only relevant for virtual calls, and (as
     # in create_interview_event above) not ready the instant the event is
     # created, hence the short poll.
-    join_web_url = ""
-    if is_online == 1:
-        for _ in range(10):
-            ev = requests.get(event_url, headers=headers).json()
-            if ev.get("onlineMeeting"):
-                join_web_url = ev["onlineMeeting"].get("joinUrl", "")
-                break
-            time.sleep(1)
-
-    meeting_html = (
-        f'<p><b>Join Teams Meeting:</b> <a href="{join_web_url}" target="_blank">Join Now</a></p>'
-        if is_online == 1 and join_web_url
-        else "<p><b>Mode:</b> Offline Interview</p>"
+    join_web_url, meeting_html = _interview_schedule_meeting_html(
+        is_online, Organizer_email, event_id, headers
     )
     map_html = _interview_schedule_map_html(is_online, address, Map_location)
     note_to_candidate_html = (
@@ -1571,7 +1589,7 @@ def create_interview_schedule(
     frappe.sendmail(
         recipients=[interviewee_email],
         sender=Organizer_email,
-        subject=f"Discussion With - {Applicants_name} ({Applicants_Role} Role), Azim Premji Scholarship",
+        subject=_scholarship_interview_subject(Applicants_name, Applicants_Role),
         message=candidate_body,
         delayed=False,
     )
@@ -1715,16 +1733,8 @@ def update_interview_schedule(
         )
     res.raise_for_status()
 
-    join_web_url = ""
-    if is_online == 1:
-        ev = requests.get(event_url, headers=headers).json()
-        if ev.get("onlineMeeting"):
-            join_web_url = ev["onlineMeeting"].get("joinUrl", "")
-
-    meeting_html = (
-        f'<p><b>Join Teams Meeting:</b> <a href="{join_web_url}" target="_blank">Join Now</a></p>'
-        if is_online == 1 and join_web_url
-        else "<p><b>Mode:</b> Offline Interview</p>"
+    join_web_url, meeting_html = _interview_schedule_meeting_html(
+        is_online, Organizer_email, doc.event_id, headers
     )
     map_html = _interview_schedule_map_html(is_online, address, Map_location)
     note_to_candidate_html = (

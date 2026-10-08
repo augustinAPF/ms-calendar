@@ -136,6 +136,9 @@ _LIVELIHOOD_FEEDBACK_URLS = {
 _HEALTH_FEEDBACK_URLS = {
     "recruiter round": "https://careers.frappe.cloud/health-recruitment-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
     "functional round": "https://careers.frappe.cloud/health-functional-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    # Health's Technical Round uses the same Functional Round feedback form
+    # (requested by the Health recruitment team, 2026-10-08).
+    "technical round": "https://pathways.azimpremjifoundation.org/health-functional-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
     "leader round-1": "https://careers.frappe.cloud/health-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
     "leader round-2": "https://careers.frappe.cloud/health-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
 }
@@ -703,13 +706,23 @@ def _fetch_teams_meeting_info(organizer_email, event_id, headers, mode_is_online
     """
     event_fetch_url = f"https://graph.microsoft.com/v1.0/users/{organizer_email}/events/{event_id}"
 
+    # Poll until the Teams meeting is attached AND (for online interviews)
+    # Exchange has written its "Meeting ID / Passcode" footer into the event
+    # body. The footer lands a few seconds AFTER onlineMeeting appears — the
+    # old loop stopped at onlineMeeting, so it often read the body too early
+    # and invites went out with a Join link but no Meeting ID / Passcode.
+    # (Callers overwrite the body with their own template right after this,
+    # so this is the only chance to read Exchange's footer.)
     join_web_url = ""
     json_data = {}
-    for _ in range(10):
-        data = requests.get(event_fetch_url, headers=headers)
-        json_data = data.json()
+    for _ in range(15):
+        json_data = requests.get(event_fetch_url, headers=headers, timeout=30).json()
         if json_data.get("onlineMeeting"):
-            join_web_url = json_data["onlineMeeting"].get("joinUrl", "")
+            join_web_url = json_data["onlineMeeting"].get("joinUrl", "") or join_web_url
+        if join_web_url and (
+            not mode_is_online
+            or all(_extract_teams_ids_from_html(json_data.get("body", {}).get("content", "")))
+        ):
             break
         _time.sleep(1)
 
@@ -719,9 +732,13 @@ def _fetch_teams_meeting_info(organizer_email, event_id, headers, mode_is_online
     # in the event's own body (set when the invite was first created), so
     # fall back to reading it straight out of that instead of leaving the
     # whole Teams section blank.
+    html_body = json_data.get("body", {}).get("content", "") or ""
     if mode_is_online and not join_web_url:
-        html_body = json_data.get("body", {}).get("content", "")
-        m0 = re.search(r'<a href="(https://teams\.microsoft\.com[^"]+)"', html_body)
+        # Graph's own footer uses href="...", the body this file writes
+        # uses href='...' — accept either quote style.
+        m0 = re.search(
+            r"""<a href=["'](https://teams\.microsoft\.com[^"']+)["']""", html_body
+        )
         if m0:
             join_web_url = m0.group(1)
 
@@ -729,40 +746,315 @@ def _fetch_teams_meeting_info(organizer_email, event_id, headers, mode_is_online
     join_passcode = ""
 
     if mode_is_online and join_web_url:
-        filter_url = (
-            f"https://graph.microsoft.com/v1.0/users/{organizer_email}"
-            f"/onlineMeetings?$filter=JoinWebUrl eq '{join_web_url}'"
-        )
-        om_res = requests.get(filter_url, headers=headers)
-        if om_res.status_code == 200:
-            values = om_res.json().get("value", [])
-            if values:
-                join_meeting_id = values[0].get("joinMeetingId", "") or ""
-                join_passcode = values[0].get("passcode", "") or ""
-
-    if mode_is_online and (not join_meeting_id or not join_passcode):
+        # The onlineMeetings API only accepts the organizer's object id
+        # (GUID) — with an email it always fails ("userId ... is not a valid
+        # GUID"). It also needs a Teams application access policy granted to
+        # this app by an M365 admin; until then it returns 403 and the body
+        # footer above is what supplies the IDs.
         try:
-            html_body = json_data.get("body", {}).get("content", "")
-
-            m1 = re.search(r"Meeting ID:\s*</span><span[^>]*>([\d\s]+)<", html_body)
-            if m1:
-                join_meeting_id = m1.group(1).strip()
-            elif not join_meeting_id:
-                m1b = re.search(r"Meeting ID:\s*([\d\s]+)", html_body)
-                if m1b:
-                    join_meeting_id = m1b.group(1).strip()
-
-            m2 = re.search(r"Passcode:\s*</span><span[^>]*>([\w\d]+)<", html_body)
-            if m2:
-                join_passcode = m2.group(1).strip()
-            elif not join_passcode:
-                m2b = re.search(r"Passcode:\s*([\w\d]+)", html_body)
-                if m2b:
-                    join_passcode = m2b.group(1).strip()
+            user_res = requests.get(
+                f"https://graph.microsoft.com/v1.0/users/{organizer_email}",
+                headers=headers,
+                params={"$select": "id"},
+                timeout=30,
+            )
+            organizer_id = user_res.json().get("id") if user_res.ok else None
+            if organizer_id:
+                om_res = requests.get(
+                    f"https://graph.microsoft.com/v1.0/users/{organizer_id}/onlineMeetings",
+                    headers=headers,
+                    params={"$filter": f"JoinWebUrl eq '{join_web_url}'"},
+                    timeout=30,
+                )
+                values = om_res.json().get("value", []) if om_res.ok else []
+                if values:
+                    id_settings = values[0].get("joinMeetingIdSettings") or {}
+                    join_meeting_id = (
+                        id_settings.get("joinMeetingId") or values[0].get("joinMeetingId") or ""
+                    )
+                    join_passcode = id_settings.get("passcode") or values[0].get("passcode") or ""
         except Exception:
             pass
 
+    if mode_is_online and (not join_meeting_id or not join_passcode):
+        _id, _pc = _extract_teams_ids_from_html(html_body)
+        join_meeting_id = join_meeting_id or _id
+        join_passcode = join_passcode or _pc
+
     return join_web_url, join_meeting_id, join_passcode
+
+
+def _extract_teams_ids_from_html(html_body):
+    """
+    Teams Meeting ID + Passcode out of an event body. Works on both Graph's
+    own auto-appended Teams footer ("Meeting ID: </span><span>416 ...") and
+    the body this file writes back on the event ("<b>Meeting ID:</b> 416
+    ..."). The old regexes only matched the first form — but once
+    create_interview_event PATCHes its own body in, the first form is gone,
+    so every reschedule read back an empty Meeting ID / Passcode. Tags are
+    stripped first so the markup between label and value doesn't matter;
+    block tags become line breaks so an EMPTY value never picks up the next
+    line's text (e.g. "Passcode:" followed by "Interview Round:").
+    """
+    import html as _html
+
+    text = re.sub(r"(?i)<br\s*/?>|</(?:p|div|tr|li|td|th|table)\s*>", "\n", html_body or "")
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = _html.unescape(text).replace("\xa0", " ")
+    text = re.sub(r"[ \t]+", " ", text)
+    meeting_id = passcode = ""
+    m_id = re.search(r"Meeting ID:[ \t]*(\d[\d ]*\d)", text)
+    if m_id:
+        meeting_id = m_id.group(1).strip()
+    m_pc = re.search(r"Passcode:[ \t]*([A-Za-z0-9]+)", text)
+    if m_pc:
+        passcode = m_pc.group(1).strip()
+    return meeting_id, passcode
+
+
+def _resolve_field_feedback_url(
+    department,
+    interview_round,
+    applicant_role,
+    application_id,
+    applicant_name,
+    feedback_form_link=None,
+):
+    """
+    Feedback Form URL for a Field interview, picked by Department + Round.
+    Shared by create_interview_event and update_interview_event — the
+    resolved URL is never saved back onto the Field Interview Schedule
+    (feedback_form_link is usually blank), so a reschedule that only read
+    doc.feedback_form_link sent interviewers an updated invite with no
+    Feedback Form button at all.
+    """
+    from urllib.parse import quote as _fq
+
+    _round_norm = str(interview_round or "").strip().lower()
+    _round_norm = {
+        "recruiter round select": "recruiter round",
+        "recruiter round reject": "recruiter round",
+    }.get(_round_norm, _round_norm)
+
+    # --- Department-based lookup (primary) ---
+    _dept_raw = str(department or "").strip().lower()
+    _role_raw2 = str(applicant_role or "").strip().lower()
+
+    # Bucket is determined purely by the Department field — role text is no
+    # longer consulted here (it used to be a fallback, but that misclassified
+    # roles whose title happened to contain another bucket's keyword).
+    _is_arp = "associate resource person" in _dept_raw
+    _is_health = (not _is_arp) and ("health" in _dept_raw)
+    _is_livelihood = (not _is_arp) and any(
+        k in _dept_raw for k in ("livelihood", "livelihoods")
+    )
+    _is_education = (
+        not _is_arp and not _is_health and not _is_livelihood
+    ) and "education" in _dept_raw
+    _is_enabler = (
+        not _is_arp and not _is_health and not _is_livelihood and not _is_education
+    ) and "enabler" in _dept_raw
+    # Within Education, _EDUCATION_FEEDBACK_URLS is further keyed by which
+    # role the department string names (e.g. "School Teacher Education" vs
+    # "Resource Person Education") — read straight off department, not the
+    # separate Applicants_Role field.
+    if "school teacher" in _dept_raw:
+        _edu_role_key = "school teacher"
+    elif "resource person" in _dept_raw:
+        _edu_role_key = "resource person"
+    else:
+        _edu_role_key = ""
+
+    _app_q = _fq(str(application_id or ""), safe="")
+    _name_q = _fq(str(applicant_name or ""), safe="")
+
+    feedback_url = ""
+
+    if _is_arp:
+        if _round_norm in ("recruiter round",):
+            feedback_url = (
+                "https://careers.frappe.cloud/recruiter-assessment-form-feed-back-form/new"
+                f"?app_id={_app_q}&applicant_name={_name_q}"
+            )
+        elif _round_norm in (
+            "education capacity round",
+            "subject round",
+            "functional round",
+            "demo round",
+            "leader round-1",
+            "leader round-2",
+        ):
+            feedback_url = (
+                "https://careers.frappe.cloud/campus-associate-feedback-form/new"
+                f"?app_id={_app_q}&applicant_name={_name_q}"
+            )
+        elif "calibration" in _round_norm:
+            feedback_url = (
+                "https://careers.frappe.cloud/calibration-process/new"
+                f"?app_id={_app_q}&applicant_name={_name_q}"
+            )
+
+    elif _is_health:
+        _tmpl = _HEALTH_FEEDBACK_URLS.get(_round_norm, "")
+        if _tmpl:
+            feedback_url = _tmpl.format(app_id=_app_q, applicant_name=_name_q)
+
+    elif _is_livelihood:
+        _tmpl = _LIVELIHOOD_FEEDBACK_URLS.get(_round_norm, "")
+        if _tmpl:
+            feedback_url = _tmpl.format(app_id=_app_q, applicant_name=_name_q)
+
+    elif _is_education:
+        _tmpl = _EDUCATION_FEEDBACK_URLS.get((_edu_role_key, _round_norm), "")
+        if _tmpl:
+            feedback_url = _tmpl.format(app_id=_app_q, applicant_name=_name_q)
+
+    elif _is_enabler:
+        _tmpl = _ENABLER_FEEDBACK_URLS.get(_round_norm, "")
+        if _tmpl:
+            feedback_url = _tmpl.format(app_id=_app_q, applicant_name=_name_q)
+
+    # Fallback to value passed from JS / stored on form
+    if not feedback_url:
+        feedback_url = str(feedback_form_link or "").strip()
+
+    # Debug log
+    try:
+        _bucket = (
+            "arp"
+            if _is_arp
+            else (
+                "health"
+                if _is_health
+                else (
+                    "livelihood"
+                    if _is_livelihood
+                    else (
+                        "education"
+                        if _is_education
+                        else "enabler" if _is_enabler else "none"
+                    )
+                )
+            )
+        )
+        frappe.log_error(
+            title="Feedback URL Debug",
+            message=f"dept={repr(_dept_raw)} | role={repr(_role_raw2)} | round={repr(_round_norm)} | bucket={_bucket} | url={'SET' if feedback_url else 'EMPTY'}",
+        )
+    except Exception:
+        pass
+
+    # Priority 2: read from Field Interview Schedule record in DB
+    if not feedback_url and application_id:
+        try:
+            _fis = frappe.get_all(
+                "Field Interview Schedule",
+                filters={
+                    "application_id": application_id,
+                    "interview_round": interview_round,
+                },
+                fields=["feedback_form_link"],
+                order_by="modified desc",
+                limit=1,
+            )
+            if _fis and _fis[0].get("feedback_form_link"):
+                feedback_url = str(_fis[0]["feedback_form_link"]).strip()
+        except Exception:
+            pass
+
+    # For Priority 1 & 2 URLs (manually filled), append params if not already present
+    if (
+        feedback_url
+        and "app_id=" not in feedback_url
+        and "applicant_id=" not in feedback_url
+    ):
+        _sep = "&" if "?" in feedback_url else "?"
+        feedback_url = f"{feedback_url}{_sep}app_id={_app_q}&applicant_name={_name_q}"
+
+    # Ensure absolute URL so Outlook doesn't treat it as a relative path
+    if feedback_url and not feedback_url.startswith("http"):
+        feedback_url = "https://" + feedback_url
+
+    return feedback_url
+
+
+def _upsert_candidate_calendar_event(
+    headers,
+    sender_email,
+    existing_event_id,
+    subject,
+    body_html,
+    start_datetime,
+    end_datetime,
+    candidate_email,
+    location_text="",
+):
+    """
+    Gives the candidate a real Outlook/Gmail calendar invite (Accept /
+    Decline, time blocked on their calendar) instead of only a plain email.
+
+    The candidate can't simply be added to the main interviewer event —
+    Graph shows every attendee the same body, so they'd get the
+    interviewer-only content (feedback form link, interviewer list). So the
+    candidate gets their OWN event, organised by the candidate sender
+    mailbox, carrying the candidate email body.
+
+    existing_event_id set   -> PATCH it (Graph sends the candidate a
+                               "meeting updated" notice, same as interviewers).
+    existing_event_id empty -> create it with the candidate as attendee
+                               (Graph sends the invite).
+
+    Returns the event id on success, "" on any failure — callers then fall
+    back to the plain candidate email so the candidate still hears about it.
+    """
+    if not (sender_email and candidate_email):
+        return ""
+    if candidate_email.strip().lower() == sender_email.strip().lower():
+        # Graph rejects the organizer as their own attendee.
+        return ""
+
+    payload = {
+        "subject": subject,
+        "body": {"contentType": "HTML", "content": body_html},
+        "start": {"dateTime": start_datetime, "timeZone": "Asia/Kolkata"},
+        "end": {"dateTime": end_datetime, "timeZone": "Asia/Kolkata"},
+        "attendees": [
+            {"emailAddress": {"address": candidate_email}, "type": "required"}
+        ],
+        "showAs": "busy",
+        "isReminderOn": True,
+        "reminderMinutesBeforeStart": 30,
+        "allowNewTimeProposals": False,
+        "location": {"displayName": location_text or ""},
+    }
+    events_url = f"https://graph.microsoft.com/v1.0/users/{sender_email}/events"
+
+    try:
+        if existing_event_id:
+            res = requests.patch(
+                f"{events_url}/{existing_event_id}",
+                headers=headers,
+                json=payload,
+                timeout=60,
+            )
+            if res.status_code == 404:
+                # Event was removed from the mailbox by hand — create a fresh one.
+                existing_event_id = ""
+            else:
+                res.raise_for_status()
+                return existing_event_id
+
+        res = _requests_with_retry("POST", events_url, headers=headers, json=payload)
+        res.raise_for_status()
+        return res.json().get("id", "")
+    except Exception:
+        frappe.log_error(
+            title="FIELD_INTERVIEW_CANDIDATE_EVENT_ERROR",
+            message=f"{sender_email} -> {candidate_email}: {frappe.get_traceback()}"[
+                :4000
+            ],
+        )
+        return ""
 
 
 @frappe.whitelist()
@@ -990,133 +1282,14 @@ def create_interview_event(
         "yes",
     )
 
-    _round_norm = str(Interview_round or "").strip().lower()
-    _round_norm = {
-        "recruiter round select": "recruiter round",
-        "recruiter round reject": "recruiter round",
-    }.get(_round_norm, _round_norm)
-
-    # --- Department-based lookup (primary) ---
-    _dept_raw = str(department or "").strip().lower()
-    _role_raw2 = str(Applicants_Role or "").strip().lower()
-
-    from urllib.parse import quote as _fq
-
-    # Bucket is determined purely by the Department field — role text is no
-    # longer consulted here (it used to be a fallback, but that misclassified
-    # roles whose title happened to contain another bucket's keyword).
-    _is_arp = "associate resource person" in _dept_raw
-    _is_health = (not _is_arp) and ("health" in _dept_raw)
-    _is_livelihood = (not _is_arp) and any(
-        k in _dept_raw for k in ("livelihood", "livelihoods")
+    feedback_url = _resolve_field_feedback_url(
+        department,
+        Interview_round,
+        Applicants_Role,
+        application_id,
+        Applicants_name,
+        feedback_form_link,
     )
-    _is_education = (
-        not _is_arp and not _is_health and not _is_livelihood
-    ) and "education" in _dept_raw
-    _is_enabler = (
-        not _is_arp and not _is_health and not _is_livelihood and not _is_education
-    ) and "enabler" in _dept_raw
-    # Within Education, _EDUCATION_FEEDBACK_URLS is further keyed by which
-    # role the department string names (e.g. "School Teacher Education" vs
-    # "Resource Person Education") — read straight off department, not the
-    # separate Applicants_Role field.
-    if "school teacher" in _dept_raw:
-        _edu_role_key = "school teacher"
-    elif "resource person" in _dept_raw:
-        _edu_role_key = "resource person"
-    else:
-        _edu_role_key = ""
-
-    feedback_url = ""
-
-    if _is_arp:
-        if _round_norm in ("recruiter round",):
-            feedback_url = (
-                "https://careers.frappe.cloud/recruiter-assessment-form-feed-back-form/new"
-                f"?app_id={_fq(str(application_id or ''), safe='')}"
-                f"&applicant_name={_fq(str(Applicants_name or ''), safe='')}"
-            )
-        elif _round_norm in (
-            "education capacity round",
-            "subject round",
-            "functional round",
-            "demo round",
-            "leader round-1",
-            "leader round-2",
-        ):
-            feedback_url = (
-                "https://careers.frappe.cloud/campus-associate-feedback-form/new"
-                f"?app_id={_fq(str(application_id or ''), safe='')}"
-                f"&applicant_name={_fq(str(Applicants_name or ''), safe='')}"
-            )
-        elif "calibration" in _round_norm:
-            feedback_url = (
-                "https://careers.frappe.cloud/calibration-process/new"
-                f"?app_id={_fq(str(application_id or ''), safe='')}"
-                f"&applicant_name={_fq(str(Applicants_name or ''), safe='')}"
-            )
-
-    elif _is_health:
-        _tmpl = _HEALTH_FEEDBACK_URLS.get(_round_norm, "")
-        if _tmpl:
-            feedback_url = _tmpl.format(
-                app_id=_fq(str(application_id or ""), safe=""),
-                applicant_name=_fq(str(Applicants_name or ""), safe=""),
-            )
-
-    elif _is_livelihood:
-        _tmpl = _LIVELIHOOD_FEEDBACK_URLS.get(_round_norm, "")
-        if _tmpl:
-            feedback_url = _tmpl.format(
-                app_id=_fq(str(application_id or ""), safe=""),
-                applicant_name=_fq(str(Applicants_name or ""), safe=""),
-            )
-
-    elif _is_education:
-        _tmpl = _EDUCATION_FEEDBACK_URLS.get((_edu_role_key, _round_norm), "")
-        if _tmpl:
-            feedback_url = _tmpl.format(
-                app_id=_fq(str(application_id or ""), safe=""),
-                applicant_name=_fq(str(Applicants_name or ""), safe=""),
-            )
-
-    elif _is_enabler:
-        _tmpl = _ENABLER_FEEDBACK_URLS.get(_round_norm, "")
-        if _tmpl:
-            feedback_url = _tmpl.format(
-                app_id=_fq(str(application_id or ""), safe=""),
-                applicant_name=_fq(str(Applicants_name or ""), safe=""),
-            )
-
-    # Fallback to value passed from JS / stored on form
-    if not feedback_url:
-        feedback_url = str(feedback_form_link or "").strip()
-
-    # Debug log
-    try:
-        _bucket = (
-            "arp"
-            if _is_arp
-            else (
-                "health"
-                if _is_health
-                else (
-                    "livelihood"
-                    if _is_livelihood
-                    else (
-                        "education"
-                        if _is_education
-                        else "enabler" if _is_enabler else "none"
-                    )
-                )
-            )
-        )
-        frappe.log_error(
-            title="Feedback URL Debug",
-            message=f"dept={repr(_dept_raw)} | role={repr(_role_raw2)} | round={repr(_round_norm)} | bucket={_bucket} | url={'SET' if feedback_url else 'EMPTY'}",
-        )
-    except Exception:
-        pass
 
     # If JS failed to extract demo_feedback_interviewers_email (Table MultiSelect mapping issue),
     # fetch it directly from the saved Field Interview Schedule document in the database.
@@ -1141,43 +1314,6 @@ def create_interview_event(
                 )
             except Exception:
                 pass
-
-    # Priority 2: read from Field Interview Schedule record in DB
-    if not feedback_url and application_id:
-        try:
-            _fis = frappe.get_all(
-                "Field Interview Schedule",
-                filters={
-                    "application_id": application_id,
-                    "interview_round": Interview_round,
-                },
-                fields=["feedback_form_link"],
-                order_by="modified desc",
-                limit=1,
-            )
-            if _fis and _fis[0].get("feedback_form_link"):
-                feedback_url = str(_fis[0]["feedback_form_link"]).strip()
-        except Exception:
-            pass
-
-    # For Priority 1 & 2 URLs (manually filled), append params if not already present
-    if (
-        feedback_url
-        and "app_id=" not in feedback_url
-        and "applicant_id=" not in feedback_url
-    ):
-        from urllib.parse import quote as _quote
-
-        _sep = "&" if "?" in feedback_url else "?"
-        feedback_url = (
-            f"{feedback_url}{_sep}"
-            f"app_id={_quote(str(application_id or ''), safe='')}"
-            f"&applicant_name={_quote(str(Applicants_name or ''), safe='')}"
-        )
-
-    # Ensure absolute URL so Outlook doesn't treat it as a relative path
-    if feedback_url and not feedback_url.startswith("http"):
-        feedback_url = "https://" + feedback_url
 
     # Build demo feedback URL separately when checkbox is checked
     demo_feedback_url = ""
@@ -1382,9 +1518,10 @@ def create_interview_event(
     # NOTE: the candidate is deliberately NOT added as a calendar attendee.
     # Attendees get Microsoft's own auto-generated invite email, which uses
     # the interviewer-oriented body (feedback form link, meeting passcode,
-    # "Interviewers: ..."). The candidate instead gets the separate,
-    # mode-specific candidate email (phone / online / face-to-face) sent
-    # further down in this function.
+    # "Interviewers: ..."). The candidate instead gets their OWN separate
+    # calendar invite carrying the mode-specific candidate body (phone /
+    # online / face-to-face) further down — see
+    # _upsert_candidate_calendar_event.
     # ----------------------------------------
     # ATTACHMENTS (PUBLIC + PRIVATE FIXED)
     # --------------------------------------
@@ -2335,7 +2472,36 @@ comments/recommendations for the calibration process and final selection decisio
         elif _is_same_person:
             pass  # candidate is the interviewer/organizer — they already got the interviewer email
         else:
-            _graph_cand_sent = False
+            # Attempt 0: a real calendar invite (Accept / Decline, blocks the
+            # candidate's calendar) carrying the full candidate email body.
+            # Only if that fails do the plain-email attempts below run.
+            _candidate_event_id = _upsert_candidate_calendar_event(
+                headers,
+                _candidate_sender_email,
+                "",
+                candidate_email_subject,
+                candidate_email_body,
+                start_datetime,
+                end_datetime,
+                interviewee_email,
+                address if _mode_lower in ("face-to-face", "hybrid") else "",
+            )
+            _graph_cand_sent = bool(_candidate_event_id)
+            if _candidate_event_id and doc_name:
+                try:
+                    frappe.db.set_value(
+                        "Field Interview Schedule",
+                        doc_name,
+                        "candidate_ms_event_id",
+                        _candidate_event_id,
+                        update_modified=False,
+                    )
+                except Exception:
+                    frappe.log_error(
+                        title="FIELD_INTERVIEW_CANDIDATE_EVENT_ID_SAVE_ERROR",
+                        message=frappe.get_traceback(),
+                    )
+
             _cand_msg = {
                 "subject": candidate_email_subject,
                 "body": {"contentType": "HTML", "content": candidate_email_body},
@@ -2344,24 +2510,25 @@ comments/recommendations for the calibration process and final selection decisio
 
             # Attempt 1: send directly from the candidate sender mailbox via Graph.
             _gc1_err = ""
-            try:
-                _gc1 = requests.post(
-                    f"https://graph.microsoft.com/v1.0/users/{_candidate_sender_email}/sendMail",
-                    headers=headers,
-                    json={"message": _cand_msg, "saveToSentItems": True},
-                    timeout=30,
-                )
-                _gc1_err = _gc1.text
-                _gc1.raise_for_status()
-                _graph_cand_sent = True
-            except Exception as _gc1_exc:
+            if not _graph_cand_sent:
                 try:
-                    frappe.log_error(
-                        title="Candidate Email Graph Attempt 1",
-                        message=(_gc1_err or str(_gc1_exc))[:2000],
+                    _gc1 = requests.post(
+                        f"https://graph.microsoft.com/v1.0/users/{_candidate_sender_email}/sendMail",
+                        headers=headers,
+                        json={"message": _cand_msg, "saveToSentItems": True},
+                        timeout=30,
                     )
-                except Exception:
-                    pass
+                    _gc1_err = _gc1.text
+                    _gc1.raise_for_status()
+                    _graph_cand_sent = True
+                except Exception as _gc1_exc:
+                    try:
+                        frappe.log_error(
+                            title="Candidate Email Graph Attempt 1",
+                            message=(_gc1_err or str(_gc1_exc))[:2000],
+                        )
+                    except Exception:
+                        pass
 
             # Attempt 2: frappe.sendmail via Frappe's own outgoing Email Account.
             # IMPORTANT: only claim the candidate sender mailbox as the From
@@ -2782,6 +2949,11 @@ def update_interview_event(
     "meeting updated" notification — delete+recreate instead sends a
     cancellation email followed by a brand new invite, which is confusing
     and was the actual complaint this function fixes.
+
+    The rebuilt body carries the same full detail as the original invite
+    (Teams link / Meeting ID / Passcode, Interviewers, location, message,
+    Feedback Form button), and the candidate's own calendar invite (see
+    _upsert_candidate_calendar_event) is moved to the new time too.
     """
     import requests
     from datetime import datetime
@@ -2806,6 +2978,7 @@ def update_interview_event(
     Organizer_email = (Organizer_email or "").strip()
     Applicants_name = (Applicants_name or "").strip()
     Applicants_Role = (Applicants_Role or "").strip()
+    interviewee_email = (interviewee_email or "").strip()
 
     start_dt = datetime.fromisoformat(start_datetime)
     end_dt = datetime.fromisoformat(end_datetime)
@@ -2813,6 +2986,16 @@ def update_interview_event(
     interview_time_str = (
         start_dt.strftime("%I:%M %p") + " – " + end_dt.strftime("%I:%M %p")
     )
+    round_label = (doc.interview_round or "").strip()
+
+    candidate_phone = (doc.phone_no or "").strip()
+    if not candidate_phone and doc.application_id:
+        candidate_phone = (
+            frappe.db.get_value(
+                "Field Registration Form", doc.application_id, "phone_number"
+            )
+            or ""
+        )
 
     creds = frappe.get_single("MS Graph Credentials")
     tok = requests.post(
@@ -2832,11 +3015,17 @@ def update_interview_event(
         "Content-Type": "application/json",
     }
 
-    interviewer_list = [
-        i.strip() for i in (interviewer_emails or "").split(",") if i.strip()
-    ]
-    cc_list = [c.strip() for c in (cc_emails or "").split(",") if c.strip()]
-    room_list = [r.strip() for r in (room_emails or "").split(",") if r.strip()]
+    interviewer_list = list(
+        dict.fromkeys(
+            i.strip() for i in (interviewer_emails or "").split(",") if i.strip()
+        )
+    )
+    cc_list = list(
+        dict.fromkeys(c.strip() for c in (cc_emails or "").split(",") if c.strip())
+    )
+    room_list = list(
+        dict.fromkeys(r.strip() for r in (room_emails or "").split(",") if r.strip())
+    )
     hybrid_interviewer_list = [
         row.interviewer_email
         for row in (doc.hybrid_interviewers_email or [])
@@ -2844,19 +3033,40 @@ def update_interview_event(
     ]
     # Hybrid interviewers are on their OWN separate event (doc.hybrid_ms_event_id),
     # not this one — see the PATCH further below.
+    # Organizer is skipped as an attendee, same as create_interview_event —
+    # Graph rejects the organizer being added to their own event.
+    _org_email_lower = Organizer_email.lower()
     attendees = (
-        [{"emailAddress": {"address": i}, "type": "required"} for i in interviewer_list]
-        + [{"emailAddress": {"address": c}, "type": "optional"} for c in cc_list]
+        [
+            {"emailAddress": {"address": i}, "type": "required"}
+            for i in interviewer_list
+            if i.lower() != _org_email_lower
+        ]
+        + [
+            {"emailAddress": {"address": c}, "type": "optional"}
+            for c in cc_list
+            if c.lower() != _org_email_lower
+        ]
         + [{"emailAddress": {"address": r}, "type": "resource"} for r in room_list]
     )
 
-    # Both the Graph event body (what interviewers/CC/rooms see natively)
-    # and the candidate email below need the same mode/meeting-info detail
-    # (Teams link, location, candidate phone) — computed once here, before
-    # the PATCH, so it can be embedded directly in that PATCH's own "body".
-    display_mode = (doc.interview_mode or "Face-to-Face").strip()
+    # Mode — same rules as create_interview_event. interview_type (passed in
+    # as is_online) is a hidden checkbox that stays 0 even for Online
+    # interviews, so checking only is_online == 1 here PATCHed
+    # isOnlineMeeting=False on every Online reschedule: Outlook dropped the
+    # Teams meeting ("Microsoft Teams Meeting" location struck out) and the
+    # updated invite went out with no Join link / Meeting ID / Passcode.
+    display_mode = (doc.interview_mode or "").strip() or (
+        "Online" if is_online == 1 else "Face-to-Face"
+    )
     _mode_lower = display_mode.lower()
-    mode_is_online = is_online == 1
+    mode_is_online = (is_online == 1) or (_mode_lower in ("online", "hybrid"))
+    if _mode_lower == "online":
+        display_mode_label = "Video Conference"
+    elif _mode_lower == "hybrid":
+        display_mode_label = "Face-to-Face"
+    else:
+        display_mode_label = display_mode
 
     # Same Teams meeting persists across a reschedule (PATCH doesn't create
     # a new one) - fetch its Join link/Meeting ID/Passcode so the rebuilt
@@ -2868,21 +3078,30 @@ def update_interview_event(
             Organizer_email, doc.ms_event_id, headers, mode_is_online
         )
 
-    if _mode_lower == "online" and join_web_url:
-        mode_info_html = (
+    def _meeting_html(url, meeting_id, passcode):
+        if not (mode_is_online and url):
+            return ""
+        return (
             f"<p><b>Join Teams Meeting:</b> "
-            f"<a href='{join_web_url}' target='_blank'>Join Now</a><br>"
-            f"<b>Meeting ID:</b> {join_meeting_id}<br>"
-            f"<b>Passcode:</b> {join_passcode}</p>"
+            f"<a href='{url}' target='_blank'>Join Now</a><br>"
+            f"<p><b>Meeting ID:</b> {meeting_id}<br>"
+            f"<b>Passcode:</b> {passcode}</p>"
         )
-    elif _mode_lower == "phone":
-        mode_info_html = (
-            f"<p><b>Candidate Phone No.:</b> {doc.phone_no}</p>" if doc.phone_no else ""
-        )
-    elif _mode_lower in ("face-to-face", "hybrid") and (doc.location or doc.google_map):
+
+    meeting_html = _meeting_html(join_web_url, join_meeting_id, join_passcode)
+
+    phone_info_html = (
+        f"<b>Candidate Phone No.:</b> {candidate_phone}<br>"
+        if _mode_lower == "phone" and candidate_phone
+        else ""
+    )
+
+    address = (doc.location or "").strip()
+    map_location = (doc.google_map or "").strip()
+    if _mode_lower in ("face-to-face", "hybrid") and (address or map_location):
         from urllib.parse import quote as _qmap
 
-        _search_text = (doc.google_map or doc.location or "").strip()
+        _search_text = map_location or address
         if _search_text.startswith("http"):
             _final_map_url = _search_text
         else:
@@ -2894,43 +3113,76 @@ def update_interview_event(
             if _final_map_url
             else ""
         )
-        mode_info_html = f"<p><b>Location:</b> {doc.location or ''}{_map_link}</p>"
+        # Candidate: address + clickable map link. Interviewer: address only.
+        map_html = f"<p><b>Location:</b> {address}{_map_link}</p>"
+        interviewer_location_html = (
+            f"<p><b>Location:</b> {address}</p>" if address else ""
+        )
     else:
-        mode_info_html = ""
+        map_html = ""
+        interviewer_location_html = ""
 
-    # Feedback Form Link button, reused from the URL create_interview_event
-    # already resolved by department/round and saved on the doc — same
-    # button style as the original creation-time email.
-    _feedback_url = (doc.feedback_form_link or "").strip()
+    note_to_interviewer_html = (
+        f"<p><strong>For your information:</strong> {doc.message_for_the_interviewer}</p>"
+        if doc.message_for_the_interviewer
+        else ""
+    )
+    note_to_candidate_html = (
+        f"<p><strong>For your information:</strong> {doc.message_for_canditate}</p>"
+        if doc.message_for_canditate
+        else ""
+    )
+
+    feedback_url = _resolve_field_feedback_url(
+        doc.department,
+        doc.interview_round,
+        Applicants_Role,
+        doc.application_id,
+        Applicants_name,
+        doc.feedback_form_link,
+    )
     feedback_html_block = (
         f"<p><b>Feedback Form Link:</b><br>"
-        f'<a href="{_feedback_url}" target="_blank" '
+        f'<a href="{feedback_url}" target="_blank" '
         f'style="display:inline-block;margin-top:6px;padding:8px 18px;'
         f"background-color:#1d4ed8;color:#ffffff;text-decoration:none;"
         f'border-radius:4px;font-weight:600;font-size:13px;">'
         f"Click Here to Open Feedback Form</a></p>"
-        if _feedback_url
+        if feedback_url
         else ""
     )
 
-    interviewer_body = f"""
-    <p>Hi,</p>
+    cc_line = f"<b>Cc:</b> {', '.join(cc_list)}<br>" if cc_list else ""
+    interviewers_name = ", ".join(interviewer_list)
 
-    <p>An interview with <b>{Applicants_name}</b> for the role of <b>{Applicants_Role}</b> has been confirmed.
-    Please find the details of the interview below.</p>
+    def _build_interviewer_body(meeting_info):
+        # Same layout as create_interview_event's interviewer templates.
+        return f"""
+<p>Hi,</p>
 
-    <p>
-    <b>Date:</b> {interview_date_str}<br>
-    <b>Interview Mode:</b> {display_mode}<br>
-    {mode_info_html}
-    <b>Interview Round:</b> {doc.interview_round or ""}<br>
-    <b>Interview Time:</b> {interview_time_str}<br>
-    </p>
+<p>The interview with <b>{Applicants_name}</b> for the role of <b>{Applicants_Role}</b> has been
+<b>rescheduled</b>. Please find the updated details of the interview below.</p>
 
-    {feedback_html_block}
+<p>
+<b>Date:</b> {interview_date_str}<br>
+<b>Interview Mode:</b> {display_mode_label}<br>
+{meeting_info}
+{phone_info_html}
+<b>Interview Round:</b> {round_label}<br>
+<b>Interview Time:</b> {interview_time_str}<br>
+<b>Interviewers:</b> {interviewers_name}<br>
+{cc_line}
+</p>
 
-    <p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
-    """
+{interviewer_location_html}
+{note_to_interviewer_html}
+
+{feedback_html_block}
+
+<p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
+"""
+
+    interviewer_body = _build_interviewer_body(meeting_html)
 
     # Interviewers/CC/rooms are Graph attendees on this event, so the
     # calendar invite's own stored body IS what they see (Outlook's "sent a
@@ -2945,27 +3197,62 @@ def update_interview_event(
         f"https://graph.microsoft.com/v1.0/users/{Organizer_email}"
         f"/events/{doc.ms_event_id}?sendUpdates=sendToAllAndSaveCopy"
     )
-    res = requests.patch(
-        event_url,
-        headers=headers,
-        json={
-            "start": {"dateTime": start_datetime, "timeZone": "Asia/Kolkata"},
-            "end": {"dateTime": end_datetime, "timeZone": "Asia/Kolkata"},
-            "attendees": attendees,
-            "isOnlineMeeting": True if is_online == 1 else False,
-            "showAs": "busy",
-            "body": {"contentType": "HTML", "content": interviewer_body},
-        },
-        timeout=30,
-    )
+    # Same layout as create_interview_event's calendar_subject, with
+    # "Rescheduled" so the update isn't mistaken for the original invite.
+    interviewer_subject = (
+        f"Interview Rescheduled – {Applicants_name} | {round_label} for "
+        f"{Applicants_Role} {candidate_phone}"
+    ).strip()
+    patch_payload = {
+        "subject": interviewer_subject,
+        "start": {"dateTime": start_datetime, "timeZone": "Asia/Kolkata"},
+        "end": {"dateTime": end_datetime, "timeZone": "Asia/Kolkata"},
+        "attendees": attendees,
+        "isOnlineMeeting": mode_is_online,
+        "showAs": "busy",
+        "body": {"contentType": "HTML", "content": interviewer_body},
+    }
+    if mode_is_online:
+        patch_payload["onlineMeetingProvider"] = "teamsForBusiness"
+    res = requests.patch(event_url, headers=headers, json=patch_payload, timeout=30)
     res.raise_for_status()
 
-    # Candidate is invited by email only (never a Graph attendee), so they
-    # don't get Outlook's automatic "meeting updated" notice — email them
-    # directly instead. Interviewers/CC/rooms already got the update above,
-    # via the calendar invite's own rebuilt body.
-    if interviewee_email:
+    # Events already broken by the old isOnlineMeeting=False reschedule have
+    # no Teams meeting left to read before the PATCH — the PATCH above turns
+    # it back on, so read the new Join details now and put them in the body.
+    if mode_is_online and not join_web_url:
+        try:
+            join_web_url, join_meeting_id, join_passcode = _fetch_teams_meeting_info(
+                Organizer_email, doc.ms_event_id, headers, mode_is_online
+            )
+            if join_web_url:
+                meeting_html = _meeting_html(
+                    join_web_url, join_meeting_id, join_passcode
+                )
+                interviewer_body = _build_interviewer_body(meeting_html)
+                requests.patch(
+                    event_url,
+                    headers=headers,
+                    json={"body": {"contentType": "HTML", "content": interviewer_body}},
+                    timeout=30,
+                ).raise_for_status()
+        except Exception:
+            frappe.log_error(
+                title="FIELD_INTERVIEW_RESCHEDULE_TEAMS_RELINK_ERROR",
+                message=frappe.get_traceback(),
+            )
+
+    # Candidate isn't an attendee on the interviewer event (they'd see the
+    # interviewer-only body) — they have their own calendar invite instead,
+    # moved to the new time here so their calendar stays blocked correctly.
+    # Interviews scheduled before that invite existed get one created now.
+    # Plain email is only the fallback if Graph fails.
+    _same_person = interviewee_email.lower() in (
+        {i.lower() for i in interviewer_list} | {_org_email_lower}
+    )
+    if interviewee_email and not _same_person:
         if _mode_lower == "online":
+            candidate_mode_html = meeting_html
             candidate_advice_html = (
                 "<p>For attending the interview through video conference on M S Teams, "
                 "please ensure you are in a suitable environment (quiet, well-lit, and with "
@@ -2973,14 +3260,43 @@ def update_interview_event(
                 "microphone in advance.</p>"
             )
         elif _mode_lower == "phone":
+            candidate_mode_html = (
+                f"<p><b>Candidate Phone No.:</b> {candidate_phone}</p>"
+                if candidate_phone
+                else ""
+            )
             candidate_advice_html = (
                 "<p>For attending the interview through phone, please ensure you are in a "
                 "suitable environment (quiet, and with minimal disturbance). "
                 "Be available for phone call</p>"
             )
         else:
+            candidate_mode_html = map_html
+            travel_reimbursement_html = (
+                "<p><b>Travel Reimbursement Policy for Outstation Candidates:</b></p>"
+                "<ol>"
+                "<li>Up to 300 Km - Sleeper Class Train or Non – AC bus</li>"
+                "<li>Above 300 Km – 3rd AC Train or AC Bus</li>"
+                "<li>For local conveyance, public transport, or shared auto to be preferred.</li>"
+                "<li>Stay: Candidates who need to travel by road or train for more than 10 hours "
+                "are eligible for reimbursement of hotel/guest house accommodation. Reimbursement "
+                "will be made on actual expenses (with supporting documents), up to a maximum of "
+                "Rs. 2,500 per day/night.</li>"
+                "<li>Food expenses up to a maximum amount of Rs. 500 per day.</li>"
+                "<li>All return tickets or any other supporting documents should be sent via "
+                "e-mail within 3 days of the interview for a smooth reimbursement process.</li>"
+                "<li>All reimbursements will be made through bank transfer. Candidates are "
+                "required to bring a photocopy of their bank passbook or a cancelled cheque "
+                "bearing the beneficiary's name, account number, bank name, and IFSC code.</li>"
+                "</ol>"
+                "<p><em>(Please note that all travel reimbursement will be made as per "
+                "organization's policy. Bills are compulsory for claim settlements)</em></p>"
+                if doc.travel_reimbursement
+                else ""
+            )
             candidate_advice_html = (
                 "<p>Kindly reach the venue <b>15 minutes prior</b> to the assigned time.</p>"
+                + travel_reimbursement_html
             )
 
         candidate_body = f"""
@@ -2993,7 +3309,7 @@ def update_interview_event(
         <table style="border-collapse:collapse; width:auto;">
           <tr>
             <td style="padding:4px 12px 4px 0;"><b>Interview Round:</b></td>
-            <td style="padding:4px 0;">{doc.interview_round or ""}</td>
+            <td style="padding:4px 0;">{round_label}</td>
           </tr>
           <tr>
             <td style="padding:4px 12px 4px 0;"><b>New Date:</b></td>
@@ -3005,46 +3321,82 @@ def update_interview_event(
           </tr>
           <tr>
             <td style="padding:4px 12px 4px 0;"><b>Interview Mode:</b></td>
-            <td style="padding:4px 0;">{display_mode}</td>
+            <td style="padding:4px 0;">{display_mode_label}</td>
           </tr>
         </table>
 
-        {mode_info_html}
+        {candidate_mode_html}
 
         {candidate_advice_html}
+
+        {note_to_candidate_html}
 
         <p>We wish you all the best for your interview.</p>
 
         <p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
         """
-        sender_arg = {}
-        if doc.candidate_email_sendar and frappe.db.exists(
-            "Email Account",
-            {"email_id": doc.candidate_email_sendar, "enable_outgoing": 1},
-        ):
-            sender_arg = {"sender": doc.candidate_email_sendar}
-        _reschedule_subject = f"Interview Rescheduled - {doc.interview_round} for {Applicants_Role} {doc.phone_no}"
-        try:
-            frappe.sendmail(
-                recipients=[interviewee_email],
-                subject=_reschedule_subject,
-                message=candidate_body,
-                delayed=False,
-                **sender_arg,
-            )
+
+        _candidate_sender_email = (
+            doc.candidate_email_sendar or _CANDIDATE_SENDER_EMAIL
+        ).strip()
+        _reschedule_subject = (
+            f"Interview Rescheduled – {Applicants_name} | {round_label} for {Applicants_Role}"
+        )
+        _candidate_event_id = _upsert_candidate_calendar_event(
+            headers,
+            _candidate_sender_email,
+            doc.get("candidate_ms_event_id") or "",
+            _reschedule_subject,
+            candidate_body,
+            start_datetime,
+            end_datetime,
+            interviewee_email,
+            address if _mode_lower in ("face-to-face", "hybrid") else "",
+        )
+        if _candidate_event_id:
+            if _candidate_event_id != (doc.get("candidate_ms_event_id") or ""):
+                try:
+                    doc.db_set(
+                        "candidate_ms_event_id",
+                        _candidate_event_id,
+                        update_modified=False,
+                    )
+                except Exception:
+                    frappe.log_error(
+                        title="FIELD_INTERVIEW_CANDIDATE_EVENT_ID_SAVE_ERROR",
+                        message=frappe.get_traceback(),
+                    )
             _log_field_interview_communication(
                 doc_name, _reschedule_subject, candidate_body, interviewee_email
             )
-        except Exception:
-            frappe.log_error(
-                title="FIELD_INTERVIEW_RESCHEDULE_MAIL_ERROR",
-                message=frappe.get_traceback(),
-            )
+        else:
+            sender_arg = {}
+            if doc.candidate_email_sendar and frappe.db.exists(
+                "Email Account",
+                {"email_id": doc.candidate_email_sendar, "enable_outgoing": 1},
+            ):
+                sender_arg = {"sender": doc.candidate_email_sendar}
+            try:
+                frappe.sendmail(
+                    recipients=[interviewee_email],
+                    subject=_reschedule_subject,
+                    message=candidate_body,
+                    delayed=False,
+                    **sender_arg,
+                )
+                _log_field_interview_communication(
+                    doc_name, _reschedule_subject, candidate_body, interviewee_email
+                )
+            except Exception:
+                frappe.log_error(
+                    title="FIELD_INTERVIEW_RESCHEDULE_MAIL_ERROR",
+                    message=frappe.get_traceback(),
+                )
 
     if interviewer_list or cc_list:
         _log_field_interview_communication(
             doc_name,
-            f"Interview Rescheduled - {doc.interview_round} for {Applicants_name} ({Applicants_Role})",
+            interviewer_subject,
             interviewer_body,
             interviewer_list or cc_list,
             cc=", ".join(cc_list) if interviewer_list else "",
@@ -3082,8 +3434,8 @@ def update_interview_event(
             )
 
     frappe.msgprint(
-        "✅ Interview rescheduled — candidate emailed and interviewer(s) "
-        "notified via the updated calendar invite."
+        "✅ Interview rescheduled — candidate and interviewer(s) notified via "
+        "the updated calendar invite."
     )
 
     return {"event_id": doc.ms_event_id, "rescheduled": True}
@@ -3177,27 +3529,89 @@ def _remove_event_from_attendee_calendars(headers, ical_uid, attendee_emails):
             )
 
 
+def _display_interview_time(value):
+    """ "10:30:00 AM" / "10:45:00:Am" / "14:30" -> "10:30 AM". Falls back
+    to the raw text — frappe.utils.format_time raises on the free-text
+    variants older records still hold, which used to crash the cancel."""
+    from dateutil import parser as _dtparser
+
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    cleaned = re.sub(r"[\s:.\-]*([ap])\.?\s*m\.?$", r" \1M", raw, flags=re.I).upper()
+    try:
+        return _dtparser.parse(cleaned).strftime("%I:%M %p")
+    except Exception:
+        return raw
+
+
 @frappe.whitelist()
-def cancel_interview_event(name):
+def cancel_interview_event(name, reason=None):
     """
-    Cancels an already-scheduled Field Interview Schedule: deletes the
-    Outlook event via Graph with sendUpdates=all (same mechanism already
-    used for the reschedule path above, which also notifies attendees),
-    then actively deletes it off each interviewer/CC/room's own calendar
-    too — deleting the organizer's own copy notifies attendees, but leaves
-    a "Canceled: ..." placeholder sitting in each of their calendars until
-    they manually click "Remove event" (see
-    _remove_event_from_attendee_calendars for the full explanation) —
-    emails the candidate directly (they are invited by email only, not as
-    a Graph attendee), and clears ms_event_id so the same record can be
-    freely rescheduled later.
+    Cancels an already-scheduled Field Interview Schedule. The recruiter
+    must give a reason (asked for by the Cancel dialog in
+    field_interview_schedule.js); it goes into the cancellation email itself
+    and is saved on the record (cancellation_reason).
+
+    Every Outlook event on the record is cancelled with Graph's /cancel
+    action rather than a bare DELETE — /cancel sends attendees the
+    cancellation WITH a message (the reason), then removes the event; a
+    DELETE can only send a blank "Canceled:" notice. DELETE is kept as the
+    fallback if /cancel is refused.
+      - main event      -> interviewers / CC / rooms
+      - hybrid event    -> hybrid interviewers
+      - candidate event -> the candidate (see _upsert_candidate_calendar_event)
+    Interviewers' own leftover "Canceled: ..." calendar entries are then
+    removed too (see _remove_event_from_attendee_calendars). The candidate
+    gets a plain cancellation email only if they had no calendar invite or
+    cancelling it failed. Finally the event ids are cleared so the record
+    can be scheduled fresh later.
     """
     import requests
+
+    reason = (reason or "").strip()
+    if not reason:
+        frappe.throw("Please enter the reason for cancelling this interview.")
 
     doc = frappe.get_doc("Field Interview Schedule", name)
 
     if doc.is_cancelled:
         frappe.throw("This interview is already cancelled.")
+
+    interview_date = (
+        frappe.utils.formatdate(doc.interview_date, "dd MMMM yyyy")
+        if doc.interview_date
+        else ""
+    )
+    start_time = _display_interview_time(doc.start_time)
+    end_time = _display_interview_time(doc.end_time)
+    applicant_name = (doc.applicants_name or "").strip()
+    role = (doc.role or "").strip()
+    round_label = (doc.interview_round or "").strip()
+
+    # Graph's /cancel "comment" is plain text, shown at the top of the
+    # cancellation email each attendee receives.
+    interviewer_comment = (
+        f"The interview with {applicant_name} for the role of {role} "
+        f"({round_label}) scheduled on {interview_date} "
+        f"({start_time} – {end_time}) has been cancelled.\n\n"
+        f"Reason for cancellation: {reason}"
+    )
+    candidate_comment = (
+        f"Dear {applicant_name or 'Candidate'},\n\n"
+        f"Your interview for the position of {role} at Azim Premji Foundation "
+        f"scheduled on {interview_date} ({start_time} – {end_time}) has been "
+        f"cancelled.\n\n"
+        f"Reason for cancellation: {reason}\n\n"
+        f"We will reach out separately if the interview needs to be rescheduled.\n\n"
+        f"Warm regards,\nRecruitment Team\nAzim Premji Foundation"
+    )
+
+    # Set once the candidate's own calendar invite is cancelled — Graph then
+    # sends them a native cancellation (with the reason) that also frees
+    # their calendar, so the plain cancellation email below would just be a
+    # duplicate.
+    candidate_event_cancelled = False
 
     if doc.ms_event_id and doc.organizer_email:
         try:
@@ -3216,7 +3630,34 @@ def cancel_interview_event(name):
             access_token = tok.json().get("access_token")
             headers = {"Authorization": f"Bearer {access_token}"}
 
-            # Needed BEFORE deleting each event to find every attendee's own
+            def _cancel_event(mailbox, event_id, comment, label):
+                """POST /cancel (attendees get the reason), DELETE as fallback.
+                Returns True if the event is gone either way."""
+                event_url = (
+                    f"https://graph.microsoft.com/v1.0/users/{mailbox}/events/{event_id}"
+                )
+                res = requests.post(
+                    f"{event_url}/cancel",
+                    headers=headers,
+                    json={"comment": comment},
+                    timeout=30,
+                )
+                if res.status_code in (200, 202, 204):
+                    return True
+                frappe.log_error(
+                    title="FIELD_INTERVIEW_CANCEL_WITH_REASON_FAILED",
+                    message=(
+                        f"{label} event {event_id} in {mailbox}: /cancel returned "
+                        f"{res.status_code} {res.text[:500]} — falling back to DELETE "
+                        f"(cancellation notice will not include the reason)."
+                    ),
+                )
+                del_res = requests.delete(
+                    f"{event_url}?sendUpdates=all", headers=headers, timeout=30
+                )
+                return del_res.status_code in (200, 202, 204)
+
+            # Needed BEFORE cancelling each event to find every attendee's own
             # copy of it afterwards — see _remove_event_from_attendee_calendars.
             main_ical_uid = None
             try:
@@ -3253,18 +3694,25 @@ def cancel_interview_event(name):
                         message=frappe.get_traceback(),
                     )
 
-            requests.delete(
-                f"https://graph.microsoft.com/v1.0/users/{doc.organizer_email}"
-                f"/events/{doc.ms_event_id}?sendUpdates=all",
-                headers=headers,
-                timeout=30,
+            _cancel_event(
+                doc.organizer_email, doc.ms_event_id, interviewer_comment, "Main"
             )
             if doc.hybrid_ms_event_id:
-                requests.delete(
-                    f"https://graph.microsoft.com/v1.0/users/{doc.organizer_email}"
-                    f"/events/{doc.hybrid_ms_event_id}?sendUpdates=all",
-                    headers=headers,
-                    timeout=30,
+                _cancel_event(
+                    doc.organizer_email,
+                    doc.hybrid_ms_event_id,
+                    interviewer_comment,
+                    "Hybrid",
+                )
+            if doc.get("candidate_ms_event_id"):
+                _candidate_sender_email = (
+                    doc.candidate_email_sendar or _CANDIDATE_SENDER_EMAIL
+                ).strip()
+                candidate_event_cancelled = _cancel_event(
+                    _candidate_sender_email,
+                    doc.candidate_ms_event_id,
+                    candidate_comment,
+                    "Candidate",
                 )
 
             _remove_event_from_attendee_calendars(
@@ -3280,30 +3728,25 @@ def cancel_interview_event(name):
                 message=frappe.get_traceback(),
             )
 
-    interview_date = (
-        frappe.utils.formatdate(doc.interview_date, "dd MMMM yyyy")
-        if doc.interview_date
-        else ""
+    _cancel_subject = (
+        f"Interview Cancelled – {applicant_name} | {round_label} for {role}"
     )
-    start_time = frappe.utils.format_time(doc.start_time) if doc.start_time else ""
-    end_time = frappe.utils.format_time(doc.end_time) if doc.end_time else ""
+    candidate_body = f"""
+    <p>Dear {applicant_name or "Candidate"},</p>
+    <p>Your interview for the position of <b>{role}</b> at Azim Premji Foundation
+    scheduled on <strong>{interview_date}</strong> ({start_time} – {end_time}) has been
+    <strong>cancelled</strong>.</p>
+    <p><b>Reason for cancellation:</b> {frappe.utils.escape_html(reason)}</p>
+    <p>We will reach out separately if the interview needs to be rescheduled.</p>
+    <p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
+    """
 
-    sender_arg = {}
-    if doc.organizer_email and frappe.db.exists(
-        "Email Account", {"email_id": doc.organizer_email, "enable_outgoing": 1}
-    ):
-        sender_arg = {"sender": doc.organizer_email}
-
-    if doc.attendees:
-        candidate_body = f"""
-        <p>Hi {doc.applicants_name or "there"},</p>
-        <p>This is to inform you that your interview scheduled on
-        <strong>{interview_date}</strong> ({start_time} – {end_time}) has been
-        <strong>cancelled</strong>.</p>
-        <p>We will reach out separately if the interview needs to be rescheduled.</p>
-        <p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
-        """
-        _cancel_subject = f"Interview Cancelled – Azim Premji Foundation ({interview_date})"
+    if doc.attendees and not candidate_event_cancelled:
+        sender_arg = {}
+        if doc.organizer_email and frappe.db.exists(
+            "Email Account", {"email_id": doc.organizer_email, "enable_outgoing": 1}
+        ):
+            sender_arg = {"sender": doc.organizer_email}
         try:
             frappe.sendmail(
                 recipients=[doc.attendees],
@@ -3312,25 +3755,38 @@ def cancel_interview_event(name):
                 delayed=False,
                 **sender_arg,
             )
-            _log_field_interview_communication(
-                name, _cancel_subject, candidate_body, doc.attendees
-            )
         except Exception:
             frappe.log_error(
                 title="FIELD_INTERVIEW_CANCEL_MAIL_ERROR",
                 message=frappe.get_traceback(),
             )
+    if doc.attendees:
+        _log_field_interview_communication(
+            name, _cancel_subject, candidate_body, doc.attendees
+        )
 
-    # Interviewers/CC/rooms are Graph attendees on the event, so the DELETE
-    # with sendUpdates=all above already sent them a native cancellation
-    # notice in the same meeting thread — a separate frappe.sendmail here
-    # would be a redundant second email for the same cancellation.
+    # Interviewers/CC/rooms are Graph attendees on the event, so the /cancel
+    # above already sent them a native cancellation notice (with the reason)
+    # in the same meeting thread — a separate frappe.sendmail here would be
+    # a redundant second email for the same cancellation.
 
     doc.db_set("is_cancelled", 1, update_modified=False)
     doc.db_set("ms_event_id", "", update_modified=False)
     doc.db_set("hybrid_ms_event_id", "", update_modified=False)
+    try:
+        doc.db_set("cancellation_reason", reason, update_modified=False)
+        if doc.get("candidate_ms_event_id"):
+            doc.db_set("candidate_ms_event_id", "", update_modified=False)
+    except Exception:
+        # Columns only exist after `bench migrate` — never fail the cancel over it.
+        frappe.log_error(
+            title="FIELD_INTERVIEW_CANCEL_REASON_SAVE_ERROR",
+            message=frappe.get_traceback(),
+        )
 
-    frappe.msgprint("✅ Interview cancelled — candidate and interviewer(s) notified.")
+    frappe.msgprint(
+        "✅ Interview cancelled — candidate and interviewer(s) notified with the reason."
+    )
 
     return {"cancelled": True}
 
@@ -4885,85 +5341,242 @@ def _merge_feedback_submissions_to_registration_form(doc, target_field, pdf_titl
         )
 
         meta = frappe.get_meta(doc.doctype)
-        skip_fieldtypes = {
-            "Section Break",
-            "Column Break",
-            "Tab Break",
-            "HTML",
-            "Button",
+        skip_fieldtypes = {"HTML", "Button"}
+        # Rendered full width under a section's two columns rather than
+        # squeezed into half a column (Strengths / Concerns / Comments etc.).
+        long_fieldtypes = {
+            "Small Text", "Text", "Long Text", "Text Editor",
+            "HTML Editor", "Markdown Editor", "Code", "JSON", "Table",
         }
+        esc = frappe.utils.escape_html
 
-        def _render_feedback_table(fb_doc):
-            rows_html = ""
-            for i, df in enumerate(meta.fields):
-                if df.fieldtype in skip_fieldtypes:
-                    continue
-                value = fb_doc.get(df.fieldname)
-                if value in (None, ""):
-                    value = "-"
-                row_bg = "#f7f8fa" if i % 2 == 0 else "#ffffff"
-                rows_html += (
-                    f"<tr style='background:{row_bg};'>"
-                    f"<td style='padding:8px 14px;font-weight:600;color:#333;width:38%;"
-                    f"vertical-align:top;border-bottom:1px solid #e5e7eb;'>{df.label or df.fieldname}</td>"
-                    f"<td style='padding:8px 14px;color:#111;vertical-align:top;"
-                    f"border-bottom:1px solid #e5e7eb;'>{value}</td></tr>"
-                )
+        # Same two-column "label above a grey value box" layout as the
+        # "Field Application Form" print format (the applicant's
+        # application-form PDF), per a 2026-09-29 request — replaced the
+        # old single label|value table. Layout follows the doctype's own
+        # Section Breaks (one dark title bar each) and labelled Column
+        # Breaks (e.g. "A.Essential" / "B.Other Supporting"); a section
+        # with just one column is split into two automatically.
+        def _build_sections():
+            sections = []
+            cur = {"label": None, "columns": [{"label": None, "fields": []}]}
+            for df in meta.fields:
+                if df.fieldtype in ("Section Break", "Tab Break"):
+                    sections.append(cur)
+                    cur = {"label": (df.label or "").strip() or None,
+                           "columns": [{"label": None, "fields": []}]}
+                elif df.fieldtype == "Column Break":
+                    cur["columns"].append({"label": (df.label or "").strip() or None, "fields": []})
+                elif df.fieldtype not in skip_fieldtypes:
+                    cur["columns"][-1]["fields"].append(df)
+            sections.append(cur)
+            out = []
+            for s in sections:
+                cols = [c for c in s["columns"] if c["fields"]]
+                if cols:
+                    out.append({"label": s["label"], "columns": cols})
+            return out
+
+        layout = _build_sections()
+
+        def _format_value(fb_doc, df):
+            value = fb_doc.get(df.fieldname)
+            if df.fieldtype == "Table":
+                return _render_child_table(value or [], df.options)
+            if value in (None, ""):
+                return ""
+            if df.fieldtype == "Check":
+                return "Yes" if frappe.utils.cint(value) else "No"
+            if df.fieldtype == "Date":
+                return esc(frappe.utils.formatdate(value, "d MMM yyyy"))
+            if df.fieldtype == "Datetime":
+                return esc(frappe.utils.format_datetime(value, "d MMM yyyy, h:mm a"))
+            if df.fieldtype == "Rating":
+                stars = frappe.utils.cint(df.options) or 5
+                return f"{round(frappe.utils.flt(value) * stars)} / {stars}"
+            if df.fieldtype in ("Text Editor", "HTML Editor"):
+                return str(value)
+            return esc(str(value)).replace("\n", "<br>")
+
+        def _render_child_table(rows, child_doctype):
+            if not rows:
+                return ""
+            child_fields = [
+                f for f in frappe.get_meta(child_doctype).fields
+                if f.fieldtype not in ("Section Break", "Column Break", "Tab Break", "HTML", "Button")
+            ]
+            listed = [f for f in child_fields if f.in_list_view] or child_fields
+            head = "".join(f"<th>{esc((f.label or f.fieldname).strip())}</th>" for f in listed)
+            body = "".join(
+                "<tr>" + "".join(f"<td>{_format_value(r, f) or '&mdash;'}</td>" for f in listed) + "</tr>"
+                for r in rows
+            )
+            return f"<table class='fb-table'><tr>{head}</tr>{body}</table>"
+
+        def _field_html(fb_doc, df):
+            value_html = _format_value(fb_doc, df)
+            label = esc((df.label or df.fieldname).strip())
+            if df.fieldtype == "Table":
+                empty_box = "<span class='fb-value'>&mdash;</span>"
+                return f"<div class='fb-field'><span class='fb-label'>{label}</span>{value_html or empty_box}</div>"
             return (
-                "<table style='border-collapse:collapse;width:100%;"
-                "border:1px solid #e5e7eb;font-size:12px;'>" + rows_html + "</table>"
+                f"<div class='fb-field'><span class='fb-label'>{label}</span>"
+                f"<span class='fb-value'>{value_html or '&mdash;'}</span></div>"
+            )
+
+        def _render_section(fb_doc, sec, title):
+            cols = sec["columns"]
+            full_width = []
+            if len(cols) == 1:
+                fields = cols[0]["fields"]
+                short = [f for f in fields if f.fieldtype not in long_fieldtypes]
+                full_width = [f for f in fields if f.fieldtype in long_fieldtypes]
+                half = (len(short) + 1) // 2
+                cols = [{"label": None, "fields": short[:half]},
+                        {"label": None, "fields": short[half:]}] if short else []
+            html = f"<div class='fb-section'><div class='fb-section-title'>{esc(title)}</div>"
+            if cols:
+                width = 100.0 / len(cols)
+                html += "<table class='fb-cols'><tr>"
+                for c in cols:
+                    html += f"<td style='width:{width:.2f}%;'>"
+                    if c["label"]:
+                        html += f"<div class='fb-subhead'>{esc(c['label'])}</div>"
+                    html += "".join(_field_html(fb_doc, f) for f in c["fields"])
+                    html += "</td>"
+                html += "</tr></table>"
+            html += "".join(_field_html(fb_doc, f) for f in full_width)
+            return html + "</div>"
+
+        # Zwayam-style heading, per a 2026-09-29 request (the recruitment
+        # team asked for the interview type + interviewer name on every
+        # feedback PDF): "Interview Feedback - NAME [Round]" as the title,
+        # and per submission "<date> | Feedback updated by <panelist> for
+        # <Round>" instead of the old "Submission N · <docname> · <date>".
+        #
+        # One Feedback Form doctype can serve several rounds (e.g. Leader
+        # Final Round → Leader Round-1 AND Leader Round-2 — see
+        # FIELD_FEEDBACK_ROUND_MAP), so the real round comes from the
+        # applicant's Field Interview Schedule: the latest one created on
+        # or before that submission whose base round uses this doctype.
+        # Falls back to the doctype's own name ("Leader Final Round") when
+        # no schedule matches.
+        candidate_rounds = [
+            r for r, doctypes in FIELD_FEEDBACK_ROUND_MAP.items() if doc.doctype in doctypes
+        ]
+        schedules = frappe.get_all(
+            "Field Interview Schedule",
+            filters={"application_id": applicant_id},
+            fields=["interview_round", "creation"],
+            order_by="creation desc",
+            limit_page_length=0,
+        ) if candidate_rounds else []
+        fallback_round = (
+            pdf_title.replace(" - Feedback Form", "").replace("Feedback Form - ", "").replace(" Feedback Form", "").strip()
+            or pdf_title
+        )
+
+        def _round_for(fb_doc):
+            for s in schedules:
+                base = re.sub(r"\s+(Select|Reject)$", "", (s.interview_round or "").strip())
+                if base in candidate_rounds and s.creation <= fb_doc.creation:
+                    return base
+            return fallback_round
+
+        def _panelist_for(fb_doc):
+            return (
+                (fb_doc.get("panelist_name") or "").strip()
+                or (fb_doc.get("panelist_email") or fb_doc.get("panelist__email") or "").strip()
+                or frappe.utils.get_fullname(fb_doc.owner)
             )
 
         display_name = doc.applicant_name or applicant_id
         sections_html = ""
-        for idx, row in enumerate(submissions, start=1):
+        rounds_seen = []
+        for row in submissions:
             fb_doc = (
                 doc
                 if row["name"] == doc.name
                 else frappe.get_doc(doc.doctype, row["name"])
             )
-            submitted_on = frappe.utils.format_datetime(
-                fb_doc.creation, "d MMM yyyy, h:mm a"
+            round_name = _round_for(fb_doc)
+            if round_name not in rounds_seen:
+                rounds_seen.append(round_name)
+            submitted_date = frappe.utils.format_datetime(fb_doc.creation, "dd-MMM-yyyy")
+            submitted_time = frappe.utils.format_datetime(fb_doc.creation, "hh:mm a")
+            body = "".join(
+                _render_section(fb_doc, sec, sec["label"] or ("Applicant & Interview Details" if i == 0 else "Details"))
+                for i, sec in enumerate(layout)
             )
             sections_html += f"""
-                <div style="margin-top:22px;">
-                    <div style="background:#1d4ed8;color:#ffffff;padding:8px 14px;
-                                border-radius:4px 4px 0 0;font-size:13px;font-weight:600;">
-                        Submission {idx} &middot; {fb_doc.name} &middot; {submitted_on}
-                    </div>
-                    {_render_feedback_table(fb_doc)}
+                <div class="fb-submission">
+                    <table class="fb-submission-head"><tr>
+                        <td class="fb-submission-date">{esc(submitted_date)}<br>{esc(submitted_time)}</td>
+                        <td class="fb-submission-by">Feedback updated by {esc(_panelist_for(fb_doc))} for {esc(round_name)}</td>
+                    </tr></table>
+                    {body}
                 </div>
             """
+        title_rounds = ", ".join(rounds_seen) or fallback_round
 
         html = f"""
             <html>
             <head>
+                <meta charset="utf-8">
                 <style>
-                    body {{ font-family: 'Helvetica', 'Arial', sans-serif; color:#1a1a1a; }}
+                    body {{ font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+                            font-size: 11.5px; line-height: 1.45; color: #202020; }}
+                    .fb-letterhead {{ text-align: center; border-bottom: 2.5px solid #1f3a5f;
+                                      padding-bottom: 10px; margin-bottom: 4px; }}
+                    .fb-org-name {{ font-size: 20px; font-weight: 700; letter-spacing: 0.4px;
+                                    color: #1f3a5f; margin: 0; }}
+                    .fb-doc-title {{ font-size: 12.5px; font-weight: 600; text-transform: uppercase;
+                                     letter-spacing: 1.8px; color: #555; margin: 3px 0 0 0; }}
+                    .fb-title {{ text-align: center; font-size: 18px; font-weight: 700; color: #111;
+                                 margin: 14px 0 2px 0; }}
+                    .fb-submission {{ margin-top: 16px; }}
+                    table.fb-submission-head {{ width: 100%; border-collapse: collapse;
+                                                border-bottom: 2px solid #1f3a5f; }}
+                    .fb-submission-date {{ width: 110px; font-size: 11px; font-weight: 700; color: #111;
+                                           padding: 0 0 6px 0; vertical-align: top; white-space: nowrap; }}
+                    .fb-submission-by {{ font-size: 13px; font-weight: 700; color: #111;
+                                         padding: 0 0 6px 10px; vertical-align: top; }}
+                    .fb-section {{ margin-top: 14px; page-break-inside: avoid; }}
+                    .fb-section-title {{ background: #1f3a5f; color: #ffffff; padding: 5px 10px;
+                                         font-size: 11px; font-weight: 600; text-transform: uppercase;
+                                         letter-spacing: 0.8px; border-radius: 2px; margin-bottom: 8px; }}
+                    .fb-subhead {{ font-size: 11px; font-weight: 700; color: #1f3a5f;
+                                   border-bottom: 1px solid #cdd6e0; padding-bottom: 3px;
+                                   margin: 4px 0 8px 0; }}
+                    table.fb-cols {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
+                    table.fb-cols td {{ vertical-align: top; padding: 0 10px; }}
+                    table.fb-cols td:first-child {{ padding-left: 0; }}
+                    table.fb-cols td:last-child {{ padding-right: 0; }}
+                    .fb-field {{ margin-bottom: 7px; page-break-inside: avoid; }}
+                    .fb-label {{ display: block; font-size: 9.5px; font-weight: 600;
+                                 text-transform: uppercase; letter-spacing: 0.3px; color: #000;
+                                 margin-bottom: 1px; }}
+                    .fb-value {{ display: block; min-height: 15px; padding: 3px 6px;
+                                 background: #f7f8fa; border: 1px solid #e0e3e8; border-radius: 2px;
+                                 font-size: 11.5px; color: #1a1a1a; }}
+                    table.fb-table {{ width: 100%; border-collapse: collapse; margin: 2px 0 6px 0;
+                                      font-size: 10.5px; }}
+                    table.fb-table th {{ background: #1f3a5f; color: #fff; text-transform: uppercase;
+                                         font-size: 9.5px; letter-spacing: 0.3px; padding: 5px 6px;
+                                         text-align: left; }}
+                    table.fb-table td {{ border: 1px solid #e0e3e8; padding: 5px 6px; }}
+                    .fb-footer {{ margin-top: 24px; padding-top: 6px; border-top: 1px solid #dcdfe4;
+                                  font-size: 9px; color: #999; text-align: center; }}
                 </style>
             </head>
             <body>
-                <div style="border-bottom:3px solid #1d4ed8;padding-bottom:14px;margin-bottom:18px;">
-                    <div style="font-size:11px;letter-spacing:1px;color:#6b7280;text-transform:uppercase;">
-                        Azim Premji Foundation
-                    </div>
-                    <h1 style="margin:4px 0 10px 0;font-size:20px;color:#111827;">{pdf_title}</h1>
-                    <table style="font-size:12px;color:#374151;">
-                        <tr>
-                            <td style="padding:2px 10px 2px 0;font-weight:600;">Applicant</td>
-                            <td style="padding:2px 0;">{display_name}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding:2px 10px 2px 0;font-weight:600;">Applicant ID</td>
-                            <td style="padding:2px 0;">{applicant_id}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding:2px 10px 2px 0;font-weight:600;">Submissions</td>
-                            <td style="padding:2px 0;">{len(submissions)}</td>
-                        </tr>
-                    </table>
+                <div class="fb-letterhead">
+                    <p class="fb-org-name">Azim Premji Foundation</p>
+                    <p class="fb-doc-title">{esc(pdf_title)}</p>
                 </div>
+                <div class="fb-title">Interview Feedback - {esc(display_name)} [{esc(title_rounds)}]</div>
                 {sections_html}
+                <div class="fb-footer">Generated on {esc(frappe.utils.format_datetime(frappe.utils.now_datetime(), "d MMM yyyy, h:mm a"))}</div>
             </body>
             </html>
         """

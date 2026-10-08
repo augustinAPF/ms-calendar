@@ -358,6 +358,26 @@ def _drop_unresolvable_links(values):
             del values[fieldname]
 
 
+def _drop_invalid_selects(values):
+    """Same idea as _drop_unresolvable_links, for Select fields. The source
+    forms' Select options have drifted from Applicant Master's (e.g. Health
+    form salary goes up to "INR 1,50,001 or more", Applicant Master stops at
+    "INR 1,00,001 or more"; reason for hold "Too junior" exists only on the
+    forms). Frappe throws on a value outside the options, failing the whole
+    save — so skip just that field and let the rest of the record sync.
+    """
+    meta = frappe.get_meta("Applicant Master")
+    for fieldname in list(values):
+        value = values[fieldname]
+        if value in (None, ""):
+            continue
+        df = meta.get_field(fieldname)
+        if not df or df.fieldtype != "Select" or not df.options:
+            continue
+        if str(value).strip() not in df.options.split("\n"):
+            del values[fieldname]
+
+
 def _sanitize_scalar(value):
     """Every Applicant Master field this syncs into (see FIELD_MAPPING_*
     below) is a plain Data/Text/Select field, never a Table/Table
@@ -411,6 +431,7 @@ def _sync_to_applicant_master(doc, field_mapping, source_label):
             for am_field, src_field in field_mapping.items()
         }
         _drop_unresolvable_links(values)
+        _drop_invalid_selects(values)
 
         if match_value:
             # match_value itself is the authoritative Zwayam Id — set

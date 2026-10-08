@@ -485,6 +485,11 @@ doc_events = {
     "Philanthrophy Feedback Form": {
         "after_insert": "ms_calendar.api.feedback_merge.on_feedback_form_submitted"
     },
+    # Emails the written answers to the subject's evaluator (Question Paper
+    # Master.evaluator_email), if that question paper has one.
+    "Field MeritTrac Test Result": {
+        "after_insert": "ms_calendar.api.field_merit_trac.on_field_merittrac_result_insert"
+    },
     # MBBS Fellowship's 4 feedback-round doctypes (applicant_id links to
     # Health Registration Form) -> its existing "feedback_form" field.
     # on_update (not after_insert, unlike Philanthropy's single-doctype
@@ -662,7 +667,11 @@ app_include_js = [
     # every browser is guaranteed a fresh fetch on next page load.
     "/assets/ms_calendar/js/frf_list.js?v=16",
     "/assets/ms_calendar/js/phil_registration_form_list.js",
-    "/assets/ms_calendar/js/scholarship_recruitment_form_list.js",
+    # scholarship_recruitment_form_list.js is NOT listed here: it is already
+    # loaded for its list view via doctype_list_js above, and listing it
+    # app-wide made every desk page request it — on the cloud (where the file
+    # was never deployed) that 404 came back as text/html and the browser
+    # refused it with a strict-MIME error on every page load.
     "/assets/ms_calendar/js/applicant_master_list.js?v=1",
     # "pathways_redirect.js" was never actually added to public/js/ (checked
     # git history — no commit ever created it), so this line 404s on every

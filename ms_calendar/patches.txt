@@ -9,3 +9,4 @@ ms_calendar.patches.make_fis_editable
 ms_calendar.patches.make_field_registration_form_editable
 ms_calendar.patches.sync_field_registration_form_content
 ms_calendar.patches.add_zayam_id_indexes
+ms_calendar.patches.fill_question_paper_master_evaluators
