@@ -273,10 +273,79 @@
 		</div>
 
 		<p class="ms-login-footer">&copy; {{ current_year }} {{ brand_org }}</p>
+
+		<!-- Wrong-password popup (opened from the script block below) -->
+		{% if not disable_user_pass_login %}
+		<div class="ms-login-alert" id="ms-invalid-login" role="alertdialog" aria-modal="true"
+			aria-labelledby="ms-invalid-login-text"
+			data-invalid-message="{{ _('Invalid Login. Try again.') }}" hidden>
+			<div class="ms-login-alert-card">
+				<span class="ms-login-alert-icon" aria-hidden="true">
+					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+						stroke-linecap="round" stroke-linejoin="round">
+						<rect x="4" y="10" width="16" height="11" rx="2"></rect>
+						<path d="M8 10V7a4 4 0 0 1 8 0v3"></path>
+					</svg>
+				</span>
+				<p id="ms-invalid-login-text">{{ _("Please use Forgot password to reset the password and login.") }}</p>
+				<div class="ms-login-alert-actions">
+					<a href="#forgot" class="btn btn-primary btn-block ms-alert-forgot">{{ _("Forgot password?") }}</a>
+				</div>
+			</div>
+		</div>
+		{% endif %}
 	</main>
 </div>
 {% endblock %}
 
 {% block script %}
-<script>{% include "templates/includes/login/login.js" %}</script>
+{#- login.js is itself a Jinja template. Rendering it into a variable first
+    keeps Jinja tags out of the script tag, which editors flag as JS errors. -#}
+{% set login_js %}{% include "templates/includes/login/login.js" %}{% endset %}
+<script>{{ login_js | safe }}</script>
+<script>
+// Wrong password -> popup offering "Forgot password?". login.js's 401 handler
+// calls login.set_invalid() with exactly this message (v15 and v16), so
+// wrapping it leaves other errors (429 too many requests, 500, ...) as the
+// plain red button text they were. The (translated) message comes from the
+// popup's data-invalid-message attribute.
+(function () {
+	var $dialog = $("#ms-invalid-login");
+	if (!$dialog.length) return;
+
+	var INVALID_LOGIN = $dialog.attr("data-invalid-message");
+
+	var set_invalid = login.set_invalid;
+
+	function close_dialog() {
+		$dialog.prop("hidden", true);
+		$(document).off("keydown.ms-invalid-login");
+	}
+
+	login.set_invalid = function (message) {
+		set_invalid.apply(this, arguments);
+		if (message !== INVALID_LOGIN || !$(".for-login").is(":visible")) return;
+
+		$dialog.prop("hidden", false);
+		$dialog.find(".ms-alert-forgot").trigger("focus");
+		$(document).on("keydown.ms-invalid-login", function (e) {
+			if (e.key === "Escape") {
+				close_dialog();
+				$("#login_password").trigger("select");
+			}
+		});
+	};
+
+	// The link's href="#forgot" lets login.js switch to the reset form (it
+	// also copies the typed email into it) — only the popup needs closing.
+	$dialog.on("click", ".ms-alert-forgot", close_dialog);
+	// Clicking outside the card (or Esc) returns to the login form.
+	$dialog.on("click", function (e) {
+		if (e.target === this) {
+			close_dialog();
+			$("#login_password").trigger("select");
+		}
+	});
+})();
+</script>
 {% endblock %}
