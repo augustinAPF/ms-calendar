@@ -1,543 +1,12 @@
 import frappe
-import hmac
 import json
-from frappe.utils import get_datetime, nowdate, add_days
-from frappe.rate_limiter import rate_limit
-from datetime import datetime, timedelta
+from frappe.utils import get_datetime, nowdate, add_days, escape_html
 
-
-# ============================================================
-# ✅ EXISTING CODE — DO NOT TOUCH (test result webhook API)
-# ============================================================
-
-
-@frappe.whitelist(allow_guest=True)
-def test_result_api():
-    try:
-        # ------------------------------------------------------------
-        # 1️⃣ API KEY VALIDATION (robust)
-        # ------------------------------------------------------------
-        def get_request_header(name):
-            try:
-                headers = {
-                    k.lower(): v for k, v in (frappe.request.headers or {}).items()
-                }
-                if name.lower() in headers:
-                    return headers[name.lower()]
-            except Exception:
-                pass
-            env_key = "HTTP_" + name.upper().replace("-", "_")
-            return frappe.request.environ.get(env_key)
-
-        api_key = get_request_header("Patner-key")
-        # Secret now lives only in site_config.json (field_merit_trac_partner_key),
-        # never in source — a hardcoded fallback here would defeat the point
-        # of moving it out, and would keep working even after rotating the key.
-        EXPECTED_KEY = frappe.conf.get("field_merit_trac_partner_key")
-        if (
-            not EXPECTED_KEY
-            or not api_key
-            or not hmac.compare_digest(api_key, EXPECTED_KEY)
-        ):
-            frappe.local.response.http_status_code = 401
-            return {
-                "status": "error",
-                "http_status": 401,
-                "message": "Unauthorized: Invalid Patner Key",
-            }
-
-        # ------------------------------------------------------------
-        # 2️⃣ READ JSON BODY
-        # ----------------------------------------------------------
-        raw = frappe.request.data
-        frappe.log_error(message=f"RAW BODY: {raw}", title="FIELD_MERIT_TRAC_DEBUG")
-        if not raw:
-            frappe.local.response.http_status_code = 400
-            return {
-                "status": "error",
-                "http_status": 400,
-                "message": "Empty request body",
-            }
-
-        try:
-            payload = json.loads(raw)
-        except Exception:
-            frappe.local.response.http_status_code = 400
-            return {
-                "status": "error",
-                "http_status": 400,
-                "message": "Invalid JSON body",
-            }
-
-        frappe.log_error(
-            message=f"FULL PAYLOAD: {payload}", title="FIELD_MERIT_TRAC_PAYLOAD"
-        )
-
-        # ------------------------------------------------------------
-        # 3️⃣ Accept either top-level object or {"data": {...}}
-        # ------------------------------------------------------------
-        if (
-            isinstance(payload, dict)
-            and "data" in payload
-            and isinstance(payload.get("data"), dict)
-        ):
-            item = payload.get("data")
-        elif isinstance(payload, dict) and payload.get("candidateId"):
-            item = payload
-        else:
-            frappe.local.response.http_status_code = 400
-            return {
-                "status": "error",
-                "http_status": 400,
-                "message": "Request must be a JSON object with candidateId (either top-level or inside 'data')",
-            }
-
-        frappe.log_error(message=f"ITEM: {item}", title="FIELD_MERIT_TRAC_ITEM")
-
-        # ------------------------------------------------------------
-        # 4️⃣ field extractor + datetime helper
-        # ------------------------------------------------------------
-        def fix_datetime(dt):
-            if not dt:
-                return None
-            try:
-                return get_datetime(dt).strftime("%Y-%m-%d %H:%M:%S")
-            except:
-                return None
-
-        candidate_id = item.get("candidateId")
-        percentage = item.get("overAllPercentageScore")
-        attempt_id = item.get("attemptId")
-        assessment_id = item.get("assessmentId")
-        attempt_status = item.get("attempt_status")
-        report_url = item.get("TnReport")
-        score = item.get("score")
-        max_score = item.get("maxScore")
-        total_questions = item.get("totalQuestion")
-        total_attempted = item.get("totalAttempted")
-        user_img_key = item.get("userImgKey")
-        id_img_key = item.get("idImgKey")
-        credit_score = item.get("creditScore")
-        proctor_comment = item.get("proctorComment")
-        section_wise_score = item.get("sectionWiseScore") or []
-        descriptive_response = item.get("descriptiveResponse") or []
-        updated_at = fix_datetime(item.get("updatedAt"))
-        created_at = fix_datetime(item.get("createdAt"))
-
-        frappe.log_error(
-            message=(
-                f"sectionWiseScore ({len(section_wise_score)} rows): {section_wise_score}\n\n"
-                f"descriptiveResponse ({len(descriptive_response)} rows): {descriptive_response}"
-            ),
-            title="FIELD_MERIT_TRAC_SECTIONS",
-        )
-
-        if not candidate_id:
-            frappe.local.response.http_status_code = 400
-            return {
-                "status": "error",
-                "http_status": 400,
-                "message": "candidateId missing",
-            }
-
-        # ------------------------------------------------------------
-        # 5️⃣ Route to the right result + registration doctypes by
-        # candidate ID prefix
-        # ------------------------------------------------------------
-        # This webhook is shared across programs — MeritTrac sends results
-        # for both Field candidates (APFFRF-...) and Scholarship candidates
-        # (APSRF-...) to the same URL. Each program stores its registration
-        # data under a different doctype/fieldnames, and "Field MeritTrac
-        # Test Result" has a fuller schema (proctoring images, section-wise/
-        # descriptive breakdown) than "MeritTrac Test Result" (Scholarship),
-        # which doesn't have those fields at all.
-        #
-        # NOTE: "Field Registration Form1" is a stale, orphaned leftover
-        # doctype (not used by the Desk UI, the Zwayam importer, or anything
-        # else) that happens to coexist with the real "Field Registration
-        # Form" on this site. Detecting via existence-of-Form1 is wrong —
-        # both can and do exist at the same time — so this is hardcoded to
-        # the doctype every other part of the app actually uses.
-        if "APFFRF" in candidate_id:
-            result_doctype = "Field MeritTrac Test Result"
-            reg_doctype = "Field Registration Form"
-            name_field, email_field, sender_field = (
-                "full_name_aadhaar",
-                "email_address",
-                "field_mail",
-            )
-        elif "APSRF" in candidate_id:
-            result_doctype = "MeritTrac Test Result"
-            reg_doctype = "Scholarship Recruitment Form"
-            name_field, email_field, sender_field = (
-                "full_name_as_per_aadhar",
-                "email",
-                "srt_mail",
-            )
-        else:
-            frappe.local.response.http_status_code = 400
-            return {
-                "status": "error",
-                "http_status": 400,
-                "message": f"Unknown candidate ID prefix: {candidate_id}",
-            }
-
-        _applicant_name = (
-            frappe.db.get_value(reg_doctype, candidate_id, name_field) or ""
-        )
-
-        # ------------------------------------------------------------
-        # 6️⃣ INSERT test result
-        # ------------------------------------------------------------
-        if result_doctype == "Field MeritTrac Test Result":
-            test_doc = frappe.get_doc(
-                {
-                    "doctype": result_doctype,
-                    "applicant_id": candidate_id,
-                    "applicant_name": _applicant_name,
-                    "score_percentile": percentage,
-                    "overall_percentage_score": percentage,
-                    "attempt_id": attempt_id,
-                    "assessment_id": assessment_id,
-                    "attempt_status": attempt_status,
-                    "score_report": report_url,
-                    "tn_report": report_url,
-                    "total_score": score,
-                    "max_score": max_score,
-                    "total_questions": total_questions,
-                    "total_attempted": total_attempted,
-                    "user_img_key": user_img_key,
-                    "id_img_key": id_img_key,
-                    "credit_score": credit_score,
-                    "proctor_comment": proctor_comment,
-                    "updated_at": updated_at,
-                    "created_at": created_at,
-                    # Same child tables pull_pending_merittrac_results()
-                    # writes (Field MeritTrac Section Score / Field
-                    # MeritTrac Descriptive Response) — the old
-                    # section_wise_score/descriptive_response Long Text JSON
-                    # fields no longer exist on the doctype (see
-                    # fixtures/doctype.json), so writing JSON there was
-                    # silently dropped.
-                    "section_wise_scores": [
-                        {
-                            "section_name": section.get("name"),
-                            "score": section.get("score"),
-                            "max_score": section.get("maxScore"),
-                        }
-                        for section in section_wise_score
-                        if isinstance(section, dict)
-                    ],
-                    "descriptive_responses": [
-                        {
-                            "question_text": resp.get("questionText"),
-                            "candidate_response": resp.get("candidateResponse"),
-                        }
-                        for resp in descriptive_response
-                        if isinstance(resp, dict)
-                    ],
-                }
-            )
-        else:
-            # "MeritTrac Test Result" (Scholarship) — no proctoring or
-            # section-wise/descriptive fields on this doctype.
-            test_doc = frappe.get_doc(
-                {
-                    "doctype": result_doctype,
-                    "applicant_id": candidate_id,
-                    "applicant_name": _applicant_name,
-                    "score_percentile": percentage,
-                    "attempt_id": attempt_id,
-                    "assessment_id": assessment_id,
-                    "attempt_status": attempt_status,
-                    "score_report": report_url,
-                    "total_score": score,
-                    "max_score": max_score,
-                    "total_questions": total_questions,
-                    "total_attempted": total_attempted,
-                    "updated_at": updated_at,
-                    "created_at": created_at,
-                }
-            )
-        test_doc.insert(ignore_permissions=True, ignore_links=True)
-
-        # ------------------------------------------------------------
-        # 7️⃣ UPDATE the source registration form + notify candidate
-        # ------------------------------------------------------------
-        # reg_doctype / name_field / email_field / sender_field were
-        # already picked in step 5️⃣ above, based on the same candidate ID
-        # prefix — reused here so both programs get the same status-update
-        # + email treatment, just pointed at the right doctype/fields.
-        srf = frappe.db.get_value(
-            reg_doctype,
-            {"name": candidate_id},
-            ["name", name_field, email_field, sender_field],
-            as_dict=True,
-        )
-
-        if not srf:
-            frappe.db.commit()
-            frappe.local.response.http_status_code = 200
-            return {
-                "status": 200,
-                "http_status": 200,
-                "message": "Data inserted (No SRF found for candidate)",
-                "data": [],
-            }
-
-        try:
-            passed = percentage is not None and float(percentage) >= 50
-        except:
-            passed = False
-        status = "Round One" if passed else "Test Reject"
-
-        srf_name = srf.get("name")
-        srf_doc = frappe.get_doc(reg_doctype, srf_name)
-        srf_doc.application_status = status
-        srf_doc.save(ignore_permissions=True)
-
-        applicant_name = srf.get(name_field) or "Applicant"
-        applicant_email = srf.get(email_field)
-        SenderEmail = (
-            srf.get(sender_field)
-            if srf.get(sender_field)
-            else "tech4socialsector@azimpremjifoundation.org"
-        )
-
-        # ------------------------------------------------------------
-        # 7️⃣ EMAIL TEMPLATES
-        # ------------------------------------------------------------
-        fail_email_html = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            </head>
-            <body style="margin:0; padding:20px; background:#ffffff; font-family:'Segoe UI', sans-serif; color:#333; line-height:1.6;">
-            <p style="font-size:16px; margin:0 0 20px 0;">Dear {applicant_name},</p>
-            <p style="font-size:16px; margin:0 0 20px 0;">
-            Thank you for your interest in the opportunities with the Azim Premji Scholarship Initiative.
-            We appreciate the time and effort you have invested in exploring an opportunity with us.
-            </p>
-            <p style="font-size:16px; margin:0 0 20px 0;">
-            After careful consideration of your candidature, unfortunately, we will not be able to
-            take your application forward at this point of time.
-            </p>
-            <p style="font-size:16px; margin:0 0 25px 0;">
-            We would like to thank you for your time, and we wish you the very best!
-            </p>
-            <p style="font-size:16px; margin:0 0 40px 0;">
-            Regards,<br>People Function<br>Azim Premji Foundation
-            </p>
-            </body>
-            </html>
-        """
-
-        # ------------------------------------------------------------
-        # 8️⃣ SEND EMAILS
-        # ------------------------------------------------------------
-        if applicant_email:
-            try:
-                if passed:
-                    print("Send")
-                else:
-                    frappe.sendmail(
-                        sender=SenderEmail,
-                        recipients=[applicant_email],
-                        subject=f"Azim Premji Scholarship – Your Application, {applicant_name}",
-                        message=fail_email_html,
-                        delayed=False,
-                        reference_doctype=reg_doctype,
-                        reference_name=candidate_id,
-                    )
-            except Exception as mail_exc:
-                frappe.log_error(
-                    title="MERIT_TRAC_MAIL_ERROR", message=f"Mail error: {mail_exc}"
-                )
-
-        frappe.db.commit()
-
-        frappe.local.response.http_status_code = 200
-        return {
-            "status": 200,
-            "http_status": 200,
-            "message": "Data inserted, SRF updated, email processed",
-            "data": [SenderEmail],
-        }
-
-    except Exception as e:
-        frappe.log_error(title="MERIT_TRAC_API_ERROR", message=frappe.get_traceback())
-        frappe.local.response.http_status_code = 500
-        return {"status": 500, "http_status": 500, "message": str(e)}
-
-
-# ============================================================
-# ✅ NEW CODE — Field Assessment Result webhook (proctored test with
-# section-wise scores + descriptive answers). Stores into
-# "Field MeritTrac Assessment Result" only — does not touch
-# Field Registration Form status or send any emails.
-# ============================================================
-
-
-@frappe.whitelist(allow_guest=True)
-def field_assessment_result_api():
-    try:
-        # ------------------------------------------------------------
-        # 1️⃣ API KEY VALIDATION
-        # ------------------------------------------------------------
-        def get_request_header(name):
-            try:
-                headers = {
-                    k.lower(): v for k, v in (frappe.request.headers or {}).items()
-                }
-                if name.lower() in headers:
-                    return headers[name.lower()]
-            except Exception:
-                pass
-            env_key = "HTTP_" + name.upper().replace("-", "_")
-            return frappe.request.environ.get(env_key)
-
-        api_key = get_request_header("Patner-key")
-        # No hardcoded fallback — must come from site_config.json.
-        EXPECTED_KEY = frappe.conf.get("field_assessment_partner_key")
-        if (
-            not EXPECTED_KEY
-            or not api_key
-            or not hmac.compare_digest(api_key, EXPECTED_KEY)
-        ):
-            frappe.local.response.http_status_code = 401
-            return {
-                "status": "error",
-                "http_status": 401,
-                "message": "Unauthorized: Invalid Patner Key",
-            }
-
-        # ------------------------------------------------------------
-        # 2️⃣ READ JSON BODY
-        # ------------------------------------------------------------
-        raw = frappe.request.data
-        if not raw:
-            frappe.local.response.http_status_code = 400
-            return {
-                "status": "error",
-                "http_status": 400,
-                "message": "Empty request body",
-            }
-
-        try:
-            payload = json.loads(raw)
-        except Exception:
-            frappe.local.response.http_status_code = 400
-            return {
-                "status": "error",
-                "http_status": 400,
-                "message": "Invalid JSON body",
-            }
-
-        if (
-            isinstance(payload, dict)
-            and "data" in payload
-            and isinstance(payload.get("data"), dict)
-        ):
-            item = payload.get("data")
-        elif isinstance(payload, dict) and payload.get("candidateId"):
-            item = payload
-        else:
-            frappe.local.response.http_status_code = 400
-            return {
-                "status": "error",
-                "http_status": 400,
-                "message": "Request must be a JSON object with candidateId (either top-level or inside 'data')",
-            }
-
-        # ------------------------------------------------------------
-        # 3️⃣ field extractor + datetime helper
-        # ------------------------------------------------------------
-        def fix_datetime(dt):
-            if not dt:
-                return None
-            try:
-                return get_datetime(dt).strftime("%Y-%m-%d %H:%M:%S")
-            except Exception:
-                return None
-
-        candidate_id = item.get("candidateId")
-        if not candidate_id:
-            frappe.local.response.http_status_code = 400
-            return {
-                "status": "error",
-                "http_status": 400,
-                "message": "candidateId missing",
-            }
-
-        # ------------------------------------------------------------
-        # 4️⃣ Registration form doctype — see the NOTE in test_result_api
-        # above on why this is hardcoded rather than existence-detected.
-        # ------------------------------------------------------------
-        _frf_doctype = "Field Registration Form"
-        _applicant_name = (
-            frappe.db.get_value(_frf_doctype, candidate_id, "full_name_aadhaar") or ""
-        )
-
-        # ------------------------------------------------------------
-        # 5️⃣ INSERT Field MeritTrac Assessment Result
-        # ------------------------------------------------------------
-        result_doc = frappe.get_doc(
-            {
-                "doctype": "Field MeritTrac Assessment Result",
-                "candidate_id": candidate_id,
-                "applicant_name": _applicant_name,
-                "attempt_id": item.get("attemptId"),
-                "assessment_id": item.get("assessmentId"),
-                "attempt_status": item.get("attempt_status"),
-                "overall_percentage_score": item.get("overAllPercentageScore"),
-                "score": item.get("score"),
-                "max_score": item.get("maxScore"),
-                "total_question": item.get("totalQuestion"),
-                "total_attempted": item.get("totalAttempted"),
-                "credit_score": item.get("creditScore"),
-                "user_img_key": item.get("userImgKey"),
-                "id_img_key": item.get("idImgKey"),
-                "tn_report": item.get("TnReport"),
-                "proctor_comment": item.get("proctorComment"),
-                "created_at": fix_datetime(item.get("createdAt")),
-                "updated_at": fix_datetime(item.get("updatedAt")),
-                "section_wise_score": [
-                    {
-                        "section_name": section.get("name"),
-                        "score": section.get("score"),
-                        "max_score": section.get("maxScore"),
-                    }
-                    for section in (item.get("sectionWiseScore") or [])
-                ],
-                "descriptive_response": [
-                    {
-                        "question_text": resp.get("questionText"),
-                        "candidate_response": resp.get("candidateResponse"),
-                    }
-                    for resp in (item.get("descriptiveResponse") or [])
-                ],
-            }
-        )
-        result_doc.insert(ignore_permissions=True, ignore_links=True)
-        frappe.db.commit()
-
-        frappe.local.response.http_status_code = 200
-        return {
-            "status": 200,
-            "http_status": 200,
-            "message": "Data inserted",
-            "data": [result_doc.name],
-        }
-
-    except Exception as e:
-        frappe.log_error(
-            title="FIELD_ASSESSMENT_RESULT_API_ERROR", message=frappe.get_traceback()
-        )
-        frappe.local.response.http_status_code = 500
-        return {"status": 500, "http_status": 500, "message": str(e)}
-
+# Field MeritTrac results are received by merit_trac.py (test_result_api ->
+# process_field_result). This file no longer fetches or stores results — its
+# old webhook (test_result_api / field_assessment_result_api) and the
+# get-candidates-results pull (pull_pending_merittrac_results /
+# trigger_merittrac_results_pull_on_finish) were removed 2026-10-08.
 
 # ============================================================
 # ✅ NEW CODE — Scheduled emails for Field Meritrac Test URL
@@ -600,36 +69,6 @@ def send_meritrac_scheduled_emails():
                 )
 
     frappe.db.commit()
-
-
-@frappe.whitelist()
-def test_save_result(candidate_id="APFFRF-0002"):
-    """TEST ONLY — simulates a MeritTrac result webhook for a given candidate."""
-    frappe.only_for("System Manager")
-    _frf_doctype = "Field Registration Form"
-    _applicant_name = (
-        frappe.db.get_value(_frf_doctype, candidate_id, "full_name_aadhaar") or "Test"
-    )
-
-    doc = frappe.get_doc(
-        {
-            "doctype": "MeritTrac Test Result",
-            "applicant_id": candidate_id,
-            "applicant_name": _applicant_name,
-            "attempt_id": "TEST-001",
-            "assessment_id": "SA07936",
-            "attempt_status": "Completed",
-            "score_percentile": 75,
-            "total_score": 45,
-            "max_score": 60,
-            "total_questions": 60,
-            "total_attempted": 58,
-            "score_report": "https://test-report.url",
-        }
-    )
-    doc.insert(ignore_permissions=True)
-    frappe.db.commit()
-    return {"saved": doc.name, "applicant": _applicant_name}
 
 
 @frappe.whitelist()
@@ -937,8 +376,8 @@ def save_field_merittrac_tickets(
         )
 
     # ── 2. Save ticket records + send admit card email immediately ───────
-    # Registration form doctype — see the NOTE in test_result_api on why
-    # this is hardcoded rather than existence-detected.
+    # Hardcoded rather than existence-detected: a stale, orphaned "Field
+    # Registration Form1" doctype coexists with the real one on some sites.
     _frf_doctype = "Field Registration Form"
 
     today = nowdate()
@@ -1281,189 +720,211 @@ def save_field_meritrac_test_urls(tickets, assessment_id, start_time, end_time):
 
 
 # ---------------------------------------------------------------------------
-# Pull pending Field MeritTrac results
+# Email the subject's evaluator when a Field MeritTrac result arrives
 # ---------------------------------------------------------------------------
-# MeritTrac's integration for the Field program is pull-only — there is no
-# push webhook that MeritTrac actually calls for Field candidates.
-# (Confirmed 2026-08-31: "Field MeritTrac Test Result" had 0 records despite
-# tests going back to Aug 14, while this same account's Scholarship results
-# DO arrive automatically via a separate push webhook — that's a different
-# program's integration, not this one.) MeritTrac's own API docs
-# (talent-next.com/hrms/api-docs) show the real integration point:
-# POST /hrms/get-candidates-results. This function calls that for every
-# candidate who was ever sent an online test, and records any newly
-# SUBMITTED attempt. Safe to run repeatedly — skips any attempt_id already
-# recorded, so nothing gets duplicated across runs.
-#
-# NOT scheduled. It used to run every minute (hooks.py cron + a cloud
-# "Scheduler Event" Server Script), and on 2026-10-01 MeritTrac blocked the
-# APF account for the repeated requests. It now runs only when a candidate
-# finishes the test, via trigger_merittrac_results_pull_on_finish (below),
-# which is rate-limited. Don't put it back on a scheduler.
-def pull_pending_merittrac_results():
-    import requests as _req
+# Some subjects (Music, Physical Education, Visual Art, Special Education,
+# ...) can't be judged on the MeritTrac score alone — Question Paper Master's
+# evaluator_email marks the question papers whose written answers must be
+# reviewed by a named evaluator. hooks.py fires this after_insert of every
+# "Field MeritTrac Test Result" (inserted by merit_trac.py's
+# process_field_result when MeritTrac posts a result).
+_EVALUATOR_EMAIL_SENDER = (
+    "Field Recruitment Azim Premji Foundation "
+    "<field.recruitment@azimpremjifoundation.org>"
+)
 
-    candidate_ids = frappe.get_all(
-        "Field Meritrac Test URL", pluck="applicant_id", distinct=True
+# Web Form (cloud: "evaluator-marks-form") where the evaluator enters the
+# question-wise marks + Select/Regret into "Field Evaluator Marks". Any
+# fieldname passed as a query param is pre-filled by the web form.
+_EVALUATOR_MARKS_FORM_ROUTE = "/field-evaluator-marks/new"
+
+
+def on_field_merittrac_result_insert(doc, method=None):
+    # enqueue_after_commit: only email for results that were actually saved
+    # (merit_trac.py rolls back on errors). PDF + send is done off the
+    # request. The job runs as whoever inserted the result — Guest for
+    # MeritTrac's webhook — so it calls the unchecked _send_result_to_evaluator,
+    # not the System Manager-only whitelisted wrapper.
+    frappe.enqueue(
+        "ms_calendar.api.field_merit_trac._send_result_to_evaluator",
+        queue="short",
+        enqueue_after_commit=True,
+        result_name=doc.name,
     )
-    if not candidate_ids:
-        return {"checked": 0, "inserted": 0}
 
-    already_have = set(
-        frappe.get_all("Field MeritTrac Test Result", pluck="attempt_id")
+
+def _normalize_subject(subject):
+    # Master has e.g. "Primary  Kannada" (double space).
+    return " ".join((subject or "").lower().split())
+
+
+def _get_evaluator_qp_row(applicant_id):
+    """Question Paper Master row (with an evaluator_email) for the test this
+    applicant was sent, or None.
+
+    Field MeritTrac Test Result.assessment_id is MeritTrac's internal UUID,
+    not the SA code the master is keyed on — the SA code and the candidate's
+    subject come from the applicant's "Field Meritrac Test URL" instead.
+    """
+    test_url = frappe.get_all(
+        "Field Meritrac Test URL",
+        filters={"applicant_id": applicant_id},
+        fields=["assessment_id", "subject"],
+        order_by="creation desc",
+        limit=1,
+    )
+    if not test_url or not test_url[0].assessment_id:
+        return None
+    sa_code = test_url[0].assessment_id
+    subject = test_url[0].subject or frappe.db.get_value(
+        "Field Registration Form", applicant_id, "written_subject"
     )
 
-    cred = frappe.get_doc("MeritTrac Credentials")
-    headers = {
-        "partnerid": cred.merittrac_partner_id,
-        "secretkey": cred.merittrac_secret_key,
-        "Content-Type": "application/json",
-    }
+    qp_rows = frappe.get_all(
+        "Question Paper Master",
+        or_filters={"qp_hindi_english": sa_code, "qp_kannada_english": sa_code},
+        fields=["test_subject", "evaluator_name", "evaluator_email"],
+        limit_page_length=0,
+    )
+
+    # One SA code can be shared by several subjects (SA08005 is both
+    # Secondary/High School English and Sr.Secondary/PU English) with
+    # different evaluators, so the candidate's own subject decides.
+    same_subject = [
+        r for r in qp_rows
+        if _normalize_subject(r.test_subject) == _normalize_subject(subject)
+    ]
+    if same_subject:
+        row = same_subject[0] if same_subject[0].evaluator_email else None
+    else:
+        # Subject didn't match any row (blank / overridden subject): only
+        # safe if every row for this paper points to the same evaluator.
+        with_evaluator = [r for r in qp_rows if r.evaluator_email]
+        row = (
+            with_evaluator[0]
+            if len({r.evaluator_email for r in with_evaluator}) == 1
+            else None
+        )
+
+    if row:
+        # The SA code the candidate actually sat — pre-filled on the marks
+        # form (a master row can hold both a Hindi and a Kannada code).
+        row.sa_code = sa_code
+    return row
+
+
+def _build_test_paper_pdf(result, test_subject, test_date):
+    from frappe.utils.html_utils import sanitize_html
+    from frappe.utils.pdf import get_pdf
+
+    # MeritTrac may send answers as HTML (rich-text editor) or plain text —
+    # sanitize keeps formatting but drops scripts; pre-wrap keeps plain
+    # text's line breaks.
+    answers = "".join(
+        f"""
+        <div style="margin-bottom:18px; page-break-inside:avoid;">
+            <p style="font-weight:bold; margin:0 0 6px 0;">Q{i}.</p>
+            <div style="margin:0 0 8px 0; white-space:pre-wrap;">{sanitize_html(row.question_text or "")}</div>
+            <p style="font-weight:bold; margin:0 0 6px 0;">Candidate's Answer:</p>
+            <div style="border:1px solid #ccc; padding:8px; white-space:pre-wrap;">{sanitize_html(row.candidate_response or "") or "<i>Not answered</i>"}</div>
+        </div>
+        """
+        for i, row in enumerate(result.descriptive_responses or [], start=1)
+    ) or "<p><i>No written answers were recorded for this test.</i></p>"
+
+    html = f"""
+        <div style="font-family:Arial, sans-serif; font-size:12px; color:#222;">
+            <h2 style="margin:0 0 12px 0;">{escape_html(test_subject)} — Test Paper</h2>
+            <table style="border-collapse:collapse; margin-bottom:20px;">
+                <tr><td style="padding:3px 12px 3px 0;"><b>Applicant ID</b></td><td>{escape_html(result.applicant_id or "")}</td></tr>
+                <tr><td style="padding:3px 12px 3px 0;"><b>Applicant Name</b></td><td>{escape_html(result.applicant_name or "")}</td></tr>
+                <tr><td style="padding:3px 12px 3px 0;"><b>Test Date</b></td><td>{escape_html(test_date)}</td></tr>
+            </table>
+            {answers}
+        </div>
+    """
+    return get_pdf(html)
+
+
+@frappe.whitelist()
+def send_result_to_evaluator(result_name):
+    """Email the result's written answers (as a PDF) to the evaluator set on
+    its Question Paper Master row. No-op if that row has no evaluator.
+
+    Whitelisted (System Manager) so a result can be re-sent by hand:
+    frappe.call("ms_calendar.api.field_merit_trac.send_result_to_evaluator",
+    {result_name: "FAPMTR-0001"})
+    """
+    frappe.only_for("System Manager")
+    return _send_result_to_evaluator(result_name)
+
+
+def _send_result_to_evaluator(result_name):
+    result = frappe.get_doc("Field MeritTrac Test Result", result_name)
+    qp_row = _get_evaluator_qp_row(result.applicant_id)
+    if not qp_row:
+        return {"sent": False, "reason": "No evaluator for this question paper"}
 
     try:
-        resp = _merittrac_post_with_retry(
-            "https://www.talent-next.com/hrms/get-candidates-results",
-            headers,
-            {"candidateIds": candidate_ids},
-        )
-    except (_req.exceptions.ReadTimeout, _req.exceptions.ConnectionError) as exc:
-        frappe.log_error(
-            title="MERITTRAC_RESULTS_PULL_TIMEOUT",
-            message=f"Gave up after {_MERITTRAC_RETRIES + 1} attempts: {exc}",
-        )
-        return {"checked": len(candidate_ids), "inserted": 0, "error": "timeout"}
+        from urllib.parse import quote, urlencode
 
-    if not resp.ok:
-        frappe.log_error(
-            title="MERITTRAC_RESULTS_PULL_ERROR",
-            message=f"status={resp.status_code} body={resp.text[:800]}",
-        )
-        return {
-            "checked": len(candidate_ids),
-            "inserted": 0,
-            "error": f"http_{resp.status_code}",
-        }
+        test_datetime = get_datetime(result.created_at or result.creation)
+        test_date = test_datetime.strftime("%d %B %Y")
+        test_subject = qp_row.test_subject
+        evaluator_name = qp_row.evaluator_name or "Evaluator"
 
-    rows = (resp.json() or {}).get("data") or []
-
-    def fix_dt(iso):
-        if not iso:
-            return None
-        return iso.replace("T", " ").split(".")[0]
-
-    inserted = 0
-    for row in rows:
-        if not isinstance(row, dict) or row.get("attempt_status") != "SUBMITTED":
-            continue
-
-        attempt_id = row.get("attemptId")
-        if not attempt_id or attempt_id in already_have:
-            continue
-
-        candidate_id = row.get("candidateId")
-        applicant_name = (
-            frappe.db.get_value(
-                "Field Registration Form", candidate_id, "full_name_aadhaar"
+        # quote (not urlencode's default quote_plus): the web form reads
+        # these with decodeURIComponent, which would leave "+" for spaces.
+        marks_form_url = (
+            frappe.utils.get_url(_EVALUATOR_MARKS_FORM_ROUTE)
+            + "?"
+            + urlencode(
+                {
+                    "applicant_id": result.applicant_id or "",
+                    "applicant_name": result.applicant_name or "",
+                    "test_subject": test_subject or "",
+                    "question_paper": qp_row.sa_code or "",
+                    "test_date": test_datetime.strftime("%Y-%m-%d"),
+                    "evaluator_name": qp_row.evaluator_name or "",
+                    "evaluator_email": qp_row.evaluator_email or "",
+                },
+                quote_via=quote,
             )
-            or ""
         )
-        percentage = row.get("overAllPercentageScore")
 
-        result_doc = frappe.get_doc(
-            {
-                "doctype": "Field MeritTrac Test Result",
-                "applicant_id": candidate_id,
-                "applicant_name": applicant_name,
-                "score_percentile": percentage,
-                "overall_percentage_score": percentage,
-                "attempt_id": attempt_id,
-                "assessment_id": row.get("assessmentId"),
-                "attempt_status": row.get("attempt_status"),
-                "score_report": row.get("TnReport"),
-                "tn_report": row.get("TnReport"),
-                "total_score": row.get("score"),
-                "max_score": row.get("maxScore"),
-                "total_questions": row.get("totalQuestion"),
-                "total_attempted": row.get("totalAttempted"),
-                "user_img_key": row.get("userImgKey"),
-                "id_img_key": row.get("idImgKey"),
-                "credit_score": row.get("creditScore"),
-                "proctor_comment": row.get("proctorComment"),
-                "updated_at": fix_dt(row.get("updatedAt")),
-                "created_at": fix_dt(row.get("createdAt")),
-                # Proper child tables (Field MeritTrac Section Score /
-                # Field MeritTrac Descriptive Response) — replaced the old
-                # section_wise_score/descriptive_response Long Text JSON
-                # blob fields on 2026-09-01, per a request for the
-                # descriptive Q&A to render as separate, readable rows
-                # instead of raw JSON text on the form. The doctype
-                # definition lives in fixtures/doctype.json (re-imported
-                # with force=True on every migrate) — both Table fields
-                # must stay in that file, or the next deploy silently
-                # strips them again (happened 2026-09-06, -21 and -22).
-                "section_wise_scores": [
-                    {
-                        "section_name": s.get("name"),
-                        "score": s.get("score"),
-                        "max_score": s.get("maxScore"),
-                    }
-                    for s in (row.get("sectionWiseScore") or [])
-                    if isinstance(s, dict)
-                ],
-                "descriptive_responses": [
-                    {
-                        "question_text": r.get("questionText"),
-                        "candidate_response": r.get("candidateResponse"),
-                    }
-                    for r in (row.get("descriptiveResponse") or [])
-                    if isinstance(r, dict)
-                ],
-            }
+        message = f"""
+            <p>Dear {escape_html(evaluator_name)},</p>
+            <p>Please find attached the {escape_html(test_subject)} test papers for evaluation. The written test was conducted on {test_date}. Kindly evaluate the test papers and update the marks in the portal and Select or Reject from the dropdown provided.</p>
+            <p style="margin:20px 0;">
+                <a href="{escape_html(marks_form_url)}" style="background:#2490ef; color:#ffffff; padding:10px 18px; border-radius:6px; text-decoration:none; font-weight:bold;">Enter Marks</a>
+            </p>
+            <p style="font-size:12px; color:#666;">If the button doesn't open, copy this link into your browser:<br>{escape_html(marks_form_url)}</p>
+            <p>If you have any additional feedback/comments about the candidate, please write the comments section provided in the portal.</p>
+            <p>Warm Regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
+        """
+
+        frappe.sendmail(
+            sender=_EVALUATOR_EMAIL_SENDER,
+            recipients=[qp_row.evaluator_email],
+            subject=f"{test_subject} Test Paper for Evaluation – {result.applicant_id}",
+            message=message,
+            attachments=[
+                {
+                    "fname": f"{result.applicant_id} - {test_subject} Test Paper.pdf".replace("/", "-"),
+                    "fcontent": _build_test_paper_pdf(result, test_subject, test_date),
+                }
+            ],
+            reference_doctype="Field MeritTrac Test Result",
+            reference_name=result.name,
         )
-        try:
-            result_doc.insert(ignore_permissions=True, ignore_links=True)
-        except frappe.DuplicateEntryError:
-            # attempt_id is a unique field — this only fires if another
-            # run (the scheduled poll and the finish-page trigger can
-            # legitimately overlap) already inserted this exact attempt
-            # between our dedup check above and this insert. Not an
-            # error, just lost a race; move on to the next row.
-            frappe.db.rollback()
-            already_have.add(attempt_id)
-            continue
-        already_have.add(attempt_id)
-        inserted += 1
+    except Exception:
+        frappe.log_error(
+            title="FIELD_MERITTRAC_EVALUATOR_EMAIL_ERROR",
+            message=f"{result_name}: {frappe.get_traceback()}",
+        )
+        raise
 
-    frappe.db.commit()
-    return {"checked": len(candidate_ids), "fetched": len(rows), "inserted": inserted}
-
-
-@frappe.whitelist(allow_guest=True)
-@rate_limit(limit=1, seconds=15, ip_based=False)
-def trigger_merittrac_results_pull_on_finish():
-    """
-    Fired by a tiny script on the "Thank You for Attending the Test" page
-    (Web Page "test-completed-field", route assessment-finished-field) the
-    moment a candidate lands there right after submitting — this is the
-    only thing that pulls Field results now (there is no scheduled poll),
-    without needing MeritTrac to actually push (see the long comment on
-    pull_pending_merittrac_results above — that has still never happened
-    for the Field program).
-
-    Public/guest page hits this, so it's rate-limited globally (not per
-    IP — many different candidates finishing around the same time should
-    still only trigger one pull, not one each) rather than trusting every
-    visitor to be well-behaved. Runs the pull in the background so a
-    slow/failed MeritTrac call never blocks or errors the candidate's
-    page — the fetch() that calls this is fire-and-forget from the page's
-    side regardless.
-    """
-    frappe.enqueue(
-        "ms_calendar.api.field_merit_trac.pull_pending_merittrac_results",
-        queue="short",
-        job_name="merittrac_results_pull_on_finish",
-    )
-    return {"queued": True}
+    return {"sent": True, "evaluator_email": qp_row.evaluator_email}
 
 
 # ---------------------------------------------------------------------------
@@ -1482,51 +943,6 @@ _WRITTEN_SUBJECT_LEVEL_PREFIXES = [
 ]
 
 _ASSESSMENT_TOKEN_STOPWORDS = {"foundation", "azim", "premji", "set"}
-
-# Explicit overrides for (candidate role, written_subject) pairs where the
-# generic word-overlap scorer below is known to misfire — either because the
-# Field Meritrac Assessment label uses different wording than the picklist
-# ("Mathematics" vs "Maths"), a shared/reused SA number is stored under an
-# unrelated-looking label (the Social Science paper is filed under a
-# "History" assessment_set), or two live records still tie on score alone
-# (e.g. Upper Primary Hindi's Set 1/Set 2 both remaining active). Checked
-# before the generic scorer runs; verified against live Field Meritrac
-# Assessment data as of 2026-08-17.
-_WRITTEN_SUBJECT_OVERRIDES = {
-    ("School Teacher", "Primary Mathematics"): "SA08072",
-    ("School Teacher", "Upper Primary Maths"): "SA08073",
-    ("School Teacher", "Secondary/High School Maths"): "SA07733",
-    ("School Teacher", "Upper Primary Social Science"): "SA07746",
-    ("School Teacher", "Upper Primary Kannada"): "SA07730",
-    ("School Teacher", "Upper Primary Hindi"): "SA07744",
-    # "Upper Primary English" was losing the tie-break to "Primary English"
-    # (SA07690) because the UP record's label says "UP", not "Upper"/"Primary",
-    # so it doesn't even earn the level-word point the Primary record gets.
-    # Confirmed live via the Initiate Test dialog on 2026-08-18.
-    ("School Teacher", "Upper Primary English"): "SA07741",
-    # No dedicated Sanskrit paper exists — SA08071 is actually labeled
-    # "UP_Hindi Set 1", a deliberate stand-in reuse, not a mismatch.
-    # Confirmed live via the Initiate Test dialog on 2026-09-01 (manually
-    # picked SA08071 for an unmatched "Upper Primary Sanskrit" candidate).
-    ("School Teacher", "Upper Primary Sanskrit"): "SA08071",
-}
-
-# Subjects with more than one genuinely valid SA number, where the form has
-# no field to disambiguate (e.g. no language selector) — unlike
-# _WRITTEN_SUBJECT_OVERRIDES, we return all valid options as "ambiguous"
-# rather than picking one, since guessing wrong here would assign the wrong
-# paper outright. Discovered because the generic scorer was ignoring both
-# genuine ECE records (their DB label uses "ECE", which shares no word with
-# the picklist's "Early Childhood Education") and instead tying on an
-# unrelated record ("Special Education") by accident.
-_WRITTEN_SUBJECT_AMBIGUOUS_OVERRIDES = {
-    ("School Teacher", "Early Childhood Education"): ["SA07671", "SA07948"],  # Hindi / Kannada
-    # Was falling through to "no_token_overlap" — "EVS" doesn't appear in
-    # either assessment_set's text, so the generic scorer found nothing at
-    # all. Shares the same Hindi/Kannada Set 2 pair as "Primary All
-    # subjects" per the 2026-08-31 subject-mapping sheet.
-    ("School Teacher", "Primary EVS"): ["SA07692", "SA07694"],  # Hindi / Kannada
-}
 
 # Field Role (candidate) -> Field Meritrac Assessment.role values it can match.
 # Ordered by preference (e.g. latest Associates batch first) for tie-breaking.
@@ -1590,43 +1006,12 @@ def suggest_meritrac_assessment(candidate_ids):
     written_subject = subjects.pop()
 
     # Strip region suffixes ("School Teacher - Barmer" -> "School Teacher")
-    # before comparing — every key in the override/role-map tables above is
-    # the bare category, so a suffixed role missed all of them and the
-    # scorer searched every role's tests unfiltered (e.g. a "Resource
-    # Person - Rajasthan" batch tied onto an unrelated ARP test).
+    # before comparing — every key in the role-map table above is the bare
+    # category, so a suffixed role missed all of them and the scorer
+    # searched every role's tests unfiltered (e.g. a "Resource Person -
+    # Rajasthan" batch tied onto an unrelated ARP test).
     roles = {r.role.split(" - ")[0].strip() for r in rows if r.role}
     role = roles.pop() if len(roles) == 1 else None
-
-    override_name = _WRITTEN_SUBJECT_OVERRIDES.get((role, written_subject))
-    if override_name:
-        override_set = frappe.db.get_value(
-            "Field Meritrac Assessment", override_name, "assessment_set"
-        )
-        if override_set:
-            return {
-                "matched": True,
-                "assessment": override_name,
-                "assessment_set": override_set,
-                "ambiguous": False,
-                "alternatives": [],
-            }
-
-    ambiguous_names = _WRITTEN_SUBJECT_AMBIGUOUS_OVERRIDES.get((role, written_subject))
-    if ambiguous_names:
-        ambiguous_records = [
-            {"name": n, "assessment_set": frappe.db.get_value("Field Meritrac Assessment", n, "assessment_set")}
-            for n in ambiguous_names
-        ]
-        ambiguous_records = [r for r in ambiguous_records if r["assessment_set"]]
-        if ambiguous_records:
-            best = ambiguous_records[0]
-            return {
-                "matched": True,
-                "assessment": best["name"],
-                "assessment_set": best["assessment_set"],
-                "ambiguous": True,
-                "alternatives": ambiguous_records[1:],
-            }
 
     level, subject_text = _split_written_subject(written_subject)
     subject_tokens = _tokenize(subject_text)

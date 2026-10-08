@@ -575,31 +575,14 @@ fixtures = [
             ]
         ],
     },
-    # MeritTrac result doctypes were created as Custom DocTypes directly on
-    # ms.local's DB (no JSON/module file), so any other site running this
-    # app needs them shipped as a fixture too, or merit_trac.py's
-    # test_result_api() fails with a DocType import error on insert.
+    # No DocType fixture: "MeritTrac Test Result", "Field MeritTrac Test
+    # Result", "Department" and "Location" are Custom DocTypes maintained on
+    # each site directly. Shipping them as fixtures/doctype.json made every
+    # migrate force-overwrite the site's copy (2026-10-08 deploy stripped the
+    # Field MeritTrac Test Result child tables and broke result inserts).
+    # Note sync_fixtures imports every file in fixtures/, not just the ones
+    # listed here — don't re-add a doctype.json there.
     #
-    # Department and Location are the same situation: also created as
-    # Custom DocTypes directly on ms.local's DB, and used as Link targets
-    # on Applicant Master's "department"/"location" fields. Without this
-    # fixture, any other site (e.g. production) shows "Missing DocType —
-    # Field department is referring to non-existing doctype Department."
-    {
-        "dt": "DocType",
-        "filters": [
-            [
-                "name",
-                "in",
-                [
-                    "MeritTrac Test Result",
-                    "Field MeritTrac Test Result",
-                    "Department",
-                    "Location",
-                ],
-            ]
-        ],
-    },
     # Actual Department/Location records (Applicant Master's Link fields
     # need the rows to exist too, not just the DocType definition).
     {"dt": "Department"},
