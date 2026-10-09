@@ -543,6 +543,14 @@ doc_events = {
     "Final Round Feedback Form": {
         "after_insert": "ms_calendar.api.ms_field.send_final_round_feedback_pdf_to_registration_form"
     },
+    # Enabler's Functional / Final round feedback forms (cloud web forms
+    # enablers-functional-round-feedback-form / enablers-final-round-feedback-form).
+    "Functional Feedback Field Enabler": {
+        "after_insert": "ms_calendar.api.ms_field.send_enabler_functional_feedback_pdf_to_registration_form"
+    },
+    "Final Feedback Field Enabler": {
+        "after_insert": "ms_calendar.api.ms_field.send_enabler_final_feedback_pdf_to_registration_form"
+    },
 }
 
 # Client Script records that must exist on any site running this app

@@ -978,6 +978,80 @@ def _resolve_field_feedback_url(
     return feedback_url
 
 
+def _field_auto_attach_fields(interview_round, applicant_role, department=None):
+    """
+    Field Registration Form attach fields auto-attached to a Field
+    interview invite, picked by round. Used by create_interview_event and by
+    check_field_interview_attachments (the pre-create check), so the
+    "missing PDFs" popup always lists exactly what the invite would carry.
+
+    Recruiter Round  → base docs
+    Round-1 (Subject / Education Capacity / Functional) → base + recruiter feedback
+        (a Round-1 interview is where the round one feedback gets written,
+        so it isn't attached to its own invite)
+    Technical Round (Health, after Functional) → base + recruiter + round one feedback
+    Round-2 (Demo / Leader Round-1) → base + recruiter + round one feedback
+    Round-3 (Leader Round-2) → base + recruiter + round one + round two feedback
+    Calibration (Associate Resource Person) → everything
+
+    "Base docs" = resume, application form, self declaration, MeritTrac
+    result. Health department candidates take no MeritTrac test, so it's
+    left out for them.
+    """
+    round_raw = str(interview_round or "").strip().lower()
+    role_raw = str(applicant_role or "").strip().lower()
+    dept_raw = str(department or "").strip().lower()
+
+    is_recruiter_round = "recruiter" in round_raw
+    is_round1 = (
+        "subject round" in round_raw
+        or "education capacity round" in round_raw
+        or ("functional round" in round_raw and "leader" not in round_raw)
+    )
+    # Health's Technical Round comes after its Functional Round (and uses the
+    # same feedback form), so it carries the Functional Round feedback.
+    is_technical = "technical round" in round_raw
+    is_round2 = "demo round" in round_raw or "leader round-1" in round_raw
+    is_round3 = "leader round-2" in round_raw
+    is_calibration_arp = (
+        "calibration" in round_raw and "associate resource person" in role_raw
+    )
+    # Same Health bucket as _resolve_field_feedback_url (ARP excluded).
+    is_health = "health" in dept_raw and "associate resource person" not in dept_raw
+
+    base = ["resume_upload", "application_forms", "self_declaration"]
+
+    if is_calibration_arp:
+        feedback = [
+            "recruiter_round_feedback_form",
+            "round_one_feedback_from",
+            "round_two_feedback_form",
+            "round_tree_feedback_form",
+        ]
+    elif is_recruiter_round:
+        feedback = []
+    elif is_round1:
+        feedback = ["recruiter_round_feedback_form"]
+    elif is_technical or is_round2:
+        feedback = ["recruiter_round_feedback_form", "round_one_feedback_from"]
+        # School Teacher has a Demo Round before Leader Round-1; its feedback
+        # (Demo Lesson Observation → round_two_feedback_form) must reach the
+        # Leader Round-1 panel too.
+        if "leader round-1" in round_raw and "school teacher" in dept_raw:
+            feedback.append("round_two_feedback_form")
+    elif is_round3:
+        feedback = [
+            "recruiter_round_feedback_form",
+            "round_one_feedback_from",
+            "round_two_feedback_form",
+        ]
+    else:
+        feedback = []
+
+    merit = [] if is_health else ["filed_merit_track_test"]
+    return base + feedback + merit
+
+
 def _upsert_candidate_calendar_event(
     headers,
     sender_email,
@@ -1091,6 +1165,8 @@ def create_interview_event(
     interview_mode_hybrid=None,
     google_map_hybrid=None,
     location_address=None,
+    exclude_attach_fields=None,
+    include_attach_fields=None,
 ):
 
     import re
@@ -1574,75 +1650,28 @@ def create_interview_event(
             if not srf:
                 raise Exception("srf not loaded, skipping auto-attach")
 
-            # Determine which fields to attach based on round
-            # resume_upload is NOT auto-attached — resume comes from candidate_cv__resume on the form
-            # application_forms is always attached for all rounds
-            if is_calibration_arp:
-                auto_attach_fields = [
-                    "resume_upload",
-                    "application_forms",
-                    "self_declaration",
-                    "recruiter_round_feedback_form",
-                    "round_one_feedback_from",
-                    "round_two_feedback_form",
-                    "round_tree_feedback_form",
-                    "filed_merit_track_test",
-                ]
-            elif is_recruiter_round:
-                auto_attach_fields = [
-                    "resume_upload",
-                    "application_forms",
-                    "self_declaration",
-                    "filed_merit_track_test",
-                ]
-            elif is_round1:
-                if "education capacity round" in round_raw:
-                    auto_attach_fields = [
-                        "resume_upload",
-                        "recruiter_round_feedback_form",
-                        "application_forms",
-                        "self_declaration",
-                        "filed_merit_track_test",
-                    ]
-                else:
-                    # Subject Round / Functional Round
-                    auto_attach_fields = [
-                        "resume_upload",
-                        "recruiter_round_feedback_form",
-                        "round_one_feedback_from",
-                        "application_forms",
-                        "self_declaration",
-                        "filed_merit_track_test",
-                    ]
-            elif is_round2:
-                auto_attach_fields = [
-                    "resume_upload",
-                    "recruiter_round_feedback_form",
-                    "round_one_feedback_from",
-                    "application_forms",
-                    "self_declaration",
-                    "filed_merit_track_test",
-                ]
-            elif is_round3:
-                auto_attach_fields = [
-                    "resume_upload",
-                    "recruiter_round_feedback_form",
-                    "round_one_feedback_from",
-                    "round_two_feedback_form",
-                    "application_forms",
-                    "self_declaration",
-                    "filed_merit_track_test",
-                ]
-            else:
-                auto_attach_fields = [
-                    "resume_upload",
-                    "application_forms",
-                    "self_declaration",
-                ]
+            # Which Field Registration Form attach fields go out for this
+            # round — shared with check_field_interview_attachments (the
+            # pre-create check on the form) so both always agree.
+            auto_attach_fields = _field_auto_attach_fields(
+                Interview_round, Applicants_Role, department
+            )
 
-            # MeritTrac test result PDF (manually uploaded) — always attach if present,
-            # regardless of round.
-            auto_attach_fields = auto_attach_fields + ["filed_merit_track_test"]
+            # PDFs the user unticked in the form's PDF review popup
+            # (fis_show_attachment_confirm) — left out of this invite.
+            _excluded = frappe.parse_json(exclude_attach_fields) if exclude_attach_fields else []
+            if _excluded:
+                auto_attach_fields = [f for f in auto_attach_fields if f not in _excluded]
+
+            # Optional PDFs the user switched ON in the same popup (not part
+            # of this round's default list). Generated now if the record
+            # exists but its PDF doesn't yet.
+            _included = frappe.parse_json(include_attach_fields) if include_attach_fields else []
+            for _inc in _included:
+                if _inc in _FRF_ATTACH_LABELS and _inc not in auto_attach_fields:
+                    _ensure_frf_attachment(application_id, _inc)
+                    srf.set(_inc, frappe.db.get_value(_frf_doctype, application_id, _inc))
+                    auto_attach_fields.append(_inc)
 
             # Track filenames already added (from manual attachments) to avoid duplicates
             _already_added = {fname.lower() for fname, _ in final_files}
@@ -5303,19 +5332,313 @@ def send_leader_final_round_feedback_pdf_to_registration_form(doc, method=None):
     )
 
 
-def _merge_feedback_submissions_to_registration_form(doc, target_field, pdf_title):
+def _render_feedback_submissions_pdf(doctype, applicant_id, pdf_title, current_doc=None):
     """
-    Shared by every "<some> Feedback Form" doctype that should merge ALL of
-    its submissions for one applicant into a single PDF (one section per
-    submission) and save it into a specific attach field on the matching
-    Field Registration Form — so a second/third submission for the same
-    applicant replaces the attachment with a combined PDF instead of piling
-    up separate ones. applicant_id on these doctypes is a Link to Field
-    Registration Form and its value is that record's name, so the match is
-    a direct lookup.
+    Builds ONE PDF of every submission of `doctype` for this applicant (one
+    section per submission, oldest first). Returns
+    (first_submission_creation, pdf_title, pdf_bytes), or None when the
+    applicant has no submission of this doctype. Saving it is left to the
+    caller (_merge_feedback_submissions_to_registration_form), which may
+    merge several doctypes' PDFs into the same attach field.
     """
     from frappe.utils.pdf import get_pdf
 
+    submissions = frappe.get_all(
+        doctype,
+        filters={"applicant_id": applicant_id},
+        fields=["name", "creation"],
+        order_by="creation asc",
+    )
+    if not submissions:
+        return None
+
+    # The submission that triggered this run (after_insert) is passed in so
+    # it's used as-is; otherwise the newest one stands in for "doc" below.
+    doc = current_doc or frappe.get_doc(doctype, submissions[-1]["name"])
+
+
+    meta = frappe.get_meta(doc.doctype)
+    skip_fieldtypes = {"HTML", "Button"}
+    # Rendered full width under a section's two columns rather than
+    # squeezed into half a column (Strengths / Concerns / Comments etc.).
+    long_fieldtypes = {
+        "Small Text", "Text", "Long Text", "Text Editor",
+        "HTML Editor", "Markdown Editor", "Code", "JSON", "Table",
+    }
+    esc = frappe.utils.escape_html
+
+    # Same two-column "label above a grey value box" layout as the
+    # "Field Application Form" print format (the applicant's
+    # application-form PDF), per a 2026-09-29 request — replaced the
+    # old single label|value table. Layout follows the doctype's own
+    # Section Breaks (one dark title bar each) and labelled Column
+    # Breaks (e.g. "A.Essential" / "B.Other Supporting"); a section
+    # with just one column is split into two automatically.
+    def _build_sections():
+        sections = []
+        cur = {"label": None, "columns": [{"label": None, "fields": []}]}
+        for df in meta.fields:
+            if df.fieldtype in ("Section Break", "Tab Break"):
+                sections.append(cur)
+                cur = {"label": (df.label or "").strip() or None,
+                       "columns": [{"label": None, "fields": []}]}
+            elif df.fieldtype == "Column Break":
+                cur["columns"].append({"label": (df.label or "").strip() or None, "fields": []})
+            elif df.fieldtype not in skip_fieldtypes:
+                cur["columns"][-1]["fields"].append(df)
+        sections.append(cur)
+        out = []
+        for s in sections:
+            cols = [c for c in s["columns"] if c["fields"]]
+            if cols:
+                out.append({"label": s["label"], "columns": cols})
+        return out
+
+    layout = _build_sections()
+
+    def _format_value(fb_doc, df):
+        value = fb_doc.get(df.fieldname)
+        if df.fieldtype == "Table":
+            return _render_child_table(value or [], df.options)
+        if value in (None, ""):
+            return ""
+        if df.fieldtype == "Check":
+            return "Yes" if frappe.utils.cint(value) else "No"
+        if df.fieldtype == "Date":
+            return esc(frappe.utils.formatdate(value, "d MMM yyyy"))
+        if df.fieldtype == "Datetime":
+            return esc(frappe.utils.format_datetime(value, "d MMM yyyy, h:mm a"))
+        if df.fieldtype == "Rating":
+            stars = frappe.utils.cint(df.options) or 5
+            return f"{round(frappe.utils.flt(value) * stars)} / {stars}"
+        if df.fieldtype in ("Text Editor", "HTML Editor"):
+            return str(value)
+        return esc(str(value)).replace("\n", "<br>")
+
+    def _render_child_table(rows, child_doctype):
+        if not rows:
+            return ""
+        child_fields = [
+            f for f in frappe.get_meta(child_doctype).fields
+            if f.fieldtype not in ("Section Break", "Column Break", "Tab Break", "HTML", "Button")
+        ]
+        listed = [f for f in child_fields if f.in_list_view] or child_fields
+        head = "".join(f"<th>{esc((f.label or f.fieldname).strip())}</th>" for f in listed)
+        body = "".join(
+            "<tr>" + "".join(f"<td>{_format_value(r, f) or '&mdash;'}</td>" for f in listed) + "</tr>"
+            for r in rows
+        )
+        return f"<table class='fb-table'><tr>{head}</tr>{body}</table>"
+
+    def _field_html(fb_doc, df):
+        value_html = _format_value(fb_doc, df)
+        label = esc((df.label or df.fieldname).strip())
+        if df.fieldtype == "Table":
+            empty_box = "<span class='fb-value'>&mdash;</span>"
+            return f"<div class='fb-field'><span class='fb-label'>{label}</span>{value_html or empty_box}</div>"
+        return (
+            f"<div class='fb-field'><span class='fb-label'>{label}</span>"
+            f"<span class='fb-value'>{value_html or '&mdash;'}</span></div>"
+        )
+
+    def _render_section(fb_doc, sec, title):
+        cols = sec["columns"]
+        full_width = []
+        if len(cols) == 1:
+            fields = cols[0]["fields"]
+            short = [f for f in fields if f.fieldtype not in long_fieldtypes]
+            full_width = [f for f in fields if f.fieldtype in long_fieldtypes]
+            half = (len(short) + 1) // 2
+            cols = [{"label": None, "fields": short[:half]},
+                    {"label": None, "fields": short[half:]}] if short else []
+        html = f"<div class='fb-section'><div class='fb-section-title'>{esc(title)}</div>"
+        if cols:
+            width = 100.0 / len(cols)
+            html += "<table class='fb-cols'><tr>"
+            for c in cols:
+                html += f"<td style='width:{width:.2f}%;'>"
+                if c["label"]:
+                    html += f"<div class='fb-subhead'>{esc(c['label'])}</div>"
+                html += "".join(_field_html(fb_doc, f) for f in c["fields"])
+                html += "</td>"
+            html += "</tr></table>"
+        html += "".join(_field_html(fb_doc, f) for f in full_width)
+        return html + "</div>"
+
+    # Zwayam-style heading, per a 2026-09-29 request (the recruitment
+    # team asked for the interview type + interviewer name on every
+    # feedback PDF): "Interview Feedback - NAME [Round]" as the title,
+    # and per submission "<date> | Feedback updated by <panelist> for
+    # <Round>" instead of the old "Submission N · <docname> · <date>".
+    #
+    # One Feedback Form doctype can serve several rounds (e.g. Leader
+    # Final Round → Leader Round-1 AND Leader Round-2 — see
+    # FIELD_FEEDBACK_ROUND_MAP), so the real round comes from the
+    # applicant's Field Interview Schedule: the latest one created on
+    # or before that submission whose base round uses this doctype.
+    # Falls back to the doctype's own name ("Leader Final Round") when
+    # no schedule matches.
+    candidate_rounds = [
+        r for r, doctypes in FIELD_FEEDBACK_ROUND_MAP.items() if doc.doctype in doctypes
+    ]
+    schedules = frappe.get_all(
+        "Field Interview Schedule",
+        filters={"application_id": applicant_id},
+        fields=["interview_round", "creation"],
+        order_by="creation desc",
+        limit_page_length=0,
+    ) if candidate_rounds else []
+    fallback_round = (
+        pdf_title.replace(" - Feedback Form", "").replace("Feedback Form - ", "").replace(" Feedback Form", "").strip()
+        or pdf_title
+    )
+
+    def _round_for(fb_doc):
+        for s in schedules:
+            base = re.sub(r"\s+(Select|Reject)$", "", (s.interview_round or "").strip())
+            if base in candidate_rounds and s.creation <= fb_doc.creation:
+                return base
+        return fallback_round
+
+    def _panelist_for(fb_doc):
+        return (
+            (fb_doc.get("panelist_name") or "").strip()
+            or (fb_doc.get("panelist_email") or fb_doc.get("panelist__email") or "").strip()
+            or frappe.utils.get_fullname(fb_doc.owner)
+        )
+
+    display_name = doc.applicant_name or applicant_id
+    sections_html = ""
+    rounds_seen = []
+    for row in submissions:
+        fb_doc = (
+            doc
+            if row["name"] == doc.name
+            else frappe.get_doc(doc.doctype, row["name"])
+        )
+        round_name = _round_for(fb_doc)
+        if round_name not in rounds_seen:
+            rounds_seen.append(round_name)
+        submitted_date = frappe.utils.format_datetime(fb_doc.creation, "dd-MMM-yyyy")
+        submitted_time = frappe.utils.format_datetime(fb_doc.creation, "hh:mm a")
+        body = "".join(
+            _render_section(fb_doc, sec, sec["label"] or ("Applicant & Interview Details" if i == 0 else "Details"))
+            for i, sec in enumerate(layout)
+        )
+        sections_html += f"""
+            <div class="fb-submission">
+                <table class="fb-submission-head"><tr>
+                    <td class="fb-submission-date">{esc(submitted_date)}<br>{esc(submitted_time)}</td>
+                    <td class="fb-submission-by">Feedback updated by {esc(_panelist_for(fb_doc))} for {esc(round_name)}</td>
+                </tr></table>
+                {body}
+            </div>
+        """
+    title_rounds = ", ".join(rounds_seen) or fallback_round
+
+    html = f"""
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <style>
+                body {{ font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+                        font-size: 11.5px; line-height: 1.45; color: #202020; }}
+                .fb-letterhead {{ text-align: center; border-bottom: 2.5px solid #1f3a5f;
+                                  padding-bottom: 10px; margin-bottom: 4px; }}
+                .fb-org-name {{ font-size: 20px; font-weight: 700; letter-spacing: 0.4px;
+                                color: #1f3a5f; margin: 0; }}
+                .fb-doc-title {{ font-size: 12.5px; font-weight: 600; text-transform: uppercase;
+                                 letter-spacing: 1.8px; color: #555; margin: 3px 0 0 0; }}
+                .fb-title {{ text-align: center; font-size: 18px; font-weight: 700; color: #111;
+                             margin: 14px 0 2px 0; }}
+                .fb-submission {{ margin-top: 16px; }}
+                table.fb-submission-head {{ width: 100%; border-collapse: collapse;
+                                            border-bottom: 2px solid #1f3a5f; }}
+                .fb-submission-date {{ width: 110px; font-size: 11px; font-weight: 700; color: #111;
+                                       padding: 0 0 6px 0; vertical-align: top; white-space: nowrap; }}
+                .fb-submission-by {{ font-size: 13px; font-weight: 700; color: #111;
+                                     padding: 0 0 6px 10px; vertical-align: top; }}
+                .fb-section {{ margin-top: 14px; page-break-inside: avoid; }}
+                .fb-section-title {{ background: #1f3a5f; color: #ffffff; padding: 5px 10px;
+                                     font-size: 11px; font-weight: 600; text-transform: uppercase;
+                                     letter-spacing: 0.8px; border-radius: 2px; margin-bottom: 8px; }}
+                .fb-subhead {{ font-size: 11px; font-weight: 700; color: #1f3a5f;
+                               border-bottom: 1px solid #cdd6e0; padding-bottom: 3px;
+                               margin: 4px 0 8px 0; }}
+                table.fb-cols {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
+                table.fb-cols td {{ vertical-align: top; padding: 0 10px; }}
+                table.fb-cols td:first-child {{ padding-left: 0; }}
+                table.fb-cols td:last-child {{ padding-right: 0; }}
+                .fb-field {{ margin-bottom: 7px; page-break-inside: avoid; }}
+                .fb-label {{ display: block; font-size: 9.5px; font-weight: 600;
+                             text-transform: uppercase; letter-spacing: 0.3px; color: #000;
+                             margin-bottom: 1px; }}
+                .fb-value {{ display: block; min-height: 15px; padding: 3px 6px;
+                             background: #f7f8fa; border: 1px solid #e0e3e8; border-radius: 2px;
+                             font-size: 11.5px; color: #1a1a1a; }}
+                table.fb-table {{ width: 100%; border-collapse: collapse; margin: 2px 0 6px 0;
+                                  font-size: 10.5px; }}
+                table.fb-table th {{ background: #1f3a5f; color: #fff; text-transform: uppercase;
+                                     font-size: 9.5px; letter-spacing: 0.3px; padding: 5px 6px;
+                                     text-align: left; }}
+                table.fb-table td {{ border: 1px solid #e0e3e8; padding: 5px 6px; }}
+                .fb-footer {{ margin-top: 24px; padding-top: 6px; border-top: 1px solid #dcdfe4;
+                              font-size: 9px; color: #999; text-align: center; }}
+            </style>
+        </head>
+        <body>
+            <div class="fb-letterhead">
+                <p class="fb-org-name">Azim Premji Foundation</p>
+                <p class="fb-doc-title">{esc(pdf_title)}</p>
+            </div>
+            <div class="fb-title">Interview Feedback - {esc(display_name)} [{esc(title_rounds)}]</div>
+            {sections_html}
+            <div class="fb-footer">Generated on {esc(frappe.utils.format_datetime(frappe.utils.now_datetime(), "d MMM yyyy, h:mm a"))}</div>
+        </body>
+        </html>
+    """
+
+    return (submissions[0]["creation"], pdf_title, get_pdf(html))
+
+
+def _merge_pdf_bytes(pdf_parts):
+    """Concatenate several PDFs (bytes) into one, in the given order."""
+    from pypdf import PdfReader, PdfWriter
+
+    writer = PdfWriter()
+    for part in pdf_parts:
+        for page in PdfReader(io.BytesIO(part)).pages:
+            writer.add_page(page)
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
+# Title used for an attach field's PDF when it merges more than one Feedback
+# Form doctype (e.g. Demo Lesson Observation + Leader Final Round both feed
+# "Round Two Feedback Form" for School Teacher).
+_FRF_FIELD_PDF_TITLES = {
+    "recruiter_round_feedback_form": "Recruiter Round Feedback Form",
+    "round_one_feedback_from": "Round One Feedback Form",
+    "round_two_feedback_form": "Round Two Feedback Form",
+    "round_tree_feedback_form": "Round Three Feedback Form",
+}
+
+
+def _merge_feedback_submissions_to_registration_form(doc, target_field, pdf_title):
+    """
+    Shared by every "<some> Feedback Form" doctype's after_insert hook.
+    Rebuilds the applicant's `target_field` attachment on Field Registration
+    Form as ONE PDF holding every submission of EVERY Feedback Form doctype
+    that feeds that field (_FRF_FEEDBACK_SOURCES), oldest doctype first.
+
+    Before, each doctype overwrote the field with only its own submissions,
+    so e.g. a School Teacher's Leader Round-1 feedback replaced the Demo
+    Round feedback in "Round Two Feedback Form" and the Leader Round-2
+    panel never saw the Demo feedback. Now both go out, merged.
+    applicant_id on these doctypes is a Link to Field Registration Form and
+    its value is that record's name, so the match is a direct lookup.
+    """
     applicant_id = (doc.applicant_id or "").strip()
     if not applicant_id:
         frappe.log_error(
@@ -5332,257 +5655,34 @@ def _merge_feedback_submissions_to_registration_form(doc, target_field, pdf_titl
         return
 
     try:
-        # Pull every submission received so far for this applicant, not just this one.
-        submissions = frappe.get_all(
-            doc.doctype,
-            filters={"applicant_id": applicant_id},
-            fields=["name"],
-            order_by="creation asc",
-        )
-
-        meta = frappe.get_meta(doc.doctype)
-        skip_fieldtypes = {"HTML", "Button"}
-        # Rendered full width under a section's two columns rather than
-        # squeezed into half a column (Strengths / Concerns / Comments etc.).
-        long_fieldtypes = {
-            "Small Text", "Text", "Long Text", "Text Editor",
-            "HTML Editor", "Markdown Editor", "Code", "JSON", "Table",
-        }
-        esc = frappe.utils.escape_html
-
-        # Same two-column "label above a grey value box" layout as the
-        # "Field Application Form" print format (the applicant's
-        # application-form PDF), per a 2026-09-29 request — replaced the
-        # old single label|value table. Layout follows the doctype's own
-        # Section Breaks (one dark title bar each) and labelled Column
-        # Breaks (e.g. "A.Essential" / "B.Other Supporting"); a section
-        # with just one column is split into two automatically.
-        def _build_sections():
-            sections = []
-            cur = {"label": None, "columns": [{"label": None, "fields": []}]}
-            for df in meta.fields:
-                if df.fieldtype in ("Section Break", "Tab Break"):
-                    sections.append(cur)
-                    cur = {"label": (df.label or "").strip() or None,
-                           "columns": [{"label": None, "fields": []}]}
-                elif df.fieldtype == "Column Break":
-                    cur["columns"].append({"label": (df.label or "").strip() or None, "fields": []})
-                elif df.fieldtype not in skip_fieldtypes:
-                    cur["columns"][-1]["fields"].append(df)
-            sections.append(cur)
-            out = []
-            for s in sections:
-                cols = [c for c in s["columns"] if c["fields"]]
-                if cols:
-                    out.append({"label": s["label"], "columns": cols})
-            return out
-
-        layout = _build_sections()
-
-        def _format_value(fb_doc, df):
-            value = fb_doc.get(df.fieldname)
-            if df.fieldtype == "Table":
-                return _render_child_table(value or [], df.options)
-            if value in (None, ""):
-                return ""
-            if df.fieldtype == "Check":
-                return "Yes" if frappe.utils.cint(value) else "No"
-            if df.fieldtype == "Date":
-                return esc(frappe.utils.formatdate(value, "d MMM yyyy"))
-            if df.fieldtype == "Datetime":
-                return esc(frappe.utils.format_datetime(value, "d MMM yyyy, h:mm a"))
-            if df.fieldtype == "Rating":
-                stars = frappe.utils.cint(df.options) or 5
-                return f"{round(frappe.utils.flt(value) * stars)} / {stars}"
-            if df.fieldtype in ("Text Editor", "HTML Editor"):
-                return str(value)
-            return esc(str(value)).replace("\n", "<br>")
-
-        def _render_child_table(rows, child_doctype):
-            if not rows:
-                return ""
-            child_fields = [
-                f for f in frappe.get_meta(child_doctype).fields
-                if f.fieldtype not in ("Section Break", "Column Break", "Tab Break", "HTML", "Button")
-            ]
-            listed = [f for f in child_fields if f.in_list_view] or child_fields
-            head = "".join(f"<th>{esc((f.label or f.fieldname).strip())}</th>" for f in listed)
-            body = "".join(
-                "<tr>" + "".join(f"<td>{_format_value(r, f) or '&mdash;'}</td>" for f in listed) + "</tr>"
-                for r in rows
-            )
-            return f"<table class='fb-table'><tr>{head}</tr>{body}</table>"
-
-        def _field_html(fb_doc, df):
-            value_html = _format_value(fb_doc, df)
-            label = esc((df.label or df.fieldname).strip())
-            if df.fieldtype == "Table":
-                empty_box = "<span class='fb-value'>&mdash;</span>"
-                return f"<div class='fb-field'><span class='fb-label'>{label}</span>{value_html or empty_box}</div>"
-            return (
-                f"<div class='fb-field'><span class='fb-label'>{label}</span>"
-                f"<span class='fb-value'>{value_html or '&mdash;'}</span></div>"
-            )
-
-        def _render_section(fb_doc, sec, title):
-            cols = sec["columns"]
-            full_width = []
-            if len(cols) == 1:
-                fields = cols[0]["fields"]
-                short = [f for f in fields if f.fieldtype not in long_fieldtypes]
-                full_width = [f for f in fields if f.fieldtype in long_fieldtypes]
-                half = (len(short) + 1) // 2
-                cols = [{"label": None, "fields": short[:half]},
-                        {"label": None, "fields": short[half:]}] if short else []
-            html = f"<div class='fb-section'><div class='fb-section-title'>{esc(title)}</div>"
-            if cols:
-                width = 100.0 / len(cols)
-                html += "<table class='fb-cols'><tr>"
-                for c in cols:
-                    html += f"<td style='width:{width:.2f}%;'>"
-                    if c["label"]:
-                        html += f"<div class='fb-subhead'>{esc(c['label'])}</div>"
-                    html += "".join(_field_html(fb_doc, f) for f in c["fields"])
-                    html += "</td>"
-                html += "</tr></table>"
-            html += "".join(_field_html(fb_doc, f) for f in full_width)
-            return html + "</div>"
-
-        # Zwayam-style heading, per a 2026-09-29 request (the recruitment
-        # team asked for the interview type + interviewer name on every
-        # feedback PDF): "Interview Feedback - NAME [Round]" as the title,
-        # and per submission "<date> | Feedback updated by <panelist> for
-        # <Round>" instead of the old "Submission N · <docname> · <date>".
-        #
-        # One Feedback Form doctype can serve several rounds (e.g. Leader
-        # Final Round → Leader Round-1 AND Leader Round-2 — see
-        # FIELD_FEEDBACK_ROUND_MAP), so the real round comes from the
-        # applicant's Field Interview Schedule: the latest one created on
-        # or before that submission whose base round uses this doctype.
-        # Falls back to the doctype's own name ("Leader Final Round") when
-        # no schedule matches.
-        candidate_rounds = [
-            r for r, doctypes in FIELD_FEEDBACK_ROUND_MAP.items() if doc.doctype in doctypes
+        sources = [
+            (dt, title) for dt, title in _FRF_FEEDBACK_SOURCES.get(target_field, [])
+            if dt != doc.doctype
         ]
-        schedules = frappe.get_all(
-            "Field Interview Schedule",
-            filters={"application_id": applicant_id},
-            fields=["interview_round", "creation"],
-            order_by="creation desc",
-            limit_page_length=0,
-        ) if candidate_rounds else []
-        fallback_round = (
-            pdf_title.replace(" - Feedback Form", "").replace("Feedback Form - ", "").replace(" Feedback Form", "").strip()
-            or pdf_title
-        )
+        sources.append((doc.doctype, pdf_title))
 
-        def _round_for(fb_doc):
-            for s in schedules:
-                base = re.sub(r"\s+(Select|Reject)$", "", (s.interview_round or "").strip())
-                if base in candidate_rounds and s.creation <= fb_doc.creation:
-                    return base
-            return fallback_round
-
-        def _panelist_for(fb_doc):
-            return (
-                (fb_doc.get("panelist_name") or "").strip()
-                or (fb_doc.get("panelist_email") or fb_doc.get("panelist__email") or "").strip()
-                or frappe.utils.get_fullname(fb_doc.owner)
+        parts = []
+        for dt, title in sources:
+            if dt != doc.doctype and not _source_doctype_usable(dt):
+                continue
+            rendered = _render_feedback_submissions_pdf(
+                dt, applicant_id, title, current_doc=doc if dt == doc.doctype else None
             )
+            if rendered:
+                parts.append(rendered)
 
-        display_name = doc.applicant_name or applicant_id
-        sections_html = ""
-        rounds_seen = []
-        for row in submissions:
-            fb_doc = (
-                doc
-                if row["name"] == doc.name
-                else frappe.get_doc(doc.doctype, row["name"])
-            )
-            round_name = _round_for(fb_doc)
-            if round_name not in rounds_seen:
-                rounds_seen.append(round_name)
-            submitted_date = frappe.utils.format_datetime(fb_doc.creation, "dd-MMM-yyyy")
-            submitted_time = frappe.utils.format_datetime(fb_doc.creation, "hh:mm a")
-            body = "".join(
-                _render_section(fb_doc, sec, sec["label"] or ("Applicant & Interview Details" if i == 0 else "Details"))
-                for i, sec in enumerate(layout)
-            )
-            sections_html += f"""
-                <div class="fb-submission">
-                    <table class="fb-submission-head"><tr>
-                        <td class="fb-submission-date">{esc(submitted_date)}<br>{esc(submitted_time)}</td>
-                        <td class="fb-submission-by">Feedback updated by {esc(_panelist_for(fb_doc))} for {esc(round_name)}</td>
-                    </tr></table>
-                    {body}
-                </div>
-            """
-        title_rounds = ", ".join(rounds_seen) or fallback_round
+        if not parts:
+            return
 
-        html = f"""
-            <html>
-            <head>
-                <meta charset="utf-8">
-                <style>
-                    body {{ font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-                            font-size: 11.5px; line-height: 1.45; color: #202020; }}
-                    .fb-letterhead {{ text-align: center; border-bottom: 2.5px solid #1f3a5f;
-                                      padding-bottom: 10px; margin-bottom: 4px; }}
-                    .fb-org-name {{ font-size: 20px; font-weight: 700; letter-spacing: 0.4px;
-                                    color: #1f3a5f; margin: 0; }}
-                    .fb-doc-title {{ font-size: 12.5px; font-weight: 600; text-transform: uppercase;
-                                     letter-spacing: 1.8px; color: #555; margin: 3px 0 0 0; }}
-                    .fb-title {{ text-align: center; font-size: 18px; font-weight: 700; color: #111;
-                                 margin: 14px 0 2px 0; }}
-                    .fb-submission {{ margin-top: 16px; }}
-                    table.fb-submission-head {{ width: 100%; border-collapse: collapse;
-                                                border-bottom: 2px solid #1f3a5f; }}
-                    .fb-submission-date {{ width: 110px; font-size: 11px; font-weight: 700; color: #111;
-                                           padding: 0 0 6px 0; vertical-align: top; white-space: nowrap; }}
-                    .fb-submission-by {{ font-size: 13px; font-weight: 700; color: #111;
-                                         padding: 0 0 6px 10px; vertical-align: top; }}
-                    .fb-section {{ margin-top: 14px; page-break-inside: avoid; }}
-                    .fb-section-title {{ background: #1f3a5f; color: #ffffff; padding: 5px 10px;
-                                         font-size: 11px; font-weight: 600; text-transform: uppercase;
-                                         letter-spacing: 0.8px; border-radius: 2px; margin-bottom: 8px; }}
-                    .fb-subhead {{ font-size: 11px; font-weight: 700; color: #1f3a5f;
-                                   border-bottom: 1px solid #cdd6e0; padding-bottom: 3px;
-                                   margin: 4px 0 8px 0; }}
-                    table.fb-cols {{ width: 100%; border-collapse: collapse; table-layout: fixed; }}
-                    table.fb-cols td {{ vertical-align: top; padding: 0 10px; }}
-                    table.fb-cols td:first-child {{ padding-left: 0; }}
-                    table.fb-cols td:last-child {{ padding-right: 0; }}
-                    .fb-field {{ margin-bottom: 7px; page-break-inside: avoid; }}
-                    .fb-label {{ display: block; font-size: 9.5px; font-weight: 600;
-                                 text-transform: uppercase; letter-spacing: 0.3px; color: #000;
-                                 margin-bottom: 1px; }}
-                    .fb-value {{ display: block; min-height: 15px; padding: 3px 6px;
-                                 background: #f7f8fa; border: 1px solid #e0e3e8; border-radius: 2px;
-                                 font-size: 11.5px; color: #1a1a1a; }}
-                    table.fb-table {{ width: 100%; border-collapse: collapse; margin: 2px 0 6px 0;
-                                      font-size: 10.5px; }}
-                    table.fb-table th {{ background: #1f3a5f; color: #fff; text-transform: uppercase;
-                                         font-size: 9.5px; letter-spacing: 0.3px; padding: 5px 6px;
-                                         text-align: left; }}
-                    table.fb-table td {{ border: 1px solid #e0e3e8; padding: 5px 6px; }}
-                    .fb-footer {{ margin-top: 24px; padding-top: 6px; border-top: 1px solid #dcdfe4;
-                                  font-size: 9px; color: #999; text-align: center; }}
-                </style>
-            </head>
-            <body>
-                <div class="fb-letterhead">
-                    <p class="fb-org-name">Azim Premji Foundation</p>
-                    <p class="fb-doc-title">{esc(pdf_title)}</p>
-                </div>
-                <div class="fb-title">Interview Feedback - {esc(display_name)} [{esc(title_rounds)}]</div>
-                {sections_html}
-                <div class="fb-footer">Generated on {esc(frappe.utils.format_datetime(frappe.utils.now_datetime(), "d MMM yyyy, h:mm a"))}</div>
-            </body>
-            </html>
-        """
+        parts.sort(key=lambda p: p[0])
+        if len(parts) == 1:
+            file_title = parts[0][1]
+            pdf_content = parts[0][2]
+        else:
+            file_title = _FRF_FIELD_PDF_TITLES.get(target_field, pdf_title)
+            pdf_content = _merge_pdf_bytes([p[2] for p in parts])
 
-        pdf_content = get_pdf(html)
-        filename = f"{pdf_title.replace(' ', '-')}-{applicant_id}.pdf"
+        filename = f"{file_title.replace(' ', '-')}-{applicant_id}.pdf"
 
         # Remove any previously attached PDF for this field so re-submissions
         # don't pile up multiple stale files against the same record.
@@ -5728,6 +5828,28 @@ def send_final_round_feedback_pdf_to_registration_form(doc, method=None):
     )
 
 
+def send_enabler_functional_feedback_pdf_to_registration_form(doc, method=None):
+    """
+    Hooked to "Functional Feedback Field Enabler" after_insert (see
+    hooks.py) — Enabler's Functional Round form. Saves into "Round One
+    Feedback Form", same as the other departments' Round-1 feedback.
+    """
+    _merge_feedback_submissions_to_registration_form(
+        doc, "round_one_feedback_from", "Functional Feedback Field Enabler"
+    )
+
+
+def send_enabler_final_feedback_pdf_to_registration_form(doc, method=None):
+    """
+    Hooked to "Final Feedback Field Enabler" after_insert (see hooks.py) —
+    Enabler's Leader Round form. Saves into "Round Two Feedback Form", same
+    as the other departments' Leader Round feedback.
+    """
+    _merge_feedback_submissions_to_registration_form(
+        doc, "round_two_feedback_form", "Final Feedback Field Enabler"
+    )
+
+
 # Which "<Round> Feedback Form" doctype(s) are expected for a given base
 # interview_round on "Field Interview Schedule". Grouped the same way the
 # doc_events hooks above group them (see _merge_feedback_submissions_to_registration_form
@@ -5752,18 +5874,418 @@ FIELD_FEEDBACK_ROUND_MAP = {
         "Educational Capacity Interview - Feedback Form",
         "School Teacher Feedback Form",
         "Functional Round Feedback Form",
+        "Functional Feedback Field Enabler",
+    ],
+    # Health's Technical Round uses the Functional Round feedback form.
+    "Technical Round": [
+        "Functional Round Feedback Form",
+    ],
+    "Demo Round": [
+        "Demo Lesson Observation Feedback Form",
     ],
     "Leader Round-1": [
         "Leader Final Round Feedback Form",
         "Demo Lesson Observation Feedback Form",
         "Final Round Feedback Form",
+        "Final Feedback Field Enabler",
     ],
     "Leader Round-2": [
         "Leader Final Round Feedback Form",
         "Demo Lesson Observation Feedback Form",
         "Final Round Feedback Form",
+        "Final Feedback Field Enabler",
     ],
 }
+
+
+# ── Pre-create attachment check (Field Interview Schedule) ──────────────────
+# Human-readable names for the Field Registration Form attach fields that
+# _field_auto_attach_fields can send, shown in the "missing PDFs" popup.
+_FRF_ATTACH_LABELS = {
+    "resume_upload": "Resume",
+    "application_forms": "Application Form",
+    "self_declaration": "Self Declaration",
+    "filed_merit_track_test": "MeritTrac Test Result",
+    "recruiter_round_feedback_form": "Recruiter Round Feedback",
+    "round_one_feedback_from": "Round One Feedback (Subject / Education Capacity / Functional)",
+    "round_two_feedback_form": "Round Two Feedback (Demo / Leader Round-1)",
+    "round_tree_feedback_form": "Round Three Feedback",
+}
+
+# Feedback-PDF fields → the Feedback Form doctypes that fill them, with the
+# PDF title each one's after_insert hook uses (see the
+# send_*_feedback_pdf_to_registration_form functions above). When the field
+# is empty but a submission exists, the PDF is rebuilt from the doctype with
+# the newest submission — the same one whose hook would have written last.
+_FRF_FEEDBACK_SOURCES = {
+    "recruiter_round_feedback_form": [
+        ("Recruiter Feedback Form", "Recruiter Feedback Form"),
+        ("Recruiter Assessment Form", "Recruiter Assessment Form"),
+        ("Feedback Form - Associate Resource Person", "Feedback Form - Associate Resource Person"),
+    ],
+    "round_one_feedback_from": [
+        ("Educational Capacity Interview - Feedback Form", "Educational Capacity Interview Feedback Form"),
+        ("School Teacher Feedback Form", "School Teacher Feedback Form"),
+        ("Functional Round Feedback Form", "Functional Round Feedback Form"),
+        ("Functional Feedback Field Enabler", "Functional Feedback Field Enabler"),
+    ],
+    "round_two_feedback_form": [
+        ("Leader Final Round Feedback Form", "Leader Final Round Feedback Form"),
+        ("Demo Lesson Observation Feedback Form", "Demo Lesson Observation Feedback Form"),
+        ("Final Round Feedback Form", "Final Round Feedback Form"),
+        ("Final Feedback Field Enabler", "Final Feedback Field Enabler"),
+    ],
+}
+
+# Print-based fields → (source doctype, print format, file name, is_private).
+# Mirrors the cloud Server Scripts that normally fill these fields on save
+# ("Application Form Pdf", "ARP Application Form PDF", "Field Self
+# Declaration Pdf", "Field Merit  Track Result"), so a record whose PDF never
+# got generated (script error, record created before the script existed…)
+# can still be rebuilt here. First source doctype with a record wins.
+_FRF_PRINT_SOURCES = {
+    "application_forms": [
+        ("Field Application Form", "Field Application Form", "{applicant_id}_application_form.pdf", 0),
+        ("ARP Application Form", "Standard", "{applicant_id}_application_form.pdf", 0),
+    ],
+    "self_declaration": [
+        ("Field Self Declaration", "Standard", "{applicant_id}_self_declaration.pdf", 0),
+    ],
+    "filed_merit_track_test": [
+        ("Field MeritTrac Test Result", "Standard", "{applicant_id}_{name}_field_test_result.pdf", 1),
+    ],
+}
+
+
+def _frf_attachment_ok(web_path):
+    """True if an attach-field url resolves to a real file on disk."""
+    if not web_path:
+        return False
+    try:
+        _resolve_attachment_bytes(web_path)
+        return True
+    except Exception:
+        return False
+
+
+def _source_doctype_usable(doctype):
+    """Source doctype exists on this site and links back via applicant_id."""
+    return bool(
+        frappe.db.exists("DocType", doctype)
+        and frappe.get_meta(doctype).has_field("applicant_id")
+    )
+
+
+def _feedback_source_counts(applicant_id, target_field):
+    """
+    For one feedback attach field: how many Feedback Form doctypes have
+    submissions for this applicant, how many submissions in total, and the
+    newest submission as (creation, doctype, name, pdf_title).
+    """
+    n_doctypes = n_submissions = 0
+    latest = None
+    for doctype, pdf_title in _FRF_FEEDBACK_SOURCES.get(target_field, []):
+        if not _source_doctype_usable(doctype):
+            continue
+        rows = frappe.get_all(
+            doctype,
+            filters={"applicant_id": applicant_id},
+            fields=["name", "creation"],
+            order_by="creation desc",
+        )
+        if not rows:
+            continue
+        n_doctypes += 1
+        n_submissions += len(rows)
+        if latest is None or rows[0].creation > latest[0]:
+            latest = (rows[0].creation, doctype, rows[0].name, pdf_title)
+    return n_doctypes, n_submissions, latest
+
+
+def _regenerate_feedback_pdf_for_field(applicant_id, target_field):
+    """
+    Rebuild a feedback attach field from ALL its submissions (every source
+    doctype merged into one PDF — see _merge_feedback_submissions_to_registration_form).
+    """
+    _n_doctypes, _n_submissions, latest = _feedback_source_counts(applicant_id, target_field)
+    if not latest:
+        return False
+
+    _creation, doctype, name, pdf_title = latest
+    _merge_feedback_submissions_to_registration_form(
+        frappe.get_doc(doctype, name), target_field, pdf_title
+    )
+    return True
+
+
+def _print_source_records(applicant_id, target_field):
+    """
+    Every source record (all source doctypes) behind a print-based attach
+    field for this applicant, oldest first, as
+    (creation, doctype, name, print_format, filename_tmpl, is_private).
+    """
+    records = []
+    for doctype, print_format, filename_tmpl, is_private in _FRF_PRINT_SOURCES.get(target_field, []):
+        if not _source_doctype_usable(doctype):
+            continue
+        for row in frappe.get_all(
+            doctype,
+            filters={"applicant_id": applicant_id},
+            fields=["name", "creation"],
+            order_by="creation asc",
+        ):
+            records.append((row.creation, doctype, row.name, print_format, filename_tmpl, is_private))
+    records.sort(key=lambda r: r[0])
+    return records
+
+
+def _regenerate_print_pdf_for_field(applicant_id, target_field, records=None):
+    """
+    Rebuild an application form / self declaration / MeritTrac PDF from its
+    source record(s). When the applicant has more than one record (e.g. two
+    Self Declarations, or a Field + an ARP Application Form) every one is
+    printed and merged into ONE PDF, oldest first.
+    """
+    if records is None:
+        records = _print_source_records(applicant_id, target_field)
+    if not records:
+        return False
+
+    pdf_parts = []
+    for _creation, doctype, name, print_format, _tmpl, _private in records:
+        if not frappe.db.exists("Print Format", print_format):
+            print_format = "Standard"
+
+        # Runs on behalf of whoever is scheduling the interview, who may
+        # have no print permission on the source doctype — same as the cloud
+        # Server Scripts this mirrors, which also print unconditionally.
+        _prev_flag = frappe.flags.ignore_print_permissions
+        frappe.flags.ignore_print_permissions = True
+        try:
+            pdf_data = frappe.get_print(
+                doctype=doctype, name=name, print_format=print_format, as_pdf=True
+            )
+        finally:
+            frappe.flags.ignore_print_permissions = _prev_flag
+
+        if pdf_data:
+            pdf_parts.append(pdf_data)
+
+    if not pdf_parts:
+        return False
+
+    pdf_content = pdf_parts[0] if len(pdf_parts) == 1 else _merge_pdf_bytes(pdf_parts)
+
+    # Saved against the newest source record, same file name the cloud
+    # Server Scripts use for it.
+    _creation, doctype, name, _pf, filename_tmpl, is_private = records[-1]
+    filename = filename_tmpl.format(applicant_id=applicant_id, name=name)
+    for old in frappe.get_all(
+        "File",
+        filters={
+            "attached_to_doctype": doctype,
+            "attached_to_name": name,
+            "file_name": filename,
+        },
+        pluck="name",
+    ):
+        frappe.delete_doc("File", old, ignore_permissions=True, force=True)
+
+    file_doc = frappe.get_doc(
+        {
+            "doctype": "File",
+            "file_name": filename,
+            "attached_to_doctype": doctype,
+            "attached_to_name": name,
+            "content": pdf_content,
+            "is_private": is_private,
+        }
+    )
+    file_doc.insert(ignore_permissions=True)
+
+    # The MeritTrac result also keeps its own copy (cloud-only field).
+    if doctype == "Field MeritTrac Test Result" and frappe.get_meta(doctype).has_field(
+        "field_merittrac_resuld"
+    ):
+        frappe.db.set_value(
+            doctype, name, "field_merittrac_resuld", file_doc.file_url, update_modified=False
+        )
+
+    frappe.db.set_value(
+        "Field Registration Form",
+        applicant_id,
+        target_field,
+        file_doc.file_url,
+        update_modified=False,
+    )
+    return True
+
+
+# Attach fields the popup can offer as "Optional — add to email" when they
+# aren't in the round's default list (_field_auto_attach_fields).
+_FRF_OPTIONAL_FIELDS = [
+    "recruiter_round_feedback_form",
+    "round_one_feedback_from",
+    "round_two_feedback_form",
+    "round_tree_feedback_form",
+    "filed_merit_track_test",
+]
+
+
+def _ensure_frf_attachment(applicant_id, field):
+    """Make sure `field` on the Field Registration Form holds a readable PDF,
+    generating it from its source record(s) if it doesn't. Never raises."""
+    try:
+        if _frf_attachment_ok(frappe.db.get_value("Field Registration Form", applicant_id, field)):
+            return True
+        if field in _FRF_FEEDBACK_SOURCES:
+            _regenerate_feedback_pdf_for_field(applicant_id, field)
+        elif field in _FRF_PRINT_SOURCES:
+            _regenerate_print_pdf_for_field(applicant_id, field)
+        return _frf_attachment_ok(
+            frappe.db.get_value("Field Registration Form", applicant_id, field)
+        )
+    except Exception as e:
+        frappe.log_error(
+            title="Interview Attachment Regenerate Failed",
+            message=f"{applicant_id} / {field}: {e}\n{frappe.get_traceback()}"[:2000],
+        )
+        return False
+
+
+def _optional_attachment_items(applicant_id, default_fields, frf_values):
+    """
+    PDFs NOT in this round's default list that the applicant does have — a
+    file already on the Field Registration Form, or a source record it can
+    be generated from. Offered switched off in the popup; nothing is
+    generated here (only if the user switches one on — see
+    create_interview_event's include_attach_fields).
+    """
+    items = []
+    for field in _FRF_OPTIONAL_FIELDS:
+        if field in default_fields:
+            continue
+        label = _FRF_ATTACH_LABELS.get(field, field)
+        if _frf_attachment_ok(frf_values.get(field)):
+            note = "On the Registration Form"
+        elif field in _FRF_FEEDBACK_SOURCES and _feedback_source_counts(applicant_id, field)[1]:
+            note = "Will be generated from the saved feedback if added"
+        elif field in _FRF_PRINT_SOURCES and _print_source_records(applicant_id, field):
+            note = "Will be generated from the saved record if added"
+        else:
+            continue
+        items.append({"field": field, "label": label, "status": "optional", "note": note})
+    return items
+
+
+@frappe.whitelist()
+def check_field_interview_attachments(
+    application_id,
+    interview_round,
+    applicant_role=None,
+    candidate_cv__resume=None,
+    department=None,
+):
+    """
+    Called by the Field Interview Schedule form just before a NEW interview
+    is saved (see before_save in field_interview_schedule.js), for every
+    department. For every PDF this round's invite should carry
+    (_field_auto_attach_fields):
+
+      1. already on the Field Registration Form and readable, and only one
+         source record → ok
+      2. more than one source record (two Self Declarations, Demo Lesson +
+         Leader feedback, …) → all of them are merged into ONE PDF now
+      3. empty/broken but the source record exists (feedback submission,
+         Field Application Form, Self Declaration, MeritTrac result) →
+         the PDF is generated now
+      4. still missing → returned in "missing"; the form asks the user to
+         confirm before the interview is created without it
+
+    Generated/merged PDFs are saved onto the Field Registration Form, so
+    create_interview_event picks them up a moment later.
+
+    Returns {"ok": [labels], "generated": [labels], "missing": [labels],
+    "items": [{"field", "label", "status"}]}.
+    """
+    if not frappe.has_permission("Field Interview Schedule", "create"):
+        frappe.throw("Not permitted", frappe.PermissionError)
+
+    # ok / generated / missing hold display labels; "items" has the same
+    # entries with their attach field, so the popup can let the user untick
+    # one and send its field back as exclude_attach_fields.
+    result = {"ok": [], "generated": [], "missing": [], "items": []}
+    application_id = (application_id or "").strip()
+    if not application_id or not frappe.db.exists("Field Registration Form", application_id):
+        return result
+
+    fields = list(
+        dict.fromkeys(_field_auto_attach_fields(interview_round, applicant_role, department))
+    )
+    frf_values = frappe.db.get_value(
+        "Field Registration Form",
+        application_id,
+        list(dict.fromkeys(fields + _FRF_OPTIONAL_FIELDS)),
+        as_dict=True,
+    ) or {}
+
+    for field in fields:
+        label = _FRF_ATTACH_LABELS.get(field, field)
+        current_ok = _frf_attachment_ok(frf_values.get(field))
+
+        # Resume can't be generated, but the CV attached on the schedule
+        # form itself goes out with the invite too.
+        if field == "resume_upload":
+            if current_ok or _frf_attachment_ok(candidate_cv__resume):
+                result["ok"].append(label)
+                result["items"].append({"field": field, "label": label, "status": "ok"})
+            else:
+                result["missing"].append(label)
+                result["items"].append({"field": field, "label": label, "status": "missing"})
+            continue
+
+        rebuilt = False
+        merged_count = 0
+        try:
+            if field in _FRF_FEEDBACK_SOURCES:
+                n_doctypes, n_submissions, _latest = _feedback_source_counts(application_id, field)
+                merged_count = n_submissions
+                # Each feedback hook already merges its own doctype's
+                # submissions; a rebuild is only needed when the field is
+                # empty, or when more than one doctype feeds it.
+                if n_submissions and (not current_ok or n_doctypes > 1):
+                    rebuilt = _regenerate_feedback_pdf_for_field(application_id, field)
+            elif field in _FRF_PRINT_SOURCES:
+                records = _print_source_records(application_id, field)
+                merged_count = len(records)
+                # The cloud Server Scripts only ever print the record just
+                # saved, so with 2+ records the stored PDF is never complete.
+                if records and (not current_ok or len(records) > 1):
+                    rebuilt = _regenerate_print_pdf_for_field(application_id, field, records)
+        except Exception as e:
+            rebuilt = False
+            frappe.log_error(
+                title="Interview Attachment Regenerate Failed",
+                message=f"{application_id} / {field}: {e}\n{frappe.get_traceback()}"[:2000],
+            )
+
+        # _merge_feedback_submissions_to_registration_form logs and swallows
+        # its own errors, so re-read the field rather than trusting `rebuilt`.
+        if rebuilt and _frf_attachment_ok(
+            frappe.db.get_value("Field Registration Form", application_id, field)
+        ):
+            shown = f"{label} ({merged_count} merged)" if merged_count > 1 else label
+            result["generated"].append(shown)
+            result["items"].append({"field": field, "label": shown, "status": "generated"})
+        elif current_ok:
+            result["ok"].append(label)
+            result["items"].append({"field": field, "label": label, "status": "ok"})
+        else:
+            result["missing"].append(label)
+            result["items"].append({"field": field, "label": label, "status": "missing"})
+
+    result["items"].extend(_optional_attachment_items(application_id, fields, frf_values))
+    return result
 
 
 def send_field_interview_feedback_reminders():
