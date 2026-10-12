@@ -152,21 +152,39 @@ class FieldInterviewDashboard {
 					<div class="fid-table-scroll" id="fid-fb-table"></div>
 				</div>
 
-				<div class="fid-two">
-					<div class="fid-panel">
-						<div class="fid-panel-head"><div>
-							<div class="fid-panel-title">${__('Interviewer workload')}</div>
-							<div class="fid-panel-sub">${__('Click any number to see those interviews')}</div>
-						</div></div>
-						<div class="fid-table-scroll fid-short" id="fid-iv-table"></div>
+				<div class="fid-panel">
+					<div class="fid-panel-head">
+						<div>
+							<div class="fid-panel-title">${__('Interviewer efficiency')}</div>
+							<div class="fid-panel-sub" id="fid-iv-sub"></div>
+						</div>
+						<div class="fid-panel-tools">
+							${this.panel_date_tools('iv')}
+							<button class="btn btn-default btn-xs" id="fid-export-iv">${__('Export CSV')}</button>
+						</div>
 					</div>
-					<div class="fid-panel">
-						<div class="fid-panel-head"><div>
+					<div class="fid-eff-legend">
+						<span><b>${__('Feedback done')}</b> = ${__('feedback received ÷ completed interviews that need one')}</span>
+						<span><b>${__('On time')}</b> = ${__('feedback within 2 days of the interview')}</span>
+						<span><span class="fid-dot" style="--c:#0ca30c;"></span>${__('80%+')}
+							<span class="fid-dot" style="--c:#c98500;"></span>${__('50–79%')}
+							<span class="fid-dot" style="--c:#d03b3b;"></span>${__('below 50%')}</span>
+					</div>
+					<div class="fid-table-scroll fid-short" id="fid-iv-table"></div>
+				</div>
+
+				<div class="fid-panel">
+					<div class="fid-panel-head">
+						<div>
 							<div class="fid-panel-title">${__('By department')}</div>
-							<div class="fid-panel-sub">${__('Click any number to see those interviews')}</div>
-						</div></div>
-						<div class="fid-table-scroll fid-short" id="fid-dept-table"></div>
+							<div class="fid-panel-sub" id="fid-dept-sub"></div>
+						</div>
+						<div class="fid-panel-tools">
+							${this.panel_date_tools('dept')}
+							<button class="btn btn-default btn-xs" id="fid-export-dept">${__('Export CSV')}</button>
+						</div>
 					</div>
+					<div class="fid-table-scroll fid-short" id="fid-dept-table"></div>
 				</div>
 			</div>
 		`);
@@ -206,6 +224,37 @@ class FieldInterviewDashboard {
 		});
 		$c.find('#fid-export-agenda').on('click', () => this.export_csv('interviews-' + this.agenda_range, this.interview_columns(), this.agenda_rows()));
 
+		// Interviewer / department tables each have their own date range
+		// (interview date), applied within the filters at the top. A preset
+		// or a date is a single choice, so it applies straight away.
+		this.panel_range = { iv: { p: 'all', from: '', to: '' }, dept: { p: 'all', from: '', to: '' } };
+		$c.find('.fid-pdate').each((i, el) => {
+			const $p = $(el);
+			const key = String($p.data('k'));
+			const apply = () => (key === 'iv' ? this.render_interviewer_table() : this.render_department_table());
+			$p.find('.fid-pdate-preset').on('change', (e) => {
+				const p = String($(e.currentTarget).val());
+				if (p === 'custom') return;
+				const [from, to] = this.preset_range(p);
+				this.panel_range[key] = { p, from, to };
+				$p.find('.fid-pdate-from').val(from);
+				$p.find('.fid-pdate-to').val(to);
+				apply();
+			});
+			$p.find('.fid-pdate-from, .fid-pdate-to').on('change', () => {
+				let from = $p.find('.fid-pdate-from').val() || '';
+				let to = $p.find('.fid-pdate-to').val() || '';
+				if (from && to && from > to) [from, to] = [to, from];
+				this.panel_range[key] = { p: 'custom', from, to };
+				$p.find('.fid-pdate-preset').val(from || to ? 'custom' : 'all');
+				apply();
+			});
+		});
+		$c.find('#fid-export-iv').on('click', () => this._iv_table && this.export_csv(
+			'interviewer-efficiency-' + this.panel_range_slug('iv'), this._iv_table.cols, this._iv_table.lines));
+		$c.find('#fid-export-dept').on('click', () => this._dept_table && this.export_csv(
+			'interviews-by-department-' + this.panel_range_slug('dept'), this._dept_table.cols, this._dept_table.lines));
+
 		$(document).off('click.fidMs').on('click.fidMs', (e) => {
 			if (!$(e.target).closest('.fid-ms').length) $c.find('.fid-ms.open').removeClass('open');
 		});
@@ -216,6 +265,7 @@ class FieldInterviewDashboard {
 		const t = moment().startOf('day');
 		switch (p) {
 			case 'today': return [fmt(t), fmt(t)];
+			case 'last7': return [fmt(t.clone().subtract(7, 'days')), fmt(t)];
 			case 'week': return [fmt(t.clone().startOf('isoWeek')), fmt(t.clone().endOf('isoWeek'))];
 			case 'next7': return [fmt(t), fmt(t.clone().add(7, 'days'))];
 			case 'month': return [fmt(t.clone().startOf('month')), fmt(t.clone().endOf('month'))];
@@ -589,12 +639,58 @@ class FieldInterviewDashboard {
 	}
 
 	// ── breakdown tables ──────────────────────────────────────────────────
-	render_breakdown($el, first_label, groups, with_quality) {
+	// ── per-panel date range (interviewer / department tables) ────────────
+	panel_date_tools(key) {
+		const presets = [['all', __('All dates')], ['today', __('Today')], ['last7', __('Last 7 days')],
+			['week', __('This week')], ['month', __('This month')], ['last30', __('Last 30 days')],
+			['last90', __('Last 90 days')], ['custom', __('Custom dates')]];
+		return `<div class="fid-pdate" data-k="${key}">
+			<select class="fid-pdate-preset">${presets.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select>
+			<input type="date" class="fid-pdate-from" title="${__('From')}">
+			<span class="fid-muted">–</span>
+			<input type="date" class="fid-pdate-to" title="${__('To')}">
+		</div>`;
+	}
+
+	panel_rows(key) {
+		const r = this.panel_range[key];
+		return this.rows.filter(x => (!r.from || (x.date && x.date >= r.from)) && (!r.to || (x.date && x.date <= r.to)));
+	}
+
+	panel_range_label(key) {
+		const r = this.panel_range[key];
+		return r.from && r.to ? __('{0} to {1}', [this.fmt_date(r.from), this.fmt_date(r.to)])
+			: r.from ? __('From {0}', [this.fmt_date(r.from)])
+			: r.to ? __('Up to {0}', [this.fmt_date(r.to)])
+			: __('All dates');
+	}
+
+	panel_range_slug(key) {
+		const r = this.panel_range[key];
+		return [r.from, r.to].filter(Boolean).join('_to_') || 'all-dates';
+	}
+
+	panel_sub(key, rows) {
+		const top = this.data.from_date || this.data.to_date ? ' · ' + __('within the dates set at the top') : '';
+		this.$root.find(`#fid-${key}-sub`).text(__('{0} · {1} interviews', [this.panel_range_label(key), rows.length])
+			+ top + ' · ' + __('click any number to see those interviews'));
+	}
+
+	// % with a coloured bar: green 80%+, amber 50–79%, red below 50%.
+	rate_cell(v) {
+		if (v === null || v === undefined) return '<span class="fid-zero">—</span>';
+		const c = v >= 80 ? '#0ca30c' : v >= 50 ? '#c98500' : '#d03b3b';
+		return `<div class="fid-rate"><b>${cint(v)}%</b><div class="fid-rate-track"><div style="width:${Math.min(100, v)}%;background:${c};"></div></div></div>`;
+	}
+
+	render_breakdown($el, first_label, groups, opts = {}) {
 		const metrics = [
 			{ key: 'total', label: __('Total'), f: () => true },
 			{ key: 'upcoming', label: __('Today + upcoming'), f: r => r.status === 'Today' || r.status === 'Upcoming' },
 			{ key: 'done', label: __('Completed'), f: r => r.status === 'Completed' },
-			{ key: 'pending', label: __('Feedback pending'), f: r => r.feedback === 'Pending' },
+			{ key: 'received', label: __('Feedback received'), f: r => r.feedback === 'Received' },
+			{ key: 'pending', label: __('Feedback pending'), f: r => r.feedback === 'Pending', red: true },
+			{ key: 'late', label: __('Late feedback (>2 days)'), f: r => r.turnaround_days > 2, red: true },
 			{ key: 'cancelled', label: __('Cancelled'), f: r => r.status === 'Cancelled' }
 		];
 		const lines = Object.keys(groups).map(k => {
@@ -602,48 +698,66 @@ class FieldInterviewDashboard {
 			metrics.forEach(m => { line[m.key] = groups[k].filter(m.f); });
 			const turn = groups[k].filter(r => r.turnaround_days !== null && r.turnaround_days !== undefined).map(r => r.turnaround_days);
 			line.avg_turn = turn.length ? turn.reduce((a, b) => a + b, 0) / turn.length : null;
+			line.on_time = turn.length ? this.pct(turn.filter(d => d <= 2).length, turn.length) : null;
+			const need = line.received.length + line.pending.length;
+			line.fb_rate = need ? this.pct(line.received.length, need) : null;
 			const dec = groups[k].filter(r => r.outcome === 'Interview Select' || r.outcome === 'Interview Reject');
 			line.sel_rate = dec.length ? this.pct(dec.filter(r => r.outcome === 'Interview Select').length, dec.length) : null;
 			return line;
 		});
-		let cols = [{ key: 'label', label: first_label }].concat(metrics.map(m => ({
-			key: m.key, label: m.label,
-			sort: l => l[m.key].length,
-			csv: l => l[m.key].length,
-			render: l => l[m.key].length
-				? `<a class="fid-num ${m.key === 'pending' ? 'is-red' : ''}" data-label="${this.esc(l.label)}" data-metric="${m.key}">${l[m.key].length}</a>`
-				: '<span class="fid-zero">0</span>'
-		})));
-		if (with_quality) {
-			cols = cols.concat([
-				{ key: 'avg_turn', label: __('Avg days to feedback'), sort: l => l.avg_turn === null ? 9999 : l.avg_turn,
-					render: l => l.avg_turn === null ? '<span class="fid-zero">—</span>' : this.esc(l.avg_turn.toFixed(1)),
-					csv: l => l.avg_turn === null ? '' : l.avg_turn.toFixed(1) },
-				{ key: 'sel_rate', label: __('Selection rate'), sort: l => l.sel_rate === null ? -1 : l.sel_rate,
-					render: l => l.sel_rate === null ? '<span class="fid-zero">—</span>' : `${cint(l.sel_rate)}%`,
-					csv: l => l.sel_rate === null ? '' : l.sel_rate + '%' }
-			]);
-		}
-		this.sortable_table($el, cols, lines, { default_sort: 'total', default_dir: -1 });
+		const count_col = (key) => {
+			const m = metrics.find(x => x.key === key);
+			return {
+				key: m.key, label: m.label,
+				sort: l => l[m.key].length,
+				csv: l => l[m.key].length,
+				render: l => l[m.key].length
+					? `<a class="fid-num ${m.red ? 'is-red' : ''}" data-label="${this.esc(l.label)}" data-metric="${m.key}">${l[m.key].length}</a>`
+					: '<span class="fid-zero">0</span>'
+			};
+		};
+		// Efficiency columns sit right after Total / Completed so they're
+		// visible without scrolling; the remaining counts follow.
+		const cols = [{ key: 'label', label: first_label }, count_col('total'), count_col('done'),
+			{ key: 'fb_rate', label: __('Feedback done'), sort: l => l.fb_rate === null ? -1 : l.fb_rate,
+				render: l => this.rate_cell(l.fb_rate), csv: l => l.fb_rate === null ? '' : l.fb_rate + '%' },
+			{ key: 'on_time', label: __('On time'), sort: l => l.on_time === null ? -1 : l.on_time,
+				render: l => this.rate_cell(l.on_time), csv: l => l.on_time === null ? '' : l.on_time + '%' },
+			{ key: 'avg_turn', label: __('Avg days to feedback'), sort: l => l.avg_turn === null ? 9999 : l.avg_turn,
+				render: l => l.avg_turn === null ? '<span class="fid-zero">—</span>' : this.esc(l.avg_turn.toFixed(1)),
+				csv: l => l.avg_turn === null ? '' : l.avg_turn.toFixed(1) },
+			count_col('received'), count_col('pending'), count_col('late'), count_col('upcoming'), count_col('cancelled'),
+			{ key: 'sel_rate', label: __('Selection rate'), sort: l => l.sel_rate === null ? -1 : l.sel_rate,
+				render: l => l.sel_rate === null ? '<span class="fid-zero">—</span>' : `${cint(l.sel_rate)}%`,
+				csv: l => l.sel_rate === null ? '' : l.sel_rate + '%' }
+		];
+		this.sortable_table($el, cols, lines, { default_sort: 'total', default_dir: -1, empty: __('No interviews in these dates.') });
 		$el.off('click.fidnum').on('click.fidnum', '.fid-num', (e) => {
 			const $a = $(e.currentTarget);
 			const line = lines.find(l => l.label === String($a.data('label')));
 			const metric = metrics.find(m => m.key === $a.data('metric'));
-			if (line) this.open_drilldown(`${line.label} · ${metric.label}`, line[metric.key]);
+			if (line) this.open_drilldown(`${line.label} · ${metric.label}${opts.range ? ' · ' + opts.range : ''}`, line[metric.key]);
 		});
+		return { cols, lines };
 	}
 
 	render_interviewer_table() {
+		const rows = this.panel_rows('iv');
 		const groups = {};
-		this.rows.forEach(r => (r.interviewers.length ? r.interviewers : [__('(none)')])
+		rows.forEach(r => (r.interviewers.length ? r.interviewers : [__('(none)')])
 			.forEach(iv => (groups[iv] = groups[iv] || []).push(r)));
-		this.render_breakdown(this.$root.find('#fid-iv-table'), __('Interviewer'), groups, true);
+		this.panel_sub('iv', rows);
+		this._iv_table = this.render_breakdown(this.$root.find('#fid-iv-table'), __('Interviewer'), groups,
+			{ range: this.panel_range_label('iv') });
 	}
 
 	render_department_table() {
+		const rows = this.panel_rows('dept');
 		const groups = {};
-		this.rows.forEach(r => { const k = r.department || __('(blank)'); (groups[k] = groups[k] || []).push(r); });
-		this.render_breakdown(this.$root.find('#fid-dept-table'), __('Department'), groups, true);
+		rows.forEach(r => { const k = r.department || __('(blank)'); (groups[k] = groups[k] || []).push(r); });
+		this.panel_sub('dept', rows);
+		this._dept_table = this.render_breakdown(this.$root.find('#fid-dept-table'), __('Department'), groups,
+			{ range: this.panel_range_label('dept') });
 	}
 
 	// Generic sortable table. Clicking a header toggles asc/desc.
@@ -855,8 +969,18 @@ const FID_CSS = `
 .fid-panel-body { padding:10px 14px; }
 .fid-scroll-md { max-height:340px; overflow:auto; }
 .fid-search { height:28px; border:1px solid var(--border); border-radius:7px; padding:0 9px; font-size:12px; width:220px; background:var(--bg); color:var(--text); }
-.fid-two { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
-.fid-two > .fid-panel { margin-bottom:14px; }
+.fid-pdate { display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+.fid-pdate select, .fid-pdate input[type=date] { height:28px; border:1px solid var(--border); border-radius:7px; padding:0 7px;
+	font-size:12px; background:var(--bg); color:var(--text); }
+.fid-panel-tools { flex-wrap:wrap; }
+.fid-eff-legend { display:flex; flex-wrap:wrap; gap:6px 18px; padding:7px 14px; font-size:11px; color:var(--muted);
+	background:var(--bg-soft); border-bottom:1px solid var(--border-soft); }
+.fid-eff-legend b { color:var(--text-2); }
+.fid-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--c); margin:0 3px 0 6px; }
+.fid-rate { min-width:80px; }
+.fid-rate b { font-size:12.5px; }
+.fid-rate-track { height:5px; background:var(--border-soft); border-radius:99px; overflow:hidden; margin-top:3px; }
+.fid-rate-track > div { height:100%; border-radius:99px; }
 .fid-table-scroll { max-height:520px; overflow:auto; }
 .fid-table-scroll.fid-short { max-height:340px; }
 .fid-dd-scroll { max-height:65vh; overflow:auto; border:1px solid var(--border); border-radius:8px; }
@@ -914,7 +1038,6 @@ const FID_CSS = `
 .fid-step-round { font-size:12.5px; font-weight:700; color:var(--text); }
 .fid-pdfs { display:flex; flex-wrap:wrap; gap:8px; }
 .fid-pdf { border:1px solid rgba(42,120,214,.35); background:rgba(42,120,214,.08); color:var(--link); border-radius:8px; padding:5px 10px; font-size:12px; font-weight:600; }
-@media (max-width: 1100px) { .fid-two { grid-template-columns:1fr; } }
 @media (max-width: 900px) { .fid-f-btns { margin-left:0; } .fid-hero-right { width:100%; } }
 @media (max-width: 600px) { .fid-root { padding:12px 10px 40px; } .fid-search { width:100%; } .fid-ms { max-width:none; width:100%; }
 	.fid-f { width:100%; } `;
