@@ -118,6 +118,11 @@ _CLOSED = {"not selected", "offer declined", "document verification fail", "bloc
            "blocklist", "duplicated", "addendum declined", "not joined"}
 
 
+def _status_key(status):
+    """How MariaDB compares statuses (utf8mb4 *_ci, PAD SPACE): case-insensitive, trailing spaces ignored."""
+    return (status or "").rstrip().lower()
+
+
 def _stage(status):
     s = (status or "").strip().lower()
     if not s or s == "new applicant":
@@ -284,7 +289,7 @@ LOCAL_STATUS_ADDITIONS = {
 CARDS = {
     "new": dict(label="New Applicant", tone="neutral", hint="awaiting CV screening"),
     "cv_shortlist": dict(label="CV Shortlist", tone="good"),
-    "cv_reject": dict(label="CV Reject", tone="bad"),
+    "cv_reject": dict(label="CV Regret", tone="bad"),
     "test_select": dict(label="Test Select", tone="good"),
     "test_reject": dict(label="Test Reject", tone="bad"),
     "recruiter": dict(label="Recruiter Round", tone="info", hint="in recruiter round"),
@@ -325,8 +330,8 @@ CARDS = {
 # the page's "Card guide", so everyone reads the numbers the same way.
 CARD_DESC = {
     "new": "Nobody has screened the CV yet.",
-    "cv_shortlist": "Shortlisted at CV screening.",
-    "cv_reject": "Rejected at CV screening.",
+    "cv_shortlist": "Shortlisted at CV screening and not moved on yet (their status is still CV Shortlist).",
+    "cv_reject": "Not taken forward at CV screening (CV Reject / Regret - CV / Application Reject).",
     "test_select": "Passed the written / online test.",
     "test_reject": "Did not pass the test.",
     "recruiter": "In the Recruiter Round (Select = cleared, waiting for the next round).",
@@ -380,9 +385,10 @@ def _card_desc(key):
 # The board, in pipeline order: (group key, title, [(layout, [card keys])]).
 BOARD = [
     ("screening", "Screening & test", [
-        # CV Shortlist / Reject tile removed 2026-10-16 (the user asked; the funnel's
-        # CV Shortlisted card covers it). The cards stay defined for drilldowns.
-        ("single", ["new"]), ("pair", ["test_select", "test_reject"])]),
+        # CV Shortlist | CV Regret — the user asked for it back (2026-10-16): who is
+        # at CV screening right now (the top row's CV Shortlisted counts everyone
+        # who ever got past CV).
+        ("single", ["new"]), ("pair", ["cv_shortlist", "cv_reject"]), ("pair", ["test_select", "test_reject"])]),
     ("interviews", "Interviews", [
         ("single", ["recruiter"]), ("single", ["functional"]), ("single", ["leadership"]),
         ("single", ["iv_today"]), ("single", ["iv_next7"])]),
@@ -639,7 +645,7 @@ def _progs(f):
 @frappe.whitelist()
 def get_dashboard_data(programs=None, from_date=None, to_date=None, stages=None, refresh=0, **kw):
     f = _parse_filters(programs, from_date, to_date, stages, **{k: kw.get(k) for k in FILTER_KEYS})
-    key = "pathways_overall:v4:" + hashlib.sha1(
+    key = "pathways_overall:v5:" + hashlib.sha1(
         frappe.as_json([frappe.session.user, f]).encode()).hexdigest()
     if not cint(refresh):
         hit = frappe.cache.get_value(key)
@@ -651,7 +657,6 @@ def get_dashboard_data(programs=None, from_date=None, to_date=None, stages=None,
     funnel, status_rows, trend = [], [], {}
     cards = {k: None for k in CARDS}
     by_unit = {k: {} for k in CARDS}   # card → programme → count (programmes where the card applies)
-    subs = {}
     cur = {"prog": None}
 
     def add(k, v):
@@ -659,9 +664,6 @@ def get_dashboard_data(programs=None, from_date=None, to_date=None, stages=None,
             return
         cards[k] = (cards[k] or 0) + cint(v)
         by_unit[k][cur["prog"]] = by_unit[k].get(cur["prog"], 0) + cint(v)
-
-    def add_sub(k, v):
-        subs[k] = (subs.get(k) or 0) + cint(v)
 
     progs = _progs(f)
     for pg in progs:
@@ -676,22 +678,20 @@ def get_dashboard_data(programs=None, from_date=None, to_date=None, stages=None,
                                 "stage": _stage(r.s), "count": r.n})
         regs = sum(r.n for r in counts)
 
-        # every registration-based pipeline card in ONE pass
-        cb = _Cond(pg)
-        exprs = []
+        # Every registration-based card = "people whose Application Status is
+        # one of these", so its count is the sum of those statuses' counts
+        # from the GROUP BY above (one quick pass) — no second scan of the
+        # registrations. Keys are compared the way MariaDB compares them
+        # (case-insensitive, trailing spaces ignored), so the numbers match
+        # the old per-card SQL exactly.
+        by_status = {}
+        for r in counts:
+            key = _status_key(r.s)
+            by_status[key] = by_status.get(key, 0) + cint(r.n)
         for k in REG_CARDS:
-            cond = cb.card(k)
-            if cond:
-                exprs.append((k, f"SUM(CASE WHEN {cond} THEN 1 ELSE 0 END)"))
-        if exprs:
-            row = frappe.db.sql(
-                f"SELECT {', '.join(e for _, e in exprs)} FROM ({pg.reg_sql}) r WHERE {w}",
-                dict(p, **cb.params, **{f"{pg.pfx}today": today}))[0]
-            for (k, _), v in zip(exprs, row):
-                if k.startswith("__"):
-                    add_sub(k[2:], v)
-                else:
-                    add(k, v or 0)
+            statuses = STATUS.get(k, {}).get(pg.key)
+            if statuses:
+                add(k, sum(by_status.get(x, 0) for x in {_status_key(v) for v in statuses}))
 
         # weekly registrations (by application date)
         for wk, n in frappe.db.sql(
@@ -785,7 +785,7 @@ def get_dashboard_data(programs=None, from_date=None, to_date=None, stages=None,
                     **{k: f[k] for k in FILTER_KEYS}},
         "programs_available": [c["key"] for c in PROGRAMS if _can_read(c["reg"])],
         "units_in_scope": [{"program": pg.key, "unit": pg.cfg["unit_label"]} for pg in progs],
-        "options": _filter_options(f.programs),
+        "options": _cached_filter_options(f.programs),
         "stages": STAGES,
         "board": board,
         "funnel_cards": [{"key": k, "label": CARDS[k]["label"], "tone": CARDS[k]["tone"], "desc": _card_desc(k),
@@ -801,6 +801,21 @@ def get_dashboard_data(programs=None, from_date=None, to_date=None, stages=None,
         "generated_at": frappe.utils.now(),
     }
     frappe.cache.set_value(key, out, expires_in_sec=CACHE_SECONDS)
+    return out
+
+
+OPTIONS_CACHE_SECONDS = 600
+
+
+def _cached_filter_options(programs):
+    """_filter_options() cached per user + programmes for 10 minutes (Refresh bypasses the card cache, not this)."""
+    key = "pathways_overall:opts:v1:" + hashlib.sha1(
+        frappe.as_json([frappe.session.user, sorted(programs)]).encode()).hexdigest()
+    hit = frappe.cache.get_value(key)
+    if hit:
+        return hit
+    out = _filter_options(programs)
+    frappe.cache.set_value(key, out, expires_in_sec=OPTIONS_CACHE_SECONDS)
     return out
 
 
@@ -1609,31 +1624,45 @@ def get_candidate_timeline(program, name):
                                  order_by="creation asc", limit_page_length=_TL_MAX):
             add(a.creation, "form", title, "", by=who(a.owner), doctype=dt, docname=a.name)
 
-    # 3. Application Status changes — the document's own change history
-    #    (track changes) plus the status log child table where one exists
+    # 3. Application Status changes. Two sources can record the SAME change:
+    #    the status log child table (has the reason) and the document's own
+    #    change history (track changes). A history entry with the same
+    #    from → to within 15 minutes of a log row is that same change, so it
+    #    is merged into the log row instead of being shown twice.
     status_field = cfg["status"]
+    changes = []
+    meta = frappe.get_meta(cfg["reg"])
+    log_field = next((df.fieldname for df in meta.fields
+                      if df.fieldtype == "Table" and df.options == cfg.get("status_log")), None)
+    if log_field:
+        for row in doc.get(log_field) or []:
+            at = frappe.utils.get_datetime(row.get("changed_on")) if row.get("changed_on") else None
+            if not at:
+                continue
+            by = row.get("changed_by") or ""
+            changes.append({"at": at, "old": row.get("previous_status") or "", "new": row.get("application_status") or "",
+                            "by": who(by) or by, "reason": row.get("reason") or "", "log": True})
     for v in frappe.get_all("Version", filters={"ref_doctype": cfg["reg"], "docname": name},
                             fields=["creation", "owner", "data"], order_by="creation asc", limit_page_length=_TL_MAX):
         try:
             changed = (frappe.parse_json(v.data) or {}).get("changed") or []
         except Exception:
             continue
+        vt = frappe.utils.get_datetime(v.creation)
         for ch in changed:
-            if isinstance(ch, (list, tuple)) and len(ch) == 3 and ch[0] == status_field:
-                old, new = ch[1] or "", ch[2] or ""
-                add(v.creation, "status", f"Status → {new or '(blank)'}", f"from {old or '(blank)'}",
-                    by=who(v.owner), tone=_tone_of_status(new), old=old, new=new)
-    meta = frappe.get_meta(cfg["reg"])
-    log_field = next((df.fieldname for df in meta.fields
-                      if df.fieldtype == "Table" and df.options == cfg.get("status_log")), None)
-    if log_field:
-        for row in doc.get(log_field) or []:
-            new = row.get("application_status") or ""
-            old = row.get("previous_status") or ""
-            add(row.get("changed_on"), "status", f"Status → {new or '(blank)'}",
-                " · ".join(x for x in (f"from {old or '(blank)'}", row.get("reason") or "") if x),
-                by=row.get("changed_by") or "", tone=_tone_of_status(new), old=old, new=new,
-                reason=row.get("reason") or "")
+            if not (isinstance(ch, (list, tuple)) and len(ch) == 3 and ch[0] == status_field):
+                continue
+            old, new = ch[1] or "", ch[2] or ""
+            same = next((c for c in changes if c.get("log") and not c.get("merged") and c["old"] == old
+                         and c["new"] == new and abs((c["at"] - vt).total_seconds()) <= 900), None)
+            if same:
+                same["merged"] = True
+                same["by"] = same["by"] or who(v.owner)
+                continue
+            changes.append({"at": vt, "old": old, "new": new, "by": who(v.owner), "reason": ""})
+    for c in changes:
+        add(c["at"], "status", f"Status → {c['new'] or '(blank)'}", c["reason"], by=c["by"],
+            tone=_tone_of_status(c["new"]), old=c["old"], new=c["new"], reason=c["reason"])
 
     # 4. interviews — at the interview's own date / time
     if _can_read(cfg["interview"]):
@@ -1647,11 +1676,14 @@ def get_candidate_timeline(program, name):
             t = _hhmm(i.get("start_time"))
             at = f"{when} {t}:00" if when and t else when
             cancelled = cint(i.get("is_cancelled"))
-            detail = " · ".join(x for x in (i.get(cfg["mode"]) or "", i.get("interviewer_name") or "",
-                                            f"scheduled on {frappe.utils.formatdate(i.creation)}") if x)
+            scheduler = who(i.owner)
+            detail = " · ".join(x for x in (
+                i.get(cfg["mode"]) or "",
+                f"Interviewer: {i.get('interviewer_name')}" if i.get("interviewer_name") else "",
+                f"Scheduled {frappe.utils.formatdate(i.creation)}" + (f" by {scheduler}" if scheduler else "")) if x)
             add(at or i.creation, "interview",
                 f"{'Cancelled: ' if cancelled else ''}{i.get('interview_round') or 'Interview'}", detail,
-                by=who(i.owner), tone="neutral" if cancelled else "info", doctype=cfg["interview"],
+                by="", tone="neutral" if cancelled else "info", doctype=cfg["interview"],
                 docname=i.name, date_only=bool(when and not t), cancelled=cancelled)
 
     # 5. feedback submitted
@@ -1671,7 +1703,10 @@ def get_candidate_timeline(program, name):
             add(fb.creation, "feedback", f"Feedback: {res}" if res else "Feedback submitted", dt, by=by,
                 tone=_tone_of_result(res), doctype=dt, docname=fb.name, result=res, form=dt)
 
-    events.sort(key=lambda e: e["at"])
+    # Registration always opens the journey, then everything by date / time
+    # (an interview time entered as e.g. 01:15 on the registration day
+    # would otherwise show before the registration).
+    events.sort(key=lambda e: (0 if e["kind"] == "registered" and e["title"] == "Registered" else 1, e["at"]))
     status = doc.get(status_field) or ""
     return {
         "program": program, "id": name, "route": _slug(cfg["reg"]), "unit": cfg["unit_label"],

@@ -24,7 +24,10 @@
 const POD_API = 'ms_calendar.ms_calendar.page.pathways_overall_dashboard.pathways_overall_dashboard.';
 const POD_STORE_KEY = 'pod-filters-v2';
 // Multi-select filters (all sent as JSON lists, all remembered between visits).
-const POD_LIST_FILTERS = ['programs', 'units', 'subunits', 'locations', 'job_codes', 'roles', 'stages'];
+// No Programme filter (the user asked): Units covers the same split — each
+// programme's Unit field holds one value (Field / Health / Grants /
+// Azim Premji Scholarship). Programme is still sent as [] = all.
+const POD_LIST_FILTERS = ['units', 'subunits', 'locations', 'job_codes', 'roles', 'stages'];
 
 // Programme identity colours (categorical slots, fixed order) — always shown
 // with the programme name, never colour alone.
@@ -134,7 +137,12 @@ class PathwaysOverallDashboard {
 	has(key) { return (this.data.funnel || []).some(f => f[key] !== null && f[key] !== undefined); }
 
 	read_saved() {
-		try { return JSON.parse(localStorage.getItem(POD_STORE_KEY) || 'null'); } catch (e) { return null; }
+		let saved = null;
+		try { saved = JSON.parse(localStorage.getItem(POD_STORE_KEY) || 'null'); } catch (e) { return null; }
+		// A Programme choice saved before the filter was removed would filter
+		// the page invisibly — drop it.
+		if (saved) delete saved.programs;
+		return saved;
 	}
 	// Dates are deliberately not remembered: the page always opens on "This year".
 	save_filters(f) {
@@ -193,13 +201,13 @@ class PathwaysOverallDashboard {
 						<div class="pod-topbar-right">
 							<span class="pod-muted" id="pod-alltime" title="${__('Ignores every filter')}">${__('All-time registrations')}: <b class="v">—</b></span>
 							<span class="pod-muted" id="pod-sub"></span>
+							<button class="btn btn-default btn-xs" id="pod-guide" title="${__('What each number means')}">ⓘ ${__('Card guide')}</button>
 							<button class="btn btn-default btn-xs" id="pod-refresh" title="${__('Fetch fresh numbers')}">⟳ ${__('Refresh')}</button>
 						</div>
 					</div>
 					<div class="pod-filter-row">
-						<div class="pod-f"><label>${__('Application date from')}</label><input type="date" id="pod-from"></div>
+						<div class="pod-f"><label title="${__('Application date from')}">${__('Applied from')}</label><input type="date" id="pod-from"></div>
 						<div class="pod-f"><label>${__('To')}</label><input type="date" id="pod-to"></div>
-						<div class="pod-f"><label>${__('Programme')}</label><div class="pod-ms" id="pod-ms-programs" data-placeholder="${__('All programmes')}"></div></div>
 						<div class="pod-f"><label>${__('Units')}</label><div class="pod-ms" id="pod-ms-units" data-placeholder="${__('All units')}"></div></div>
 						<div class="pod-f"><label>${__('Sub-units')}</label><div class="pod-ms" id="pod-ms-subunits" data-placeholder="${__('All sub-units')}"></div></div>
 						<div class="pod-f"><label>${__('Location')}</label><div class="pod-ms" id="pod-ms-locations" data-placeholder="${__('All locations')}"></div></div>
@@ -263,7 +271,7 @@ class PathwaysOverallDashboard {
 						<div class="pod-panel">
 							<div class="pod-panel-head">
 								<div>
-									<div class="pod-panel-title">📅 ${__('Interviews')}</div>
+									<div class="pod-panel-title">${__('Interviews')}</div>
 									<div class="pod-panel-sub">${__('Every interview — past, upcoming and cancelled · filtered by interview date')}</div>
 								</div>
 								${this.range_tools('iv')}
@@ -273,7 +281,7 @@ class PathwaysOverallDashboard {
 						<div class="pod-panel">
 							<div class="pod-panel-head">
 								<div>
-									<div class="pod-panel-title">💬 ${__('Feedback forms')}</div>
+									<div class="pod-panel-title">${__('Feedback forms')}</div>
 									<div class="pod-panel-sub">${__('Every feedback form submitted, newest first · filtered by submitted date · click an applicant to read it in full')}</div>
 								</div>
 								${this.range_tools('fb')}
@@ -322,9 +330,6 @@ class PathwaysOverallDashboard {
 
 				<div class="pod-pane" data-pane="dash">
 				<div class="pod-cards" id="pod-cards"></div>
-				<div class="pod-board-head">
-					<button class="btn btn-default btn-sm" id="pod-guide">ⓘ ${__('Card guide')}</button>
-				</div>
 				<div class="pod-board" id="pod-board"></div>
 				</div>
 				<div class="pod-tip" id="pod-tip"></div>
@@ -489,14 +494,10 @@ class PathwaysOverallDashboard {
 				$c.find('#pod-from').val(f.from_date || '');
 				$c.find('#pod-to').val(f.to_date || '');
 				const o = this.data.options || {};
-				this.ms.programs.setOptions(this.data.programs_available || []);
 				this.ms.units.setOptions(o.units || []);
 				this.ms.locations.setOptions(o.locations || []);
 				this.ms.roles.setOptions(o.roles || []);
 				this.ms.stages.setOptions(this.data.stages || []);
-				// "All" is shown as an empty selection, not every chip ticked.
-				const all_progs = (this.data.programs_available || []).every(p => (f.programs || []).includes(p));
-				this.ms.programs.setVal(all_progs ? [] : f.programs);
 				['units', 'locations', 'roles', 'stages'].forEach(k => this.ms[k].setVal(f[k]));
 				// Sub-unit / job-code lists depend on the chosen units.
 				this.ms.subunits.setVal(f.subunits);
@@ -523,22 +524,30 @@ class PathwaysOverallDashboard {
 		});
 		if ((f.stages || []).length) extra.push(f.stages.join(', '));
 		this.$root.find('#pod-sub').text(
-			`${__('Updated')} ${frappe.datetime.str_to_user(this.data.generated_at || '').slice(-8, -3) || ''}`);
+			`${__('Updated')} ${String(this.data.generated_at || '').slice(11, 16)}`);
 		this.$root.find('#pod-alltime .v').text(this.n(this.data.all_time_registrations));
 		this.mark_preset();
 		this.render_cards();
 		this.render_stages();
 		this.render_trend();
 		this.render_funnel();
+		// The Hiring Funnel tab's lists and charts each need their own server
+		// calls, and the Timeline list too — load them only when their tab is
+		// open (now, or the next time it is opened), so the Dashboard tab
+		// comes up with a single call.
+		this.fun_dirty = true;
+		if (this.tab === 'funnel') this.render_funnel_tab();
+		this.tl_dirty = true;
+		if (this.tab === 'timeline') this.render_tl_list();
+	}
+
+	render_funnel_tab() {
+		this.fun_dirty = false;
 		this.render_upcoming();
 		this.render_feedback();
 		this.render_reg_table();
 		this.render_status_log();
 		this.render_tl_charts({});
-		// The Timeline tab's list follows the same filters; redraw it now if
-		// it is showing, else the next time it is opened.
-		this.tl_dirty = true;
-		if (this.tab === 'timeline') this.render_tl_list();
 	}
 
 	render_status_log() {
@@ -635,7 +644,8 @@ class PathwaysOverallDashboard {
 	// A number that counts up from 0 when the cards appear (the final value
 	// is already in the markup, so it is correct even without animation).
 	count_html(v) {
-		return `<span class="pod-count" data-v="${v === null || v === undefined ? '' : Number(v)}">${this.n(v)}</span>`;
+		const zero = v !== null && v !== undefined && Number(v) === 0;
+		return `<span class="pod-count ${zero ? 'is-zero' : ''}" data-v="${v === null || v === undefined ? '' : Number(v)}">${this.n(v)}</span>`;
 	}
 
 	count_up($scope) {
@@ -1159,7 +1169,7 @@ class PathwaysOverallDashboard {
 				<th data-key="${c.key}" class="${c.key === sort_key ? 'is-sorted' : ''}">${this.esc(c.label)}
 				<span class="pod-sort">${c.key === sort_key ? (dir === 1 ? '▲' : '▼') : '↕'}</span></th>`).join('')}
 				</tr></thead><tbody>${data.map(r => `<tr>${cols.map(c =>
-					`<td${c.nw ? ' class="nw"' : ''}>${c.render ? c.render(r) : this.esc(r[c.key])}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+					`<td${c.nw ? ' class="nw"' : ''}${c.render ? '' : ` title="${this.esc(r[c.key])}"`}>${c.render ? c.render(r) : this.esc(r[c.key])}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
 		};
 		$el.off('click.podsort').on('click.podsort', 'th', (e) => {
 			const k = $(e.currentTarget).data('key');
@@ -1256,7 +1266,7 @@ class PathwaysOverallDashboard {
 				<th data-key="${c.key}" class="${c.key === sort_key ? 'is-sorted' : ''}">${this.esc(c.label)}
 				<span class="pod-sort">${c.key === sort_key ? (up ? '▲' : '▼') : '↕'}</span></th>`).join('')}
 				</tr></thead><tbody>${rows.map(r => `<tr>${cols.map(c =>
-					`<td${c.nw ? ' class="nw"' : ''}>${c.render ? c.render(r) : this.esc(r[c.key])}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+					`<td${c.nw ? ' class="nw"' : ''}${c.render ? '' : ` title="${this.esc(r[c.key])}"`}>${c.render ? c.render(r) : this.esc(r[c.key])}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
 			$body.scrollTop(0);
 		};
 
@@ -1458,6 +1468,7 @@ class PathwaysOverallDashboard {
 		});
 		$c.find('.pod-pane').each((_, p) => { p.hidden = $(p).data('pane') !== tab; });
 		if (tab === 'timeline' && this.tl_dirty && this.data) this.render_tl_list();
+		if (tab === 'funnel' && this.fun_dirty && this.data) this.render_funnel_tab();
 	}
 
 	// Every applicant in scope (same filters, paged / searched on the
@@ -1993,9 +2004,9 @@ class PathwaysOverallDashboard {
 			const future = day(e.at) > today;
 			let title, body = '';
 			if (e.kind === 'status') {
-				title = __('Status changed');
-				body = `<div class="pod-tli-flow">${pill(e.old, 'neutral')}<span class="pod-tli-arrow">→</span>${pill(e.new, e.tone)}</div>`
-					+ (e.reason ? `<div class="pod-tli-meta">${esc(e.reason)}</div>` : '');
+				// one line: old → new (the reason, if any, underneath)
+				title = `<span class="pod-tli-flow is-inline">${pill(e.old, 'neutral')}<span class="pod-tli-arrow">→</span>${pill(e.new, e.tone)}</span>`;
+				body = e.reason ? `<div class="pod-tli-meta">${esc(__('Reason'))}: ${esc(e.reason)}</div>` : '';
 			} else if (e.kind === 'feedback') {
 				title = esc(e.form || __('Feedback'));
 				body = e.result ? `<div class="pod-tli-flow">${pill(e.result, e.tone)}</div>` : `<div class="pod-tli-meta">${__('No result recorded')}</div>`;
@@ -2005,13 +2016,14 @@ class PathwaysOverallDashboard {
 			}
 			const flags = (e.cancelled ? `<span class="pod-flag" style="--c:${POD_TONES.bad}">${__('Cancelled')}</span>` : '')
 				+ (future && !e.cancelled ? `<span class="pod-flag" style="--c:${POD_TONES.time}">${__('Upcoming')}</span>` : '');
-			const foot = [e.by ? __('by {0}', [esc(e.by)]) : '',
-				e.doc ? `<a target="_blank" rel="noopener" href="/app/${esc(e.route)}/${encodeURIComponent(e.doc)}">${esc(e.doc)} ↗</a>` : '']
-				.filter(Boolean).join(' · ');
+			// "by …" underneath; the record link sits at the right of the title row
+			const foot = e.by ? __('by {0}', [esc(e.by)]) : '';
+			const link = e.doc ? `<a class="pod-tli-doc" target="_blank" rel="noopener" href="/app/${esc(e.route)}/${encodeURIComponent(e.doc)}"
+				title="${esc(__('Open record'))}">${esc(e.doc)} ↗</a>` : '';
 			return `<div class="pod-tli ${future ? 'is-future' : ''} ${e.cancelled ? 'is-cancelled' : ''}" data-kind="${esc(e.kind)}" style="--k:${kc}">
 				<div class="pod-tli-time">${e.date_only ? '' : esc(String(e.at).slice(11, 16))}</div>
 				<div class="pod-tli-card">
-					<div class="pod-tli-top"><span class="pod-tli-kind">${esc(kl)}</span><span class="pod-tli-title">${title}</span>${flags}</div>
+					<div class="pod-tli-top"><span class="pod-tli-kind">${esc(kl)}</span><span class="pod-tli-title">${title}</span>${flags}${link}</div>
 					${body}
 					${foot ? `<div class="pod-tli-foot">${foot}</div>` : ''}
 				</div>
@@ -2302,7 +2314,7 @@ const POD_CSS = `
 .pod-india-svg { display:block; width:100%; max-height:420px; margin:0 auto; }
 .pod-state { stroke:var(--bg); stroke-width:0.8; stroke-linejoin:round; }
 .pod-state:hover { stroke:var(--text); stroke-width:1.4; }
-.pod-state-n { font-size:13px; font-weight:700; fill:#1A2B3C; paint-order:stroke; stroke:rgba(255,255,255,.75); stroke-width:3px;
+.pod-state-n { font-size:24px; font-weight:700; fill:#1A2B3C; paint-order:stroke; stroke:rgba(255,255,255,.75); stroke-width:5px;
 	pointer-events:none; font-variant-numeric:tabular-nums; }
 .pod-state-n.is-dark { fill:#fff; stroke:rgba(16,40,80,.55); }
 .pod-map-credit { font-size:10.5px; color:var(--muted); text-align:right; margin-top:4px; }
@@ -2370,6 +2382,18 @@ const POD_CSS = `
 .pod-tli-title { font-size:13px; font-weight:650; color:var(--text); }
 .pod-tli-top .pod-flag { margin-left:0; }
 .pod-tli-flow { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:5px; }
+.pod-tli-flow.is-inline { display:inline-flex; margin-top:0; }
+/* tighter, calmer timeline cards */
+.pod-tlg-items { gap:6px; }
+.pod-tli-card { padding:7px 12px; border-color:var(--border-soft); border-left-width:3px; }
+.pod-tli[data-kind="status"] .pod-tli-card { padding:6px 12px; background:var(--bg); }
+.pod-tli-top { gap:4px 8px; }
+.pod-tli-meta { font-size:12px; margin-top:2px; }
+.pod-tli-foot { margin-top:2px; }
+.pod-tli-time { padding-top:8px; }
+.pod-tli::before { top:10px; }
+.pod-tli-doc { margin-left:auto; font-size:11.5px; color:var(--link); white-space:nowrap; font-variant-numeric:tabular-nums; }
+.pod-tli-doc:hover { text-decoration:underline; }
 .pod-tli-arrow { color:var(--muted); font-size:13px; }
 .pod-tli-meta { font-size:12px; color:var(--text-2); margin-top:3px; overflow-wrap:anywhere; }
 .pod-tli-foot { font-size:11.5px; color:var(--muted); margin-top:4px; overflow-wrap:anywhere; }
@@ -2427,7 +2451,6 @@ const POD_CSS = `
 .pod-range-f input { height:30px; border:1px solid var(--border); border-radius:6px; padding:0 8px; font-size:12.5px;
 	background:var(--bg); color:var(--text); text-transform:none; letter-spacing:0; font-weight:400; }
 .pod-range-f input:focus { border-color:var(--brand); outline:none; box-shadow:0 0 0 3px color-mix(in srgb, var(--brand) 16%, transparent); }
-.pod-board-head { display:flex; justify-content:flex-end; margin:0 0 6px; }
 .pod-topbar { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
 .pod-topbar .pod-presets { margin-bottom:0; }
 .pod-topbar-right { display:flex; align-items:center; gap:14px; flex-wrap:wrap; font-size:12px; }
@@ -2611,6 +2634,47 @@ const POD_CSS = `
 @media (max-width: 1250px) { .pod-row { grid-template-columns:repeat(3, minmax(0,1fr)); } }
 @media (max-width: 600px) { .pod-row { grid-template-columns:minmax(0,1fr); } }
 
+/* ── full width on every Frappe version: v15 caps the page body at ~1,260 px
+   (v16 already uses the full width), which squeezed the cards ── */
+#page-pathways-overall-dashboard .page-body.container,
+#page-pathways-overall-dashboard .page-head .container { max-width:none !important; width:100% !important; }
+/* columns follow the space the dashboard actually gets (sidebar open, v15's
+   narrower page, small laptops), not the screen width: 6 per row when wide,
+   3 below ~1,200 px, 1 on a phone. The container is each tab pane (not
+   .pod-root), so the fixed-position hover tooltip keeps working. */
+.pod-pane { container-type:inline-size; container-name:podpane; }
+@container podpane (max-width: 1200px) {
+	.pod-headline { grid-template-columns:repeat(3, minmax(0,1fr)); }
+	.pod-headline.is-funnel .pod-kpi:nth-child(3n)::after,
+	.pod-headline.is-funnel .pod-kpi:has(+ .is-aside)::after { display:none; }
+	.pod-row { grid-template-columns:repeat(3, minmax(0,1fr)); }
+}
+@container podpane (max-width: 560px) {
+	.pod-headline, .pod-row { grid-template-columns:minmax(0,1fr); }
+	.pod-tile { grid-column:auto !important; }
+	.pod-headline.is-funnel .pod-kpi::after { display:none !important; }
+}
+.pod-kpi-value, .pod-half-value { flex-wrap:wrap; row-gap:2px; }
+/* card names and the grey line wrap onto a second line instead of being cut */
+.pod-root .pod-kpi-label, .pod-root .pod-tile-title { white-space:normal; overflow:visible; text-overflow:clip; line-height:1.25; }
+.pod-kpi-sub, .pod-half-hint { white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+
+/* ── whole-page finish ── */
+/* the page background reaches the bottom of the screen on short tabs */
+.pod-root { min-height:calc(100vh - 60px); }
+/* filters: one even grid (one row on a wide screen, wrapping evenly when narrower) */
+.pod-filter-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(132px, 1fr)); gap:10px; align-items:end; }
+.pod-filter-row .pod-f { min-width:0; width:auto; }
+.pod-filter-row .pod-ms { min-width:0; max-width:none; width:100%; }
+.pod-filter-row .pod-f input[type=date] { width:100%; min-width:0; }
+.pod-filter-row .pod-f-btns { margin-left:0; justify-content:flex-end; flex-direction:row; }
+.pod-topbar-right .btn { white-space:nowrap; }
+/* tables: one line per row; long text is shortened and shown in full on hover */
+.pod-table:not(.pod-fb-child) td { white-space:nowrap; max-width:260px; overflow:hidden; text-overflow:ellipsis; }
+.pod-table:not(.pod-fb-child) tbody tr { height:38px; }
+/* India map: sized to sit level with the charts beside it */
+.pod-india-svg { max-height:250px; }
+
 /* ── card polish: soft corners and shadow, % as a quiet pill ── */
 .pod-kpi, .pod-tile { border-radius:12px; border-color:#E1E7EE; box-shadow:0 1px 2px rgba(16,24,40,.05), 0 1px 1px rgba(16,24,40,.03); }
 :root[data-theme="dark"] .pod-kpi, :root[data-theme="dark"] .pod-tile { border-color:var(--border); box-shadow:none; }
@@ -2619,6 +2683,19 @@ const POD_CSS = `
 .pod-kpi-value .pod-share, .pod-half-value .pod-share { display:inline-block; font-size:12px; font-weight:600; letter-spacing:0;
 	color:var(--text-2); background:var(--bg-soft); border:1px solid var(--border-soft); border-radius:999px; padding:1px 8px; line-height:18px; }
 .pod-half.is-click:hover { background:var(--bg-soft); }
+
+/* ── card finish: one number size everywhere, divider in pair cards,
+   section headings with a hairline, quiet zeros ── */
+.pod-root .pod-kpi-label, .pod-root .pod-tile-title { color:var(--text); font-weight:600; }
+.pod-kpi-value, .pod-half-value { font-size:28px; }
+.pod-tile.is-pair .pod-halves { gap:0; }
+.pod-tile.is-pair .pod-half { margin:-4px 0; padding:4px 14px 4px 0; border-radius:6px; }
+.pod-tile.is-pair .pod-half + .pod-half { border-left:1px solid var(--border-soft); padding-left:18px; border-radius:0 6px 6px 0; }
+.pod-group-title { display:flex; align-items:center; gap:10px; margin:6px 2px 10px; }
+.pod-group-title::after { content:''; flex:1; height:1px; background:var(--border); }
+.pod-count.is-zero { color:var(--muted); font-weight:600; }
+.pod-half.is-flag .pod-count.is-zero { color:var(--muted); }
+.pod-kpi:focus-visible, .pod-half.is-click:focus-visible { outline:2px solid var(--brand); outline-offset:2px; }
 
 /* ── motion: subtle, quick, and off for anyone who prefers reduced motion ── */
 @keyframes pod-rise { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
