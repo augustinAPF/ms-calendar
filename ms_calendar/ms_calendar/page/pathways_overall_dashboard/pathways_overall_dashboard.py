@@ -1467,6 +1467,140 @@ def _slug(dt):
     return frappe.scrub(dt).replace("_", "-")
 
 
+_REC_SKIP_TYPES = {"Column Break", "Tab Break", "HTML", "Button", "Image", "Fold", "Heading", "Password",
+                   "Signature", "Geolocation"}
+_REC_LONG = {"Small Text", "Text", "Long Text", "Text Editor", "HTML Editor", "Markdown Editor", "Code"}
+_REC_FILES = {"Attach", "Attach Image"}
+
+
+# Records linked to an applicant, grouped into the profile's tabs. Anything
+# else that links to the registration (and isn't an interview / feedback
+# form, which have their own tab) lands in "other".
+_REL_ASSESSMENT = {"Field MeritTrac Test Result", "Field Meritrac Test URL", "Field Evaluator Marks",
+                   "Phil Assignment", "Health Center Visit Form"}
+_REL_ONBOARDING = {"Field Document Collection", "Health Document Collection", "Philanthrophy Document Collection",
+                   "Field Self Declaration", "Common Offer Letter", "Common New Member Form"}
+# Onboarding forms that store the applicant ID in a plain Data field.
+_REL_DATA_LINKED = ("Common Offer Letter", "Common New Member Form")
+# Headline numbers shown above an assessment's full content.
+_REL_SUMMARY = {
+    "Field MeritTrac Test Result": [("total_score", "Score"), ("max_score", "Out of"),
+                                    ("overall_percentage_score", "Percentage"), ("score_percentile", "Percentile"),
+                                    ("credit_score", "DQ score"), ("attempt_status", "Attempt status")],
+    "Field Evaluator Marks": [("total_marks", "Total marks"), ("max_total_marks", "Out of"), ("result", "Result"),
+                              ("evaluator_name", "Evaluator")],
+}
+_REL_NOISE = {"user_img_key", "id_img_key"}
+_REL_MAX = 20
+
+
+def _linked_doctypes(cfg):
+    """[(doctype, link_field)] holding records for this programme's applicants."""
+    reg = cfg["reg"]
+    rows = frappe.get_all("DocField", filters={"fieldtype": "Link", "options": reg}, fields=["parent", "fieldname"])
+    rows += frappe.get_all("Custom Field", filters={"fieldtype": "Link", "options": reg},
+                           fields=["dt as parent", "fieldname"])
+    skip = {cfg["interview"], reg, *cfg["feedback"]}
+    out = []
+    for r in rows:
+        if r.parent in skip or (r.parent, r.fieldname) in out:
+            continue
+        if not frappe.db.exists("DocType", {"name": r.parent, "istable": 0}):
+            continue
+        out.append((r.parent, r.fieldname))
+    for dt in _REL_DATA_LINKED:
+        if dt not in {d for d, _ in out} and frappe.db.exists("DocType", dt) and frappe.get_meta(dt).has_field("applicant_id"):
+            out.append((dt, "applicant_id"))
+    return out
+
+
+def _related_records(cfg, name, documents):
+    """Every record linked to this (already permission-checked) applicant that
+    the user may read, each with its full content and a headline summary."""
+    app_dt = cfg["app"][0] if isinstance(cfg["app"], tuple) else None
+    related = []
+    for dt, link in _linked_doctypes(cfg):
+        if not _can_read(dt):
+            continue
+        group = ("application" if dt == app_dt else "assessment" if dt in _REL_ASSESSMENT
+                 else "onboarding" if dt in _REL_ONBOARDING else "other")
+        for row in frappe.get_list(dt, filters={link: name}, fields=["name", "creation"],
+                                   order_by="creation desc", limit_page_length=_REL_MAX):
+            if not frappe.has_permission(dt, "read", doc=row.name):
+                continue
+            rdoc = frappe.get_doc(dt, row.name)
+            summary = []
+            for field, label in _REL_SUMMARY.get(dt, []):
+                if rdoc.get(field) not in (None, ""):
+                    summary.append({"label": label, "value": str(rdoc.get(field))})
+            related.append({
+                "group": group, "doctype": dt, "name": row.name, "route": _slug(dt),
+                "date": str(row.creation)[:16], "summary": summary,
+                "sections": _record_sections(rdoc, documents, dt),
+            })
+    return related
+
+
+def _rec_value(df, value):
+    if value in (None, ""):
+        return ""
+    if df.fieldtype == "Check":
+        return "Yes" if cint(value) else ""
+    if df.fieldtype == "Rating":
+        stars = cint(df.options) or 5
+        return f"{round(frappe.utils.flt(value) * stars)} / {stars}"
+    if df.fieldtype == "Date":
+        return frappe.utils.formatdate(value)
+    if df.fieldtype == "Datetime":
+        return frappe.utils.format_datetime(value)
+    if df.fieldtype in ("Text Editor", "HTML Editor", "Markdown Editor"):
+        return frappe.utils.strip_html(str(value)).strip()
+    return str(value)
+
+
+def _record_sections(doc, documents, source):
+    """
+    Every visible, filled-in field of one record, grouped the way its form
+    is laid out (Tab / Section Break labels) — plain text only, the page
+    escapes everything. Hidden fields, passwords / OTPs and signatures are
+    left out. Attach fields are collected into `documents` instead.
+    """
+    meta = frappe.get_meta(doc.doctype)
+    sections = [{"title": "", "fields": [], "tables": []}]
+    tab = ""
+    for df in meta.fields:
+        if df.fieldtype == "Tab Break":
+            tab = (df.label or "").strip()
+            sections.append({"title": tab, "fields": [], "tables": []})
+            continue
+        if df.fieldtype == "Section Break":
+            # An unlabelled section is a continuation of the one above.
+            if (df.label or "").strip():
+                sections.append({"title": df.label.strip(), "fields": [], "tables": []})
+            continue
+        if df.fieldtype in _REC_SKIP_TYPES or df.hidden or df.fieldname in _PROFILE_SKIP or df.fieldname in _REL_NOISE:
+            continue
+        label = (df.label or df.fieldname).strip()
+        if df.fieldtype in _REC_FILES:
+            if doc.get(df.fieldname):
+                documents.append({"label": label, "url": doc.get(df.fieldname), "source": source})
+            continue
+        if df.fieldtype in ("Table", "Table MultiSelect"):
+            cm = frappe.get_meta(df.options)
+            cols = [c for c in cm.fields
+                    if c.fieldtype not in _REC_SKIP_TYPES | {"Section Break"} and not c.hidden]
+            listed = ([c for c in cols if c.in_list_view] or cols)[:8]
+            rows = [[_rec_value(c, r.get(c.fieldname)) for c in listed] for r in (doc.get(df.fieldname) or [])[:100]]
+            if rows:
+                sections[-1]["tables"].append(
+                    {"label": label, "columns": [c.label or c.fieldname for c in listed], "rows": rows})
+            continue
+        value = _rec_value(df, doc.get(df.fieldname))
+        if value:
+            sections[-1]["fields"].append({"label": label, "value": value, "long": df.fieldtype in _REC_LONG})
+    return [s for s in sections if s["fields"] or s["tables"]]
+
+
 @frappe.whitelist()
 def get_candidate_detail(program, name):
     cfg, doc = _candidate(program, name)
@@ -1543,13 +1677,29 @@ def get_candidate_detail(program, name):
     # Where this applicant is on the pipeline (the board's cards that match).
     milestones = _milestones(cfg, name)
 
+    # The full record, every form's own content and all attached documents —
+    # each form only when this user may read that exact document.
+    documents = []
+    sections = _record_sections(doc, documents, cfg["reg"])
+    related = _related_records(cfg, name, documents)
+
+    facts = []
+    for label, key in (("Email", "email"), ("Phone", "phone"), ("Role", "role"), ("Location", "location"),
+                       ("Job code", "job_code"), ("Source", "source")):
+        if cfg.get(key) and doc.get(cfg[key]):
+            facts.append({"label": label, "value": str(doc.get(cfg[key]))})
+    applied_on = doc.get(cfg["app_date"]) if cfg["app_date"] else None
+    facts.append({"label": "Applied on", "value": frappe.utils.formatdate(applied_on or doc.creation)})
+
     status = doc.get(cfg["status"]) or ""
     applied = any(f.get("is_application") for f in forms) if cfg["app"] else None
     return {
-        "program": program, "id": name, "route": slug(cfg["reg"]),
+        "program": program, "id": name, "route": slug(cfg["reg"]), "unit": cfg["unit_label"],
         "name": doc.get(cfg["title"]) or name, "status": status, "stage": _stage(status),
         "applied": applied, "profile": profile, "forms": forms, "interviews": interviews, "feedback": feedback,
         "history": history, "milestones": milestones,
+        "sections": sections, "documents": documents, "facts": facts, "related": related,
+        "modified": str(doc.modified)[:16],
     }
 
 
