@@ -43,6 +43,31 @@ class FieldInterviewDashboard {
 	// ── helpers ────────────────────────────────────────────────────────────
 	esc(v) { return frappe.utils.escape_html(v === null || v === undefined ? '' : String(v)); }
 	fmt_date(d) { return d ? frappe.datetime.str_to_user(d) : ''; }
+	// "02:30:00 PM" → "2:30 PM"; anything unparseable is shown as stored.
+	fmt_time(t) {
+		const m = moment(String(t || '').trim(), ['h:mm:ss A', 'h:mm A', 'HH:mm:ss', 'HH:mm'], true);
+		return m.isValid() ? m.format('h:mm A') : String(t || '');
+	}
+	time_range(r) { return this.fmt_time(r.start) + (r.end ? ' – ' + this.fmt_time(r.end) : ''); }
+	// Candidate email · phone under the name (clickable mail / call links).
+	contact_html(r) {
+		const parts = [];
+		if (r.email) parts.push(`<a class="fid-contact" href="mailto:${this.esc(r.email)}">${this.esc(r.email)}</a>`);
+		if (r.phone) parts.push(`<a class="fid-contact" href="tel:${this.esc(r.phone)}">${this.esc(r.phone)}</a>`);
+		return parts.length ? `<div class="fid-muted">${parts.join(' · ')}</div>` : '';
+	}
+	// Interviewer / panelist display name from the server's email → name map.
+	person_name(email) { return ((this.data && this.data.people) || {})[email] || email; }
+	// One person per block: name, with the email under it when known.
+	people_html(emails) {
+		return (emails || []).map(e => {
+			const name = this.person_name(e);
+			return `<div class="fid-person"><div>${this.esc(name)}</div>${name !== e && e.includes('@') ? `<div class="fid-muted">${this.esc(e)}</div>` : ''}</div>`;
+		}).join('');
+	}
+	people_csv(emails) {
+		return (emails || []).map(e => { const n = this.person_name(e); return n !== e ? `${n} <${e}>` : e; }).join('; ');
+	}
 	pct(a, b) { return b ? Math.round((a / b) * 100) : 0; }
 	median(arr) {
 		if (!arr.length) return null;
@@ -505,11 +530,12 @@ class FieldInterviewDashboard {
 				<div class="fid-day-head"><span>${this.esc(label)}</span><span class="fid-muted">${this.esc(this.fmt_date(day))} · ${by_day[day].length}</span></div>
 				${by_day[day].map(x => `
 					<div class="fid-agenda-row">
-						<div class="fid-agenda-time">${this.esc(x.start || '—')}</div>
+						<div class="fid-agenda-time">${x.start ? this.esc(this.fmt_time(x.start)) : '—'}</div>
 						<div class="fid-agenda-main">
 							<a class="fid-cand" data-app="${this.esc(x.application_id)}">${this.esc(x.applicant || x.application_id)}</a>
 							<span class="fid-muted"> · ${this.esc(x.round)}</span>
-							<div class="fid-muted">${this.esc(x.department)} · ${this.esc(x.mode)}${(x.interviewers || []).length ? ' · ' + this.esc(x.interviewers.join(', ')) : ''}</div>
+							${this.contact_html(x)}
+							<div class="fid-muted">${[x.role, x.mode].filter(Boolean).map(v => this.esc(v)).join(' · ')}${(x.interviewers || []).length ? ' · ' + this.esc(x.interviewers.map(e => this.person_name(e)).join(', ')) : ''}</div>
 						</div>
 						${x.status === 'Cancelled' ? this.status_pill('Cancelled') : ''}
 						${x.status === 'Completed' ? this.status_pill(x.feedback) + this.status_pill(x.outcome) : ''}
@@ -538,14 +564,17 @@ class FieldInterviewDashboard {
 	interview_columns() {
 		return [
 			{ key: 'date', label: __('Date'), nw: true, render: r => this.esc(this.fmt_date(r.date)), csv: r => r.date },
-			{ key: 'start', label: __('Time'), nw: true, sort: r => this.time_key(r.start), render: r => this.esc(r.start + (r.end ? ' – ' + r.end : '')), csv: r => r.start + (r.end ? ' - ' + r.end : '') },
-			{ key: 'applicant', label: __('Applicant'), render: r => `<a class="fid-cand" data-app="${this.esc(r.application_id)}">${this.esc(r.applicant || r.application_id)}</a><div class="fid-muted">${this.esc(r.application_id)}</div>`, csv: r => r.applicant },
+			{ key: 'start', label: __('Time'), nw: true, sort: r => this.time_key(r.start), render: r => this.esc(this.time_range(r)), csv: r => this.time_range(r).replace('–', '-') },
+			{ key: 'applicant', label: __('Applicant'), render: r => `<a class="fid-cand" data-app="${this.esc(r.application_id)}">${this.esc(r.applicant || r.application_id)}</a><div class="fid-muted">${this.esc(r.application_id)}</div>${this.contact_html(r)}`, csv: r => r.applicant },
 			{ key: 'application_id', label: __('Application ID'), hidden: true },
+			{ key: 'email', label: __('Email'), hidden: true },
+			{ key: 'phone', label: __('Phone'), hidden: true },
 			{ key: 'round', label: __('Round') },
-			{ key: 'department', label: __('Department') },
+			// Hidden on screen (the role already says it), kept in the CSV.
+			{ key: 'department', label: __('Department'), hidden: true },
 			{ key: 'role', label: __('Role') },
 			{ key: 'mode', label: __('Mode') },
-			{ key: 'interviewers', label: __('Interviewers'), sort: r => (r.interviewers || []).join(', '), render: r => this.esc((r.interviewers || []).join(', ')), csv: r => (r.interviewers || []).join('; ') },
+			{ key: 'interviewers', label: __('Interviewers'), sort: r => (r.interviewers || []).map(e => this.person_name(e)).join(', '), render: r => this.people_html(r.interviewers), csv: r => this.people_csv(r.interviewers) },
 			{ key: 'status', label: __('Status'), render: r => this.status_pill(r.status) },
 			{ key: 'rescheduled', label: __('Modified'), sort: r => r.rescheduled || 0,
 				render: r => r.rescheduled ? `<span class="fid-pill" style="--c:#0F766E;">↻ ${__('Rescheduled')} ×${cint(r.rescheduled)}</span>` : '',
@@ -561,7 +590,7 @@ class FieldInterviewDashboard {
 	filtered_main_rows() {
 		const q = (this.$root.find('#fid-search').val() || '').toLowerCase().trim();
 		if (!q) return this.rows;
-		return this.rows.filter(r => [r.applicant, r.application_id, r.role, r.round, r.department, r.name]
+		return this.rows.filter(r => [r.applicant, r.application_id, r.email, r.phone, r.role, r.round, r.department, r.name]
 			.join(' ').toLowerCase().includes(q));
 	}
 
@@ -573,10 +602,20 @@ class FieldInterviewDashboard {
 	feedback_columns() {
 		return [
 			{ key: 'submitted_on', label: __('Submitted'), nw: true, render: r => this.esc(frappe.datetime.str_to_user(r.submitted_on)), csv: r => r.submitted_on },
-			{ key: 'applicant', label: __('Applicant'), render: r => `<a class="fid-cand" data-app="${this.esc(r.application_id)}">${this.esc(r.applicant || r.application_id)}</a><div class="fid-muted">${this.esc(r.application_id)}</div>`, csv: r => r.applicant },
+			{ key: 'applicant', label: __('Applicant'), render: r => `<a class="fid-cand" data-app="${this.esc(r.application_id)}">${this.esc(r.applicant || r.application_id)}</a><div class="fid-muted">${this.esc(r.application_id)}</div>${this.contact_html(r)}`, csv: r => r.applicant },
 			{ key: 'application_id', label: __('Application ID'), hidden: true },
+			{ key: 'email', label: __('Email'), hidden: true },
+			{ key: 'phone', label: __('Phone'), hidden: true },
 			{ key: 'doctype', label: __('Feedback form') },
-			{ key: 'by', label: __('Submitted by') },
+			// Public web-form submissions don't record who filled them in;
+			// for those the server sends the interview's panel (by_panel).
+			{ key: 'by', label: __('Submitted by'),
+				render: r => r.by_source === 'panel'
+					? this.people_html(r.by_panel) + `<div class="fid-muted fid-note">${__('Interview panel')}</div>`
+					: r.by
+						? `<div>${this.esc(r.by)}</div>${r.by_email && r.by_email !== r.by ? `<div class="fid-muted">${this.esc(r.by_email)}</div>` : ''}`
+						: `<span class="fid-muted fid-note">${__('Not recorded')}</span>`,
+				csv: r => r.by_source === 'panel' ? this.people_csv(r.by_panel) : (r.by_email && r.by_email !== r.by ? `${r.by} <${r.by_email}>` : r.by) },
 			{ key: 'result', label: __('Result'), render: r => this.status_pill(r.result) },
 			{ key: 'name', label: '', sort: r => r.name, render: r => `<a class="fid-fb-open" data-dt="${this.esc(r.doctype)}" data-name="${this.esc(r.name)}">${__('View feedback')} ▾</a>`, csv: r => r.name }
 		];
@@ -586,7 +625,8 @@ class FieldInterviewDashboard {
 		const all = (this.data && this.data.feedback) || [];
 		const q = (this.$root.find('#fid-fb-search').val() || '').toLowerCase().trim();
 		if (!q) return all;
-		return all.filter(r => [r.applicant, r.application_id, r.doctype, r.by, r.result].join(' ').toLowerCase().includes(q));
+		return all.filter(r => [r.applicant, r.application_id, r.email, r.phone, r.doctype, r.by, r.by_email, (r.by_panel || []).join(' '), r.result]
+			.join(' ').toLowerCase().includes(q));
 	}
 
 	render_feedback_table() {
@@ -631,7 +671,7 @@ class FieldInterviewDashboard {
 			</div>`).join('');
 		return `<div class="fid-fb-card">
 			<div class="fid-fb-head">
-				<div><b>${esc(f.doctype)}</b> · ${esc(frappe.datetime.str_to_user(f.submitted_on))} · ${__('by')} ${esc(f.by)} ${this.status_pill(f.result)}</div>
+				<div><b>${esc(f.doctype)}</b> · ${esc(frappe.datetime.str_to_user(f.submitted_on))} · ${f.by ? __('by') + ' ' + esc(f.by) : ''} ${this.status_pill(f.result)}</div>
 				<a target="_blank" href="/app/${slug(f.doctype)}/${encodeURIComponent(f.name)}">${__('Open record')} ↗</a>
 			</div>
 			${sections || `<div class="fid-muted">${__('No answers filled in.')}</div>`}
@@ -856,7 +896,7 @@ class FieldInterviewDashboard {
 							<div class="fid-step ${i.cancelled ? 'is-cancelled' : ''}">
 								<div class="fid-step-dot"></div>
 								<div class="fid-step-round">${esc(i.round)}</div>
-								<div class="fid-muted">${esc(this.fmt_date(i.date))} ${esc(i.start)}</div>
+								<div class="fid-muted">${esc(this.fmt_date(i.date))} ${esc(this.fmt_time(i.start))}</div>
 								<div class="fid-muted">${esc(i.mode)}${i.cancelled ? ' · ' + __('Cancelled') : ''}</div>
 								<a class="fid-muted" target="_blank" href="/app/field-interview-schedule/${encodeURIComponent(i.name)}">${esc(i.name)} ↗</a>
 							</div>`).join('') || `<div class="fid-muted">${__('None')}</div>`}
@@ -996,6 +1036,10 @@ const FID_CSS = `
 	background:color-mix(in srgb, var(--c) 10%, transparent); border-radius:20px; padding:1px 8px; font-size:10.5px; font-weight:700; white-space:nowrap; }
 :root[data-theme="dark"] .fid-pill { color:color-mix(in srgb, var(--c) 70%, #fff); }
 .fid-cand { font-weight:600; cursor:pointer; color:var(--link); }
+.fid-contact { color:inherit; }
+.fid-contact:hover { color:var(--link); text-decoration:underline; }
+.fid-person + .fid-person { margin-top:4px; }
+.fid-note { font-style:italic; margin-top:2px; }
 .fid-muted { color:var(--muted); font-size:11px; }
 .fid-num { font-weight:700; cursor:pointer; color:var(--link); }
 .fid-num.is-red { color:#d03b3b; }

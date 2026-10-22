@@ -110,7 +110,17 @@ frappe.pages['pathways-overall-dashboard'].on_page_load = function (wrapper) {
 		title: __('Pathways Overall Dashboard'),
 		single_column: true
 	});
-	new PathwaysOverallDashboard(page, wrapper);
+	wrapper.pod = new PathwaysOverallDashboard(page, wrapper);
+};
+
+// Arriving from an applicant profile opened in a registration list / form
+// ("View timeline" there routes here with the applicant in route_options).
+frappe.pages['pathways-overall-dashboard'].on_page_show = function (wrapper) {
+	const ro = frappe.route_options || {};
+	if (ro.pod_timeline && ro.pod_program && wrapper.pod) {
+		frappe.route_options = null;
+		wrapper.pod.open_timeline(ro.pod_program, ro.pod_timeline);
+	}
 };
 
 class PathwaysOverallDashboard {
@@ -169,12 +179,14 @@ class PathwaysOverallDashboard {
 		return `<a class="pod-cand" data-prog="${this.esc(r.program)}" data-id="${this.esc(r.id)}">${this.esc(r.name || r.id)}</a>`;
 	}
 	slug(dt) { return String(dt || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
-	// Applicant ID → that applicant's registration form (new tab).
+	// Applicant ID → the applicant's full detail page (open_candidate), which
+	// has the "Open in Frappe" button. Ctrl/Cmd-click or middle-click still
+	// opens the registration record in a new tab via the href.
 	id_col() {
 		return { key: 'id', label: __('Applicant ID'), nw: true,
-			render: (r) => r.id ? `<a class="pod-idlink" target="_blank" rel="noopener"
+			render: (r) => r.id ? `<a class="pod-idlink pod-cand" data-prog="${this.esc(r.program)}" data-id="${this.esc(r.id)}"
 				href="/app/${POD_REG_ROUTE[r.program] || 'field-registration-form'}/${encodeURIComponent(r.id)}"
-				title="${this.esc(__('Open registration form'))}">${this.esc(r.id)} ↗</a>` : '' };
+				title="${this.esc(__('View applicant details'))}">${this.esc(r.id)}</a>` : '' };
 	}
 
 	doc_link(dt, name) {
@@ -1183,6 +1195,8 @@ class PathwaysOverallDashboard {
 
 	bind_candidate_links($el) {
 		$el.off('click.podcand').on('click.podcand', '.pod-cand', (e) => {
+			// Ctrl/Cmd/Shift-click on an Applicant ID → the browser opens its href.
+			if (e.ctrlKey || e.metaKey || e.shiftKey) return;
 			e.preventDefault();
 			const prog = String($(e.currentTarget).data('prog') || '');
 			const id = String($(e.currentTarget).data('id') || '');
@@ -1378,7 +1392,20 @@ class PathwaysOverallDashboard {
 	}
 
 	// ── candidate detail (level 2) ─────────────────────────────────────────
+	// The applicant profile popup lives in public/js/applicant_profile.js —
+	// one copy shared with the registration lists / forms. This page passes
+	// itself as host so stage chips open its card lists and the timeline.
 	open_candidate(program, id) {
+		if (window.pathways_applicant_profile) {
+			window.pathways_applicant_profile.open(program, id, this);
+		} else {
+			// applicant_profile.js not loaded on this site (app not fully
+			// deployed yet) — fall back to this page's own popup.
+			this.open_candidate_basic(program, id);
+		}
+	}
+
+	open_candidate_basic(program, id) {
 		frappe.call({
 			method: POD_API + 'get_candidate_detail',
 			args: { program, name: id },

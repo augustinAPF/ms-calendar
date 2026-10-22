@@ -69,6 +69,21 @@ def _feedback_extra_fields(doctype):
 
 
 def _feedback_row(doctype, s):
+    # Who submitted: the form's own panelist fields first, then the logged-in
+    # user who saved it. Public web-form submissions are saved as Guest (and
+    # imports as Administrator) — those get by_source "" here and
+    # get_dashboard_data falls back to that interview's panel.
+    by_name = (s.get("panelist_name") or "").strip()
+    by_email = (s.get("panelist_email") or "").strip()
+    submitted_by = (s.get("submitted_by") or "").strip()
+    if submitted_by:
+        if "@" in submitted_by:
+            by_email = by_email or submitted_by
+        else:
+            by_name = by_name or submitted_by
+    by_source = "form" if (by_name or by_email) else ""
+    if not by_source and s.owner not in ("Guest", "Administrator"):
+        by_name, by_email, by_source = frappe.utils.get_fullname(s.owner), s.owner, "user"
     return {
         "doctype": doctype,
         "name": s.name,
@@ -76,9 +91,37 @@ def _feedback_row(doctype, s):
         "applicant": s.get("applicant_name") or "",
         "date": str(getdate(s.creation)),
         "submitted_on": str(s.creation)[:16],
-        "by": next((s.get(f) for f in _BY_FIELDS if s.get(f)), None) or frappe.utils.get_fullname(s.owner),
+        # "" = not recorded (shown as such, rather than "Guest"/"Administrator").
+        "by": by_name or by_email,
+        "by_email": by_email,
+        "by_source": by_source,
         "result": next((s.get(f) for f in _RESULT_FIELDS if s.get(f)), "") or "",
     }
+
+
+def _people_names(emails):
+    """email → display name: Interviewer Email List first, then User."""
+    emails = [e for e in {(e or "").strip() for e in emails} if "@" in e]
+    if not emails:
+        return {}
+    names = {
+        r.name: r.interviewer_name.strip()
+        for r in frappe.get_all(
+            "Interviewer Email List",
+            filters={"name": ["in", emails]},
+            fields=["name", "interviewer_name"],
+            limit_page_length=0,
+        )
+        if (r.interviewer_name or "").strip()
+    }
+    rest = [e for e in emails if e not in names]
+    if rest:
+        for u in frappe.get_all(
+            "User", filters={"name": ["in", rest]}, fields=["name", "full_name"], limit_page_length=0
+        ):
+            if (u.full_name or "").strip():
+                names[u.name] = u.full_name.strip()
+    return names
 
 
 def _allowed_feedback_doctypes():
@@ -203,7 +246,7 @@ def get_dashboard_data(from_date=None, to_date=None, departments=None, rounds=No
             "name", "application_id", "applicants_name", "interview_round", "role",
             "department", "interview_date", "start_time", "end_time", "interview_mode",
             "is_cancelled", "cancellation_reason", "ms_event_id", "organizer_email",
-            "interviewer_name", "creation",
+            "interviewer_name", "creation", "phone_no",
         ],
         order_by="interview_date desc, start_time desc",
         limit_page_length=MAX_ROWS,
@@ -260,6 +303,18 @@ def get_dashboard_data(from_date=None, to_date=None, departments=None, rounds=No
                 submissions.setdefault((dt, s.applicant_id), []).append((getdate(s.creation), fr["result"]))
                 feedback_rows.append(fr)
 
+    # Candidate email / phone from the Registration Form, shown under the
+    # applicant's name (the schedule's own phone_no is the fallback).
+    contacts = {}
+    if applicants:
+        for c in frappe.get_all(
+            "Field Registration Form",
+            filters={"name": ["in", applicants]},
+            fields=["name", "email_address", "phone_number"],
+            limit_page_length=0,
+        ):
+            contacts[c.name] = c
+
     out = []
     for r in rows:
         # Older (imported) schedules have no interviewer rows, only the
@@ -306,10 +361,13 @@ def get_dashboard_data(from_date=None, to_date=None, departments=None, rounds=No
         else:
             feedback = "Not due"
 
+        contact = contacts.get(r.application_id) or {}
         out.append({
             "name": r.name,
             "application_id": r.application_id or "",
             "applicant": r.applicants_name or "",
+            "email": (contact.get("email_address") or "").strip(),
+            "phone": (contact.get("phone_number") or r.phone_no or "").strip(),
             "round": (r.interview_round or "").strip(),
             "role": r.role or "",
             "department": r.department or "",
@@ -341,8 +399,40 @@ def get_dashboard_data(from_date=None, to_date=None, departments=None, rounds=No
     for f in feedback_rows:
         if f["application_id"] in shown_apps and (not from_date or f["date"] >= str(from_date)):
             f["applicant"] = f["applicant"] or names_by_app.get(f["application_id"], "")
+            contact = contacts.get(f["application_id"]) or {}
+            f["email"] = (contact.get("email_address") or "").strip()
+            f["phone"] = (contact.get("phone_number") or "").strip()
+            if not f["by_source"]:
+                # Submitter unknown (Guest web form) — show the panel of the
+                # interview this feedback is for: same applicant, a round this
+                # form serves, held on or before the submission, latest first.
+                panel = next(
+                    (
+                        o for o in sorted(out, key=lambda o: o["date"], reverse=True)
+                        if o["application_id"] == f["application_id"]
+                        and o["status"] != "Cancelled"
+                        and o["date"] and o["date"] <= f["date"]
+                        and f["doctype"] in fb_map.get(_base_round(o["round"]), [])
+                    ),
+                    None,
+                )
+                if panel and panel["interviewers"]:
+                    f["by_panel"] = panel["interviewers"]
+                    f["by_source"] = "panel"
             feedback_list.append(f)
     feedback_list.sort(key=lambda f: f["submitted_on"], reverse=True)
+
+    # Display names for every interviewer / submitter email on the page.
+    people = _people_names(
+        [iv for o in out for iv in o["interviewers"]]
+        + [f["by_email"] for f in feedback_list]
+        + [iv for f in feedback_list for iv in f.get("by_panel", [])]
+    )
+    for f in feedback_list:
+        if f["by_source"] == "panel":
+            f["by"] = ", ".join(people.get(e, e) for e in f["by_panel"])
+        elif f["by_email"] and f["by"] == f["by_email"]:
+            f["by"] = people.get(f["by_email"], f["by"])
 
     # Every schedule this user can read (all-time card + filter options).
     readable = frappe.get_list(FIS, pluck="name", limit_page_length=0)
@@ -350,6 +440,7 @@ def get_dashboard_data(from_date=None, to_date=None, departments=None, rounds=No
     return {
         "rows": out,
         "feedback": feedback_list,
+        "people": people,
         "truncated": len(rows) >= MAX_ROWS,
         "from_date": str(from_date) if from_date else "",
         "to_date": str(to_date) if to_date else "",

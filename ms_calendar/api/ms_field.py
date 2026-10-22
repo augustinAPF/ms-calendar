@@ -136,9 +136,10 @@ _LIVELIHOOD_FEEDBACK_URLS = {
 _HEALTH_FEEDBACK_URLS = {
     "recruiter round": "https://careers.frappe.cloud/health-recruitment-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
     "functional round": "https://careers.frappe.cloud/health-functional-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
-    # Health's Technical Round uses the same Functional Round feedback form
-    # (requested by the Health recruitment team, 2026-10-08).
-    "technical round": "https://pathways.azimpremjifoundation.org/health-functional-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
+    # Health's Technical Round has its own feedback form since 2026-10-22
+    # (cloud web form technical-round-feedback-form → "Technical Round
+    # Feedback Form"); before that it reused the Functional Round form.
+    "technical round": "https://pathways.azimpremjifoundation.org/technical-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
     "leader round-1": "https://careers.frappe.cloud/health-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
     "leader round-2": "https://careers.frappe.cloud/health-final-round-feedback-form/new?app_id={app_id}&applicant_name={applicant_name}",
 }
@@ -1000,6 +1001,8 @@ def _field_auto_attach_fields(interview_round, applicant_role, department=None):
     Technical Round (Health, after Functional) → base + recruiter + round one feedback
     Round-2 (Demo / Leader Round-1) → base + recruiter + round one feedback
     Round-3 (Leader Round-2) → base + recruiter + round one + round two feedback
+    (Health Leader rounds also carry the Technical Round feedback, when the
+    applicant had one — an empty field is simply skipped.)
     Calibration (Associate Resource Person) → everything
 
     "Base docs" = resume, application form, self declaration, MeritTrac
@@ -1016,8 +1019,8 @@ def _field_auto_attach_fields(interview_round, applicant_role, department=None):
         or "education capacity round" in round_raw
         or ("functional round" in round_raw and "leader" not in round_raw)
     )
-    # Health's Technical Round comes after its Functional Round (and uses the
-    # same feedback form), so it carries the Functional Round feedback.
+    # Health's Technical Round comes after its Functional Round, so it
+    # carries the Functional Round feedback.
     is_technical = "technical round" in round_raw
     is_round2 = "demo round" in round_raw or "leader round-1" in round_raw
     is_round3 = "leader round-2" in round_raw
@@ -1055,6 +1058,11 @@ def _field_auto_attach_fields(interview_round, applicant_role, department=None):
         ]
     else:
         feedback = []
+
+    # Health's Technical Round feedback has its own attach field; the Leader
+    # panels need it too.
+    if is_health and (is_round2 or is_round3):
+        feedback.append("technical_feedback")
 
     merit = [] if is_health else ["filed_merit_track_test"]
     return base + feedback + merit
@@ -5604,6 +5612,7 @@ _FRF_FIELD_PDF_TITLES = {
     "round_one_feedback_from": "Round One Feedback Form",
     "round_two_feedback_form": "Round Two Feedback Form",
     "round_tree_feedback_form": "Round Three Feedback Form",
+    "technical_feedback": "Technical Round Feedback Form",
 }
 
 
@@ -5799,6 +5808,18 @@ def send_functional_round_feedback_pdf_to_registration_form(doc, method=None):
     )
 
 
+def send_technical_round_feedback_pdf_to_registration_form(doc, method=None):
+    """
+    Hooked to "Technical Round Feedback Form" after_insert (see hooks.py) —
+    Health's Technical Round form. Saves into its own "Technical Round
+    Feedback Form" attach field (technical_feedback), so it doesn't replace
+    the Functional Round feedback in "Round One Feedback Form".
+    """
+    _merge_feedback_submissions_to_registration_form(
+        doc, "technical_feedback", "Technical Round Feedback Form"
+    )
+
+
 def send_final_round_feedback_pdf_to_registration_form(doc, method=None):
     """
     Hooked to "Final Round Feedback Form" after_insert (see hooks.py).
@@ -5858,9 +5879,9 @@ FIELD_FEEDBACK_ROUND_MAP = {
         "Functional Round Feedback Form",
         "Functional Feedback Field Enabler",
     ],
-    # Health's Technical Round uses the Functional Round feedback form.
+    # Health's Technical Round has its own form since 2026-10-22.
     "Technical Round": [
-        "Functional Round Feedback Form",
+        "Technical Round Feedback Form",
     ],
     "Demo Round": [
         "Demo Lesson Observation Feedback Form",
@@ -6090,6 +6111,7 @@ _FRF_ATTACH_LABELS = {
     "round_one_feedback_from": "Round One Feedback (Subject / Education Capacity / Functional)",
     "round_two_feedback_form": "Round Two Feedback (Demo / Leader Round-1)",
     "round_tree_feedback_form": "Round Three Feedback",
+    "technical_feedback": "Technical Round Feedback",
 }
 
 # Feedback-PDF fields → the Feedback Form doctypes that fill them, with the
@@ -6114,6 +6136,9 @@ _FRF_FEEDBACK_SOURCES = {
         ("Demo Lesson Observation Feedback Form", "Demo Lesson Observation Feedback Form"),
         ("Final Round Feedback Form", "Final Round Feedback Form"),
         ("Final Feedback Field Enabler", "Final Feedback Field Enabler"),
+    ],
+    "technical_feedback": [
+        ("Technical Round Feedback Form", "Technical Round Feedback Form"),
     ],
 }
 
@@ -6422,6 +6447,15 @@ def check_field_interview_attachments(
             else:
                 result["missing"].append(label)
                 result["items"].append({"field": field, "label": label, "status": "missing"})
+            continue
+
+        # Not every Health role has a Technical Round — no PDF and no
+        # submission just means there's nothing to send, not a gap.
+        if (
+            field == "technical_feedback"
+            and not current_ok
+            and not _feedback_source_counts(application_id, field)[1]
+        ):
             continue
 
         rebuilt = False
