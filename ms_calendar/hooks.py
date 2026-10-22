@@ -494,18 +494,23 @@ doc_events = {
     # Health Registration Form) -> its existing "feedback_form" field.
     # on_update (not after_insert, unlike Philanthropy's single-doctype
     # version above) so editing an already-saved round's feedback also
-    # rebuilds the combined PDF.
+    # rebuilds the combined PDF. after_insert emails the interview's
+    # interviewers the new feedback (once per submission, not per edit).
     "Health Feedback Form one": {
-        "on_update": "ms_calendar.api.ms_health.on_mbbs_feedback_form_submitted"
+        "on_update": "ms_calendar.api.ms_health.on_mbbs_feedback_form_submitted",
+        "after_insert": "ms_calendar.api.ms_health.send_feedback_submitted_email",
     },
     "Health FeedBack Form Two": {
-        "on_update": "ms_calendar.api.ms_health.on_mbbs_feedback_form_submitted"
+        "on_update": "ms_calendar.api.ms_health.on_mbbs_feedback_form_submitted",
+        "after_insert": "ms_calendar.api.ms_health.send_feedback_submitted_email",
     },
     "Health Feedback Form Three": {
-        "on_update": "ms_calendar.api.ms_health.on_mbbs_feedback_form_submitted"
+        "on_update": "ms_calendar.api.ms_health.on_mbbs_feedback_form_submitted",
+        "after_insert": "ms_calendar.api.ms_health.send_feedback_submitted_email",
     },
     "Health Center Visit Form": {
-        "on_update": "ms_calendar.api.ms_health.on_mbbs_feedback_form_submitted"
+        "on_update": "ms_calendar.api.ms_health.on_mbbs_feedback_form_submitted",
+        "after_insert": "ms_calendar.api.ms_health.send_feedback_submitted_email",
     },
     "Scholarship Recruitment Form": {
         "on_update": [
@@ -520,36 +525,73 @@ doc_events = {
         ]
     },
     "Recruiter Feedback Form": {
-        "after_insert": "ms_calendar.api.ms_field.send_recruiter_feedback_pdf_to_registration_form"
+        "after_insert": [
+            "ms_calendar.api.ms_field.send_recruiter_feedback_pdf_to_registration_form",
+            "ms_calendar.api.ms_field.send_field_feedback_submitted_email",
+        ]
     },
     "Educational Capacity Interview - Feedback Form": {
-        "after_insert": "ms_calendar.api.ms_field.send_educational_capacity_feedback_pdf_to_registration_form"
+        "after_insert": [
+            "ms_calendar.api.ms_field.send_educational_capacity_feedback_pdf_to_registration_form",
+            "ms_calendar.api.ms_field.send_field_feedback_submitted_email",
+        ]
     },
     "School Teacher Feedback Form": {
-        "after_insert": "ms_calendar.api.ms_field.send_school_teacher_feedback_pdf_to_registration_form"
+        "after_insert": [
+            "ms_calendar.api.ms_field.send_school_teacher_feedback_pdf_to_registration_form",
+            "ms_calendar.api.ms_field.send_field_feedback_submitted_email",
+        ]
     },
     "Demo Lesson Observation Feedback Form": {
-        "after_insert": "ms_calendar.api.ms_field.send_demo_lesson_observation_feedback_pdf_to_registration_form"
+        "after_insert": [
+            "ms_calendar.api.ms_field.send_demo_lesson_observation_feedback_pdf_to_registration_form",
+            "ms_calendar.api.ms_field.send_field_feedback_submitted_email",
+        ]
     },
     "Feedback Form - Associate Resource Person": {
-        "after_insert": "ms_calendar.api.ms_field.send_arp_feedback_pdf_to_registration_form"
+        "after_insert": [
+            "ms_calendar.api.ms_field.send_arp_feedback_pdf_to_registration_form",
+            "ms_calendar.api.ms_field.send_field_feedback_submitted_email",
+        ]
     },
     "Recruiter Assessment Form": {
-        "after_insert": "ms_calendar.api.ms_field.send_recruiter_assessment_pdf_to_registration_form"
+        "after_insert": [
+            "ms_calendar.api.ms_field.send_recruiter_assessment_pdf_to_registration_form",
+            "ms_calendar.api.ms_field.send_field_feedback_submitted_email",
+        ]
     },
     "Functional Round Feedback Form": {
-        "after_insert": "ms_calendar.api.ms_field.send_functional_round_feedback_pdf_to_registration_form"
+        "after_insert": [
+            "ms_calendar.api.ms_field.send_functional_round_feedback_pdf_to_registration_form",
+            "ms_calendar.api.ms_field.send_field_feedback_submitted_email",
+        ]
+    },
+    # Health's Technical Round form (cloud web form technical-round-feedback-form).
+    "Technical Round Feedback Form": {
+        "after_insert": [
+            "ms_calendar.api.ms_field.send_technical_round_feedback_pdf_to_registration_form",
+            "ms_calendar.api.ms_field.send_field_feedback_submitted_email",
+        ]
     },
     "Final Round Feedback Form": {
-        "after_insert": "ms_calendar.api.ms_field.send_final_round_feedback_pdf_to_registration_form"
+        "after_insert": [
+            "ms_calendar.api.ms_field.send_final_round_feedback_pdf_to_registration_form",
+            "ms_calendar.api.ms_field.send_field_feedback_submitted_email",
+        ]
     },
     # Enabler's Functional / Final round feedback forms (cloud web forms
     # enablers-functional-round-feedback-form / enablers-final-round-feedback-form).
     "Functional Feedback Field Enabler": {
-        "after_insert": "ms_calendar.api.ms_field.send_enabler_functional_feedback_pdf_to_registration_form"
+        "after_insert": [
+            "ms_calendar.api.ms_field.send_enabler_functional_feedback_pdf_to_registration_form",
+            "ms_calendar.api.ms_field.send_field_feedback_submitted_email",
+        ]
     },
     "Final Feedback Field Enabler": {
-        "after_insert": "ms_calendar.api.ms_field.send_enabler_final_feedback_pdf_to_registration_form"
+        "after_insert": [
+            "ms_calendar.api.ms_field.send_enabler_final_feedback_pdf_to_registration_form",
+            "ms_calendar.api.ms_field.send_field_feedback_submitted_email",
+        ]
     },
 }
 
@@ -656,7 +698,7 @@ app_include_js = [
     # holding onto old copies for the full 12h Cache-Control max-age even
     # across hard reloads. Bump the number any time this file changes and
     # every browser is guaranteed a fresh fetch on next page load.
-    "/assets/ms_calendar/js/frf_list.js?v=16",
+    "/assets/ms_calendar/js/frf_list.js?v=32",
     "/assets/ms_calendar/js/phil_registration_form_list.js",
     # scholarship_recruitment_form_list.js is NOT listed here: it is already
     # loaded for its list view via doctype_list_js above, and listing it
@@ -664,11 +706,27 @@ app_include_js = [
     # was never deployed) that 404 came back as text/html and the browser
     # refused it with a strict-MIME error on every page load.
     "/assets/ms_calendar/js/applicant_master_list.js?v=1",
+    # Applicant profile popup — shared by the Pathways Overall Dashboard and
+    # the four registration lists (click a name) / forms ("View profile").
+    # Manual "?v=" cache-buster like frf_list.js: bump it when the file changes.
+    "/assets/ms_calendar/js/applicant_profile.js?v=16",
+    # Form Activity timeline shows the exact date/time instead of "2 days ago".
+    # Manual "?v=" cache-buster: bump it when the file changes.
+    "/assets/ms_calendar/js/activity_exact_time.js?v=2",
     # "pathways_redirect.js" was never actually added to public/js/ (checked
     # git history — no commit ever created it), so this line 404s on every
     # single desk page load, for every user, since app_include_js is loaded
     # app-wide. Removed rather than guessed-at: recreating it would mean
     # inventing redirect behavior nobody's described.
+]
+# Website pages (incl. the public feedback web forms). feedback_form_draft.js
+# adds Save (browser-only draft) to the Field feedback web forms and does
+# nothing on any other page. It goes here and not in webform_include_js
+# because that hook only reaches standard (in-app) web forms, and the
+# feedback web forms are custom records on the site.
+# Manual "?v=" cache-buster like frf_list.js: bump it when the file changes.
+web_include_js = [
+    "/assets/ms_calendar/js/feedback_form_draft.js?v=4",
 ]
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -790,6 +848,11 @@ scheduler_events = {
 	"cron": {
 		"*/5 * * * *": [
 			"ms_calendar.api.ms_field.send_field_interview_first_feedback_reminder",
+			# Philanthropy's first "feedback pending" reminder, 24 hours
+			# after the interview ends - checked every 5 minutes so it goes
+			# out close to the 24-hour mark. The daily
+			# send_interviewer_feedback_reminders takes over from day 2.
+			"ms_calendar.api.ms_philanthropy.send_interviewer_first_feedback_reminder",
 			# Moved off "daily" — that only checked once around midnight, so
 			# whether a candidate got a real day's notice or just a few
 			# hours depended entirely on what time their interview happened
