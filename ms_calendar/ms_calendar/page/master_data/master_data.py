@@ -30,7 +30,7 @@ Permissions (server side, never in the browser):
 - client filter values are only ever bound as SQL parameters;
 - the Excel download goes through the same query as the table.
 No row cap: the table pages in SQL, and the download builds the workbook
-in batches with xlsxwriter's constant-memory mode.
+in batches with openpyxl's write-only mode.
 """
 
 import hashlib
@@ -735,12 +735,16 @@ def get_master_data(page=1, page_size=50, sort_by=None, sort_dir=None, search=No
 def download_excel(sort_by=None, sort_dir=None, search=None, card=None, from_date=None, to_date=None, **kw):
     """
     Every matching row (no cap) as an .xlsx with the template's two sheets —
-    same permission-scoped query as the table. Built in batches into a temp
-    file with xlsxwriter's constant-memory mode, so memory stays flat.
+    same permission-scoped query as the table. Built in batches with
+    openpyxl's write-only mode (ships with Frappe on every bench), so
+    memory stays flat.
     """
     import tempfile
 
-    import xlsxwriter
+    from openpyxl import Workbook
+    from openpyxl.cell import WriteOnlyCell
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
     from werkzeug.wrappers import Response
     from werkzeug.wsgi import wrap_file
 
@@ -749,59 +753,73 @@ def download_excel(sort_by=None, sort_dir=None, search=None, card=None, from_dat
     base = _Base(f, card=card, search=search)
     names = base.names(base.order(sort_by, sort_dir))
 
-    tmp = tempfile.NamedTemporaryFile(suffix=".xlsx")
-    wb = xlsxwriter.Workbook(tmp.name, {"constant_memory": True, "strings_to_formulas": False,
-                                        "strings_to_urls": False})
-    fmt = {
-        "group": {g: wb.add_format({"bold": True, "font_color": "#FFFFFF", "bg_color": c, "align": "center",
-                                    "valign": "vcenter", "border": 1, "text_wrap": True})
-                  for g, c in (("app", "#1F4E79"), ("test", "#7A4E12"), ("iv", "#1F5C4A"), ("offer", "#5B3A7A"))},
-        "head": wb.add_format({"bold": True, "bg_color": "#DCE6F1", "border": 1, "text_wrap": True,
-                               "valign": "top", "font_size": 10}),
-        "date": wb.add_format({"num_format": "dd-mm-yyyy"}),
-    }
+    wb = Workbook(write_only=True)
+    thin = Side(style="thin", color="A6B4C3")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    group_style = {g: (PatternFill("solid", fgColor=c), Font(bold=True, color="FFFFFF"))
+                   for g, c in (("app", "1F4E79"), ("test", "7A4E12"), ("iv", "1F5C4A"), ("offer", "5B3A7A"))}
+    head_fill, head_font = PatternFill("solid", fgColor="DCE6F1"), Font(bold=True, size=10)
+    wrap = Alignment(wrap_text=True, vertical="top")
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    def styled(ws, value, fill=None, font=None, align=None):
+        c = WriteOnlyCell(ws, value)
+        c.fill, c.font, c.alignment, c.border = fill or PatternFill(), font or Font(), align or wrap, border
+        return c
 
     def sheet(title, cols, grouped):
-        ws = wb.add_worksheet(title)
-        for i, (k, _) in enumerate(cols):
-            ws.set_column(i, i, 13 if k in DATE_KEYS else 10 if k in NUMBER_KEYS else 22)
-        r0 = 0
+        # Write-only: widths, panes and filters must be set before the first row.
+        ws = wb.create_sheet(title)
+        for i, (k, _) in enumerate(cols, start=1):
+            ws.column_dimensions[get_column_letter(i)].width = 13 if k in DATE_KEYS else 10 if k in NUMBER_KEYS else 22
+        r0 = 1
         if grouped:
-            ws.set_row(0, 30)
-            start = 0
+            ws.row_dimensions[1].height = 30
+            r0 = 2
+        ws.row_dimensions[r0].height = 48
+        ws.freeze_panes = f"B{r0 + 1}"
+        ws.auto_filter.ref = f"A{r0}:{get_column_letter(len(cols))}{r0 + max(len(names), 1)}"
+        if grouped:
+            cells, start = [], 1
             for g, label in GROUPS:
                 n = sum(1 for gg, _, _ in MASTER_COLS if gg == g)
-                ws.merge_range(0, start, 0, start + n - 1, label, fmt["group"][g])
+                fill, font = group_style[g]
+                cells += [styled(ws, label if j == 0 else None, fill, font, center) for j in range(n)]
+                ws.merged_cells.add(f"{get_column_letter(start)}1:{get_column_letter(start + n - 1)}1")
                 start += n
-            r0 = 1
-        ws.set_row(r0, 48)
-        for i, (_, label) in enumerate(cols):
-            ws.write_string(r0, i, label, fmt["head"])
-        ws.freeze_panes(r0 + 1, 1)
-        ws.autofilter(r0, 0, r0 + max(len(names), 1), len(cols) - 1)
-        return ws, r0 + 1
+            ws.append(cells)
+        ws.append([styled(ws, label, head_fill, head_font) for _, label in cols])
+        return ws
 
-    # constant_memory only needs rows in order within each sheet, so every
-    # batch is built once and written to both sheets.
-    sheets = [(*sheet("Master Tracker", [(k, label) for _, k, label in MASTER_COLS], True),
+    def cell(ws, k, v):
+        if v in (None, ""):
+            return None
+        if k in DATE_KEYS and hasattr(v, "year"):
+            c = WriteOnlyCell(ws, getdate(v))
+            c.number_format = "DD-MM-YYYY"
+            return c
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return v
+        v = str(v)
+        if v[:1] == "=":   # never let entered text become a formula
+            c = WriteOnlyCell(ws, v)
+            c.data_type = "s"
+            return c
+        return v
+
+    # Write-only appends rows in order per sheet, so every batch is built
+    # once and written to both sheets.
+    sheets = [(sheet("Master Tracker", [(k, label) for _, k, label in MASTER_COLS], True),
                [k for _, k, _ in MASTER_COLS]),
-              (*sheet("Offer Tracker", OFFER_COLS, False), [k for k, _ in OFFER_COLS])]
+              (sheet("Offer Tracker", OFFER_COLS, False), [k for k, _ in OFFER_COLS])]
     for i in range(0, len(names), BATCH):
         for row in _build_rows(base, names[i:i + BATCH]):
-            for si, (ws, row_i, keys) in enumerate(sheets):
-                for ci, k in enumerate(keys):
-                    v = row.get(k)
-                    if v in (None, ""):
-                        continue
-                    if k in DATE_KEYS and hasattr(v, "year"):
-                        ws.write_datetime(row_i, ci, frappe.utils.get_datetime(v), fmt["date"])
-                    elif isinstance(v, (int, float)) and not isinstance(v, bool):
-                        ws.write_number(row_i, ci, v)
-                    else:
-                        ws.write_string(row_i, ci, str(v))
-                sheets[si] = (ws, row_i + 1, keys)
-    wb.close()
+            for ws, keys in sheets:
+                ws.append([cell(ws, k, row.get(k)) for k in keys])
 
+    tmp = tempfile.NamedTemporaryFile(suffix=".xlsx")
+    wb.save(tmp)
+    tmp.flush()
     tmp.seek(0, 2)
     size = tmp.tell()
     tmp.seek(0)
