@@ -1621,7 +1621,11 @@ def _cancel_interview_schedule_graph_event(headers, organizer_email, event_id, c
 
 
 def _save_interview_schedule_hybrid_event_id(name, hybrid_event_id):
-    if name:
+    # Interview Schedule is a Custom DocType on the cloud sites, so the field
+    # may be missing there (pathways, 2026-10-22). Writing a missing column
+    # raised "Unknown column" AFTER the Outlook invite went out, rolling back
+    # the event_id save — skip instead; it only matters for old hybrid events.
+    if name and frappe.get_meta("Interview Schedule").has_field("hybrid_event_id"):
         frappe.db.set_value(
             "Interview Schedule", name, "hybrid_event_id", hybrid_event_id or "", update_modified=False
         )
@@ -2144,7 +2148,7 @@ has been <strong>cancelled</strong>.</p>
 
     doc.db_set("is_cancelled", 1, update_modified=False)
     doc.db_set("event_id", "", update_modified=False)
-    doc.db_set("hybrid_event_id", "", update_modified=False)
+    _save_interview_schedule_hybrid_event_id(name, "")
 
     frappe.msgprint("✅ Interview cancelled — candidate and interviewer(s) notified.")
 

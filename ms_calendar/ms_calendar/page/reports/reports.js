@@ -288,10 +288,10 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		.rpt-view-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; background:#fff;
 			border:1px solid #E5E7EB; border-radius:12px; padding:10px 12px; margin-bottom:12px;
 			box-shadow:0 1px 2px rgba(16,24,40,.04); }
-		.rpt-back { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 12px;
+		.rpt-back, .rpt-btn-clear { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 12px;
 			border-radius:8px; background:#fff; color:#374151; font-weight:500; font-size:12.5px;
 			border:1px solid #D1D5DB; cursor:pointer; }
-		.rpt-back:hover { background:#F9FAFB; border-color:#9CA3AF; }
+		.rpt-back:hover, .rpt-btn-clear:hover { background:#F9FAFB; border-color:#9CA3AF; }
 		.rpt-view-title { font-size:15px; font-weight:700; color:#111827; padding:0 12px 0 6px;
 			margin-right:4px; border-right:1px solid #E5E7EB; line-height:24px; }
 		.rpt-toolbar-label { font-size:12px; color:#6B7280; font-weight:500; }
@@ -2051,21 +2051,30 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 	// NOT an assumption — "Leader Round 1/2/3-Interview …" are all three
 	// real, distinct options; the recruiter's sheet genuinely just
 	// doesn't track Round 2.
+	//
+	// Re-checked 2026-10-15 against the CURRENT application_status option
+	// list + real School Teacher counts: the picklist now uses "<Round>",
+	// "<Round> Select", "<Round> Reject" (e.g. "Recruiter Round Reject",
+	// "Functional Round Reject"). Those weren't in this list, so ~3,300
+	// records (1,664 Recruiter Round Reject, 1,523 Functional Round Reject,
+	// …) silently counted in no round column — added below. "Education
+	// Capacity Round" = the EC/Subject interview, so it folds into the
+	// Subject Round columns like Functional Round does.
 	var STF_COLS = [
 		{ label: 'No. of Applications', key: 'applications', statuses: null },
 		{ label: 'CV Shortlisted', key: 'cv_shortlisted', statuses: ['CV Shortlist', 'Shortlisted'] },
-		{ label: 'CV Screening Pending', key: 'cv_pending', statuses: ['New Applicant', 'Pending', 'Correction Pending', 'PI Edited'] },
-		{ label: 'CV Rejected', key: 'cv_rejected', statuses: ['CV Reject', 'Rejected', 'Not Selected', 'Duplicated', 'Blacklisted', 'Blocklisted'] },
-		{ label: 'On Hold', key: 'on_hold', statuses: ['On Hold'] },
+		{ label: 'CV Screening Pending', key: 'cv_pending', statuses: ['New Applicant', 'Pending', 'Correction Pending', 'Pending for Correction', 'PI Edited'] },
+		{ label: 'CV Rejected', key: 'cv_rejected', statuses: ['CV Reject', 'Rejected', 'Not Selected', 'Duplicated', 'Blacklisted', 'Blocklisted', 'Blocklist'] },
+		{ label: 'On Hold', key: 'on_hold', statuses: ['On Hold', 'Test Hold'] },
 		{ label: 'Admit Card Sent', key: 'admit_card_sent', statuses: ['Test Process', 'Admit Card Sent'] },
-		{ label: 'Assessment Pass', key: 'assessment_pass', statuses: ['Test Select', 'Assessment Passed'] },
-		{ label: 'Assessment Fail', key: 'assessment_fail', statuses: ['Test Reject', 'Assessment Failed'] },
+		{ label: 'Test Select', key: 'assessment_pass', statuses: ['Test Select', 'Assessment Passed'] },
+		{ label: 'Test Reject', key: 'assessment_fail', statuses: ['Test Reject', 'Assessment Failed'] },
 		{ label: 'Recruiter Round Scheduled', key: 'rr_sched', statuses: ['Recruiter Round', 'Recruiter Round-Interview Scheduled'] },
 		{ label: 'Recruiter Round Selected', key: 'rr_sel', statuses: ['Recruiter Round Select', 'Recruiter Round-Interview Selected'] },
-		{ label: 'Recruiter Round Rejected', key: 'rr_rej', statuses: ['Recruiter Reject', 'Recruiter Round-Interview Rejected'] },
-		{ label: 'Subject Round Interview Scheduled', key: 'sr_sched', statuses: ['Round One', 'Subject Round', 'Subject Round-Interview Scheduled', 'Functional Round-Interview Scheduled', 'Functional Round-Interviewed'] },
-		{ label: 'Subject Round Interview Selected', key: 'sr_sel', statuses: ['Round One Select', 'Subject Round Select', 'Functional Round-Interview Selected'] },
-		{ label: 'Subject Round Interview Rejected', key: 'sr_rej', statuses: ['Round 1 Reject', 'Subject Round Reject', 'Subject Round-Interview Rejected', 'Functional Round-Interview Rejected'] },
+		{ label: 'Recruiter Round Rejected', key: 'rr_rej', statuses: ['Recruiter Round Reject', 'Recruiter Reject', 'Recruiter Round-Interview Rejected'] },
+		{ label: 'Subject Round Interview Scheduled', key: 'sr_sched', statuses: ['Functional Round', 'Education Capacity Round', 'Round One', 'Subject Round', 'Subject Round-Interview Scheduled', 'Functional Round-Interview Scheduled', 'Functional Round-Interviewed'] },
+		{ label: 'Subject Round Interview Selected', key: 'sr_sel', statuses: ['Functional Round Select', 'Education Capacity Select', 'Round One Select', 'Subject Round Select', 'Functional Round-Interview Selected'] },
+		{ label: 'Subject Round Interview Rejected', key: 'sr_rej', statuses: ['Functional Round Reject', 'Education Capacity Reject', 'Round 1 Reject', 'Subject Round Reject', 'Subject Round-Interview Rejected', 'Functional Round-Interview Rejected'] },
 		{ label: 'Demo Round Scheduled', key: 'dr_sched', statuses: ['Round Two', 'Demo Round', 'Subject/Classroom Demo Round-Interview Scheduled', 'Principal/Demo Round-Interview Scheduled'] },
 		{ label: 'Demo Round Selected', key: 'dr_sel', statuses: ['Round Two Select', 'Demo Round Select', 'Subject/Classroom Demo Round-Interview Selected', 'Principal/Demo Round-Interview Selected'] },
 		{ label: 'Demo Round Rejected', key: 'dr_rej', statuses: ['Round 2 Reject', 'Demo Round Reject', 'Subject/Classroom Demo Round-Interview Rejected', 'Principal/Demo Round-Interview Rejected', 'Demo Round-Interview Rejected', 'Demo & Leader Round-Interview Rejected'] },
@@ -2195,14 +2204,11 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			<div class="rpt-view-toolbar">
 				<button class="rpt-back" id="rpt-back">← Reports</button>
 				<span class="rpt-view-title">School Teacher — District Funnel</span>
-				<span class="rpt-toolbar-label">From:</span>
-				<input type="date" class="rpt-toolbar-date" id="stf-from" />
-				<span class="rpt-toolbar-label">To:</span>
-				<input type="date" class="rpt-toolbar-date" id="stf-to" />
-				<span class="rpt-toolbar-label">Applied From:</span>
+				<span class="rpt-toolbar-label">Application Date From:</span>
 				<input type="date" class="rpt-toolbar-date" id="stf-applied-from" />
-				<span class="rpt-toolbar-label">Applied To:</span>
+				<span class="rpt-toolbar-label">Application Date To:</span>
 				<input type="date" class="rpt-toolbar-date" id="stf-applied-to" />
+				<button class="rpt-btn-clear" id="stf-clear-dates" title="Clear both Application Dates">✕ Clear</button>
 				<div class="rpt-ms" id="stf-state" data-placeholder="All States"></div>
 				<div class="rpt-ms" id="stf-school" data-placeholder="All Schools"></div>
 				<div class="rpt-ms" id="stf-jobcode" data-placeholder="All Job Codes"></div>
@@ -2213,12 +2219,12 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			<div class="rpt-tbl-wrap" id="stf-tbl-wrap"><div class="rpt-loading is-busy">Loading…</div></div>
 		`);
 
-		(function () {
-			var t = new Date();
-			var yr = t.getMonth() >= 3 ? t.getFullYear() : t.getFullYear() - 1;
-			$('#stf-from').val(yr + '-04-01');
-			$('#stf-to').val(t.toISOString().slice(0, 10));
-		})();
+		// Only one date range on this report: Application Date From/To (the
+		// form's "Application Date" field, application_date). The old
+		// From/To (creation) range was removed 2026-10-15 at the
+		// recruiter's request — imported records all share recent creation
+		// dates, so it never meant anything here. Both boxes start empty =
+		// every record.
 
 		// Re-filter in the browser only on every change — no re-fetch
 		// needed, since _stfAllRecs already has every record for the
@@ -2232,12 +2238,23 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 
 		$('#rpt-back').on('click', showHub);
 		$('#stf-refresh').on('click', fetchSTDistrictData);
+		// Re-fetch as soon as either Application Date box changes — the
+		// date range is applied server-side, so picking a date without
+		// pressing Refresh used to leave the old (unfiltered) table on
+		// screen and looked like the filter did nothing.
+		$('#stf-applied-from, #stf-applied-to').on('change', fetchSTDistrictData);
+		// Clear both date boxes back to empty (= every record) and re-fetch.
+		// Setting .val('') doesn't fire 'change', so fetch explicitly — once.
+		$('#stf-clear-dates').on('click', function () {
+			$('#stf-applied-from, #stf-applied-to').val('');
+			fetchSTDistrictData();
+		});
 		// Real .xlsx with the same header/row colours as the on-screen
 		// table — the CSV export used elsewhere on this page has no
 		// concept of colour, so this is a server-rendered file instead
 		// (ms_calendar.api.reports.download_st_district_funnel), built
-		// with the exact same From/To/Applied From/Applied To/State/School/
-		// Job Code filters currently on screen. Multiple selected
+		// with the exact same Application Date From/To/State/School/Job Code
+		// filters currently on screen. Multiple selected
 		// states/schools/job codes are sent JSON-encoded (not comma-joined
 		// — school names like "Khargone, Madhya Pradesh" already contain
 		// commas, so a plain join/split would wrongly split a single
@@ -2247,16 +2264,13 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		// applySTFFilters does for the on-screen table — the server only
 		// knows the real values.
 		$('#stf-download').on('click', function () {
-			var from = $('#stf-from').val() || '';
-			var to = $('#stf-to').val() || '';
 			var appliedFrom = $('#stf-applied-from').val() || '';
 			var appliedTo = $('#stf-applied-to').val() || '';
 			var state = JSON.stringify(_stfMsState.val());
 			var school = JSON.stringify(_stfMsSchool.val().map(function (label) { return SCHOOL_LABEL_TO_VALUE[label] || label; }));
 			var jobCode = JSON.stringify(_stfMsJobCode.val());
 			var url = '/api/method/ms_calendar.api.reports.download_st_district_funnel'
-				+ '?from_date=' + encodeURIComponent(from) + '&to_date=' + encodeURIComponent(to)
-				+ '&applied_from=' + encodeURIComponent(appliedFrom) + '&applied_to=' + encodeURIComponent(appliedTo)
+				+ '?applied_from=' + encodeURIComponent(appliedFrom) + '&applied_to=' + encodeURIComponent(appliedTo)
 				+ '&native_state=' + encodeURIComponent(state) + '&school=' + encodeURIComponent(school)
 				+ '&job_code=' + encodeURIComponent(jobCode);
 			window.open(url, '_blank');
@@ -2266,22 +2280,16 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 
 	function fetchSTDistrictData() {
 		$('#stf-tbl-wrap').html('<div class="rpt-loading is-busy">Loading…</div>');
-		var from = $('#stf-from').val() || '';
-		var to = $('#stf-to').val() || '';
 		var appliedFrom = $('#stf-applied-from').val() || '';
 		var appliedTo = $('#stf-applied-to').val() || '';
 		var filters = [];
-		if (from) filters.push(['creation', '>=', from + ' 00:00:00']);
-		if (to) filters.push(['creation', '<=', to + ' 23:59:59']);
-		// Separate, optional range on date_of_applied (a plain Date field,
-		// so no time component) — additive to the From/To range above, not
-		// a replacement for it: From/To is when the record was saved in
-		// Frappe (creation), Applied From/To is the candidate's own
-		// self-reported application date, and the two can differ (e.g.
-		// bulk-imported records all share one creation timestamp but keep
-		// their real original application dates).
-		if (appliedFrom) filters.push(['date_of_applied', '>=', appliedFrom]);
-		if (appliedTo) filters.push(['date_of_applied', '<=', appliedTo]);
+		// Optional range on application_date (the form's "Application Date"
+		// — a Datetime field, so the To day runs to 23:59:59) — the only
+		// date filter on this report. Switched from date_of_applied
+		// 2026-10-15 at the recruiter's request (application_date is also
+		// far better filled: 11 School Teacher records blank vs 1,266).
+		if (appliedFrom) filters.push(['application_date', '>=', appliedFrom + ' 00:00:00']);
+		if (appliedTo) filters.push(['application_date', '<=', appliedTo + ' 23:59:59']);
 		// Pre-filter server-side on role instead of fetching every Field
 		// Registration Form and filtering with getCol() in the browser.
 		// Confirmed 2026-09-04: this doctype now has 126,000+ records in a

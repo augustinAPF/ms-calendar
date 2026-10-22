@@ -946,10 +946,13 @@ def _resolve_field_feedback_url(
                 )
             )
         )
-        frappe.log_error(
-            title="Feedback URL Debug",
-            message=f"dept={repr(_dept_raw)} | role={repr(_role_raw2)} | round={repr(_round_norm)} | bucket={_bucket} | url={'SET' if feedback_url else 'EMPTY'}",
-        )
+        # Only when no URL matched — the reminder jobs call this too, so
+        # logging every call would flood Error Log.
+        if not feedback_url:
+            frappe.log_error(
+                title="Feedback URL Debug",
+                message=f"dept={repr(_dept_raw)} | role={repr(_role_raw2)} | round={repr(_round_norm)} | bucket={_bucket} | url=EMPTY",
+            )
     except Exception:
         pass
 
@@ -984,7 +987,160 @@ def _resolve_field_feedback_url(
     if feedback_url and not feedback_url.startswith("http"):
         feedback_url = "https://" + feedback_url
 
-    return feedback_url
+    return _field_feedback_site_url(feedback_url)
+
+
+_FEEDBACK_FORM_HOSTS = ("https://careers.frappe.cloud", "https://pathways.azimpremjifoundation.org")
+
+
+def _field_feedback_site_url(url):
+    """The feedback URLs above are hard-coded to the production hosts. A site
+    with "feedback_form_base_url" in site_config (e.g. ms.local:
+    http://127.0.0.1:8002) gets them on its own host instead, so a local
+    test opens the local web forms. Not set on production → unchanged."""
+    base = (frappe.conf.get("feedback_form_base_url") or "").rstrip("/")
+    if not (url and base):
+        return url
+    for host in _FEEDBACK_FORM_HOSTS:
+        if url.startswith(host):
+            return base + url[len(host):]
+    return url
+
+
+# ── Personal feedback link per panel member ─────────────────────────────────
+# The Outlook invite carries ONE feedback link shared by the whole panel, so
+# each panel member is also emailed their own link carrying
+# ?panelist_email=&panelist_name= . public/js/feedback_form_draft.js (web
+# form side) fills the form's panelist fields from those and keeps that
+# panelist's Save draft under them.
+
+
+def _field_without_candidate(emails, candidate_email):
+    """Feedback links and answers are for the panel only — drops the
+    candidate's address if it was also typed into a panel/CC list."""
+    cand = (candidate_email or "").strip().lower()
+    return [e for e in emails or [] if e and e.strip().lower() != cand]
+
+
+def _field_panelist_names(emails):
+    """{email_lower: interviewer_name} from Interviewer Email List, which is
+    named by the email address."""
+    emails = [e.strip() for e in emails or [] if e and e.strip()]
+    if not emails:
+        return {}
+    rows = frappe.get_all(
+        "Interviewer Email List",
+        filters={"name": ["in", emails]},
+        fields=["name", "interviewer_name"],
+    )
+    return {r.name.strip().lower(): (r.interviewer_name or "").strip() for r in rows}
+
+
+def _field_personal_feedback_url(feedback_url, email, name=""):
+    if not (feedback_url and email) or "panelist_email=" in feedback_url:
+        return feedback_url
+    from urllib.parse import quote
+
+    sep = "&" if "?" in feedback_url else "?"
+    url = f"{feedback_url}{sep}panelist_email={quote(email.strip(), safe='')}"
+    if name:
+        url += f"&panelist_name={quote(name, safe='')}"
+    return url
+
+
+def _field_send_panel_mail(headers, organizer_email, recipient, subject, body, doc_name=None):
+    """Graph sendMail from the organizer's mailbox, else frappe.sendmail —
+    sender= only when a matching outgoing Email Account exists (a mismatched
+    From fails with SendAsDenied at commit time, see create_interview_event)."""
+    if headers:
+        try:
+            res = requests.post(
+                f"https://graph.microsoft.com/v1.0/users/{organizer_email}/sendMail",
+                headers=headers,
+                json={
+                    "message": {
+                        "subject": subject,
+                        "body": {"contentType": "HTML", "content": body},
+                        "toRecipients": [{"emailAddress": {"address": recipient}}],
+                    },
+                    "saveToSentItems": True,
+                },
+                timeout=30,
+            )
+            res.raise_for_status()
+            return
+        except Exception:
+            frappe.log_error(
+                title="Panel Feedback Link Email Graph Error",
+                message=f"{recipient}: {frappe.get_traceback()}"[:2000],
+            )
+    sender_arg = {}
+    if organizer_email and frappe.db.exists(
+        "Email Account", {"email_id": organizer_email, "enable_outgoing": 1}
+    ):
+        sender_arg = {"sender": organizer_email}
+    frappe.sendmail(
+        recipients=[recipient],
+        subject=subject,
+        message=body,
+        delayed=False,
+        reference_doctype="Field Interview Schedule" if doc_name else None,
+        reference_name=doc_name,
+        **sender_arg,
+    )
+
+
+def send_field_panel_feedback_links(
+    organizer_email,
+    panel_emails,
+    feedback_url,
+    applicant_name,
+    role,
+    round_label,
+    interview_date_str,
+    interview_time_str,
+    end_time_str,
+    doc_name=None,
+    candidate_email=None,
+):
+    """Background job (enqueued by create_interview_event on a new
+    interview): one email per panel member with their own feedback link.
+    Never the candidate."""
+    panel_emails = _field_without_candidate(panel_emails, candidate_email)
+    try:
+        headers = _field_graph_headers()
+    except Exception:
+        headers = None
+        frappe.log_error(
+            title="Panel Feedback Link Email Token Error",
+            message=frappe.get_traceback()[:2000],
+        )
+
+    names = _field_panelist_names(panel_emails)
+    subject = f"Your Feedback Form – {applicant_name} | {round_label}"
+    for email in dict.fromkeys(e.strip() for e in panel_emails or [] if e and e.strip()):
+        name = names.get(email.lower(), "")
+        url = _field_personal_feedback_url(feedback_url, email, name)
+        body = f"""
+        <p>Dear {name or 'Panel Member'},</p>
+        <p>You are on the interview panel for <b>{applicant_name}</b>
+        ({round_label}) for the role of <b>{role or ''}</b>.</p>
+        <p><b>Date:</b> {interview_date_str}<br>
+        <b>Time:</b> {interview_time_str} – {end_time_str}</p>
+        <p><b>Your Feedback Form:</b><br>
+        <a href="{url}" target="_blank" style="display:inline-block;margin-top:6px;padding:8px 18px;background-color:#1d4ed8;color:#ffffff;text-decoration:none;border-radius:4px;font-weight:600;font-size:13px;">Open My Feedback Form</a></p>
+        <p>This link is for you only: your name and email are filled in automatically.
+        Click <b>Save</b> to keep a draft on this device and finish it later from the same link.
+        Your feedback is recorded only when you click <b>Submit</b>.</p>
+        <p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>
+        """
+        try:
+            _field_send_panel_mail(headers, organizer_email, email, subject, body, doc_name)
+        except Exception:
+            frappe.log_error(
+                title="Panel Feedback Link Email Error",
+                message=f"{doc_name} / {email}: {frappe.get_traceback()}"[:2000],
+            )
 
 
 def _field_auto_attach_fields(interview_round, applicant_role, department=None):
@@ -1664,7 +1820,7 @@ def create_interview_event(
     if _demo_checked:
         from urllib.parse import quote as _quote
 
-        demo_feedback_url = (
+        demo_feedback_url = _field_feedback_site_url(
             "https://careers.frappe.cloud/demo-lesson-observation-feedback-form-feed-back-form/new"
             f"?app_id={_quote(str(application_id or ''), safe='')}"
             f"&applicant_name={_quote(str(Applicants_name or ''), safe='')}"
@@ -1776,6 +1932,11 @@ def create_interview_event(
     hybrid_interviewer_list = _field_hybrid_list(
         hybrid, hybrid_interviewers_email, interviewer_list, Organizer_email
     )
+    # The panel invite carries the feedback link — never the candidate, even
+    # if their address was also typed into a panel/CC list.
+    interviewer_list = _field_without_candidate(interviewer_list, interviewee_email)
+    cc_list = _field_without_candidate(cc_list, interviewee_email)
+    hybrid_interviewer_list = _field_without_candidate(hybrid_interviewer_list, interviewee_email)
     online_names = (
         (HybridInterviewersName or "").strip() or ", ".join(hybrid_interviewer_list)
         if hybrid_interviewer_list
@@ -2478,12 +2639,15 @@ comments/recommendations for the calibration process and final selection decisio
     # ----------------------------------------
     # Only sent when demo checkbox is checked AND demo_feedback_interviewers_email is filled.
     # These interviewers receive ONLY the demo feedback form link (not the regular feedback).
-    _demo_interviewer_list = list(
-        dict.fromkeys(
-            e.strip()
-            for e in (demo_feedback_interviewers_email or "").split(",")
-            if e.strip()
-        )
+    _demo_interviewer_list = _field_without_candidate(
+        list(
+            dict.fromkeys(
+                e.strip()
+                for e in (demo_feedback_interviewers_email or "").split(",")
+                if e.strip()
+            )
+        ),
+        interviewee_email,
     )
 
     if demo_feedback_url and _demo_interviewer_list:
@@ -2509,11 +2673,19 @@ comments/recommendations for the calibration process and final selection decisio
         _demo_send_url = (
             f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/sendMail"
         )
+        _demo_names = _field_panelist_names(_demo_interviewer_list)
         for _dmail in _demo_interviewer_list:
+            # Each demo interviewer's own link (panelist fields prefilled).
+            _dbody = _demo_body.replace(
+                demo_feedback_url,
+                _field_personal_feedback_url(
+                    demo_feedback_url, _dmail, _demo_names.get(_dmail.lower(), "")
+                ),
+            )
             _dpayload = {
                 "message": {
                     "subject": _demo_subject,
-                    "body": {"contentType": "HTML", "content": _demo_body},
+                    "body": {"contentType": "HTML", "content": _dbody},
                     "toRecipients": [{"emailAddress": {"address": _dmail}}],
                     "ccRecipients": [{"emailAddress": {"address": Organizer_email}}],
                 },
@@ -2549,7 +2721,7 @@ comments/recommendations for the calibration process and final selection decisio
                         recipients=[_dmail],
                         cc=[Organizer_email],
                         subject=_demo_subject,
-                        message=_demo_body,
+                        message=_dbody,
                         delayed=False,
                         **_demo_sender_arg,
                     )
@@ -2561,6 +2733,29 @@ comments/recommendations for the calibration process and final selection decisio
                         )
                     except Exception:
                         pass
+
+    # ----------------------------------------
+    # PERSONAL FEEDBACK LINK TO EACH PANEL MEMBER
+    # ----------------------------------------
+    # New interviews only (ms_event_id is passed when update_interview_event
+    # recreates a deleted event — that panel already has its links).
+    if feedback_url and not ms_event_id and (interviewer_list or hybrid_interviewer_list):
+        frappe.enqueue(
+            "ms_calendar.api.ms_field.send_field_panel_feedback_links",
+            queue="short",
+            enqueue_after_commit=True,
+            organizer_email=Organizer_email,
+            panel_emails=interviewer_list + hybrid_interviewer_list,
+            feedback_url=feedback_url,
+            applicant_name=Applicants_name,
+            role=Applicants_Role,
+            round_label=round_label,
+            interview_date_str=interview_date_str,
+            interview_time_str=interview_time_str,
+            end_time_str=end_time_str,
+            doc_name=doc_name,
+            candidate_email=interviewee_email,
+        )
 
     # ----------------------------------------
     # EMAIL TO CANDIDATE
@@ -3023,6 +3218,12 @@ def update_interview_event(
     hybrid_interviewer_list = _field_hybrid_list(
         hybrid, hybrid_interviewers_email, interviewer_list, Organizer_email
     )
+    # Same as create_interview_event: the panel invite (feedback link) never
+    # goes to the candidate.
+    _candidate_email = interviewee_email or doc.get("attendees")
+    interviewer_list = _field_without_candidate(interviewer_list, _candidate_email)
+    cc_list = _field_without_candidate(cc_list, _candidate_email)
+    hybrid_interviewer_list = _field_without_candidate(hybrid_interviewer_list, _candidate_email)
     online_names = (
         (HybridInterviewersName or "").strip() or ", ".join(hybrid_interviewer_list)
         if hybrid_interviewer_list
@@ -5166,11 +5367,11 @@ def send_leader_final_round_feedback_pdf(doc, method=None):
         return
 
     schedule = frappe.get_doc("Field Interview Schedule", schedules[0]["name"])
-    interviewer_emails = [
-        row.interviewer_email
-        for row in (schedule.interviewer_email or [])
-        if row.interviewer_email
-    ]
+    # Panel only — never the candidate (attendees).
+    interviewer_emails = _field_without_candidate(
+        [row.interviewer_email for row in (schedule.interviewer_email or [])],
+        schedule.get("attendees"),
+    )
     if not interviewer_emails:
         return
 
@@ -6003,14 +6204,20 @@ def _send_field_feedback_submitted_email(feedback_doc):
     if not schedule:
         return
 
-    recipients = _field_schedule_interviewer_emails(schedule)
+    # Panel only — never the candidate (attendees).
+    recipients = _field_without_candidate(
+        _field_schedule_interviewer_emails(schedule), schedule.get("attendees")
+    )
     if not recipients:
         return
-    cc_list = [
-        (r.interviewer_email or "").strip().lower()
-        for r in (schedule.get("interviewers_cc_email") or [])
-        if r.interviewer_email
-    ]
+    cc_list = _field_without_candidate(
+        [
+            (r.interviewer_email or "").strip().lower()
+            for r in (schedule.get("interviewers_cc_email") or [])
+            if r.interviewer_email
+        ],
+        schedule.get("attendees"),
+    )
     cc_list = [c for c in dict.fromkeys(cc_list) if c not in recipients]
 
     # Every submission of this round's feedback doctypes for THIS interview
@@ -6502,6 +6709,15 @@ def check_field_interview_attachments(
     return result
 
 
+def _field_reminder_columns_exist():
+    """reminder_sent / first_reminder_sent are not in the Field Interview
+    Schedule DocType JSON; until a site has them, both reminder jobs would
+    fail on every run ("Unknown column"), so they skip quietly instead."""
+    return frappe.db.has_column(
+        "Field Interview Schedule", "reminder_sent"
+    ) and frappe.db.has_column("Field Interview Schedule", "first_reminder_sent")
+
+
 def send_field_interview_feedback_reminders():
     """Runs once daily (see hooks.py scheduler_events["daily"]).
 
@@ -6521,6 +6737,8 @@ def send_field_interview_feedback_reminders():
     Shortlist, Offer, Document Verification, etc.) have no feedback form
     step and are skipped.
     """
+    if not _field_reminder_columns_exist():
+        return
     now = frappe.utils.now_datetime()
 
     schedules = frappe.get_all(
@@ -6534,6 +6752,7 @@ def send_field_interview_feedback_reminders():
             "interview_round",
             "organizer_email",
             "feedback_form_link",
+            "department",
             "interview_date",
             "end_time",
         ],
@@ -6563,11 +6782,11 @@ def send_field_interview_feedback_reminders():
             continue
 
         doc = frappe.get_doc("Field Interview Schedule", s.name)
-        interviewer_emails = [
-            row.interviewer_email
-            for row in (doc.interviewer_email or [])
-            if row.interviewer_email
-        ]
+        # Panel only — never the candidate (attendees).
+        interviewer_emails = _field_without_candidate(
+            [row.interviewer_email for row in (doc.interviewer_email or [])],
+            doc.get("attendees"),
+        )
 
         if not interviewer_emails:
             frappe.db.set_value("Field Interview Schedule", s.name, "reminder_sent", 1)
@@ -6590,10 +6809,19 @@ def send_field_interview_feedback_reminders():
             frappe.db.commit()
             continue
 
+        # Same link as the invite — feedback_form_link alone is usually blank.
+        feedback_link = _resolve_field_feedback_url(
+            s.department,
+            s.interview_round,
+            s.role,
+            s.application_id,
+            s.applicants_name,
+            s.feedback_form_link,
+        )
         feedback_link_html = (
             f"<p><strong>Feedback form:</strong> "
-            f'<a href="{s.feedback_form_link}" target="_blank">Click here</a></p>'
-            if s.feedback_form_link
+            f'<a href="{feedback_link}" target="_blank">Click here</a></p>'
+            if feedback_link
             else ""
         )
         reminder_body = f"""
@@ -6611,12 +6839,24 @@ def send_field_interview_feedback_reminders():
         ):
             sender_arg = {"sender": s.organizer_email}
 
+        names = _field_panelist_names(interviewer_emails)
         for email in interviewer_emails:
+            # Each interviewer's own link (see send_field_panel_feedback_links).
+            body = (
+                reminder_body.replace(
+                    feedback_link,
+                    _field_personal_feedback_url(
+                        feedback_link, email, names.get(email.strip().lower(), "")
+                    ),
+                )
+                if feedback_link
+                else reminder_body
+            )
             try:
                 frappe.sendmail(
                     recipients=[email],
                     subject=f"Reminder: Interview Feedback Pending – {s.applicants_name}",
-                    message=reminder_body,
+                    message=body,
                     delayed=False,
                     reference_doctype="Field Interview Schedule",
                     reference_name=s.name,
@@ -6643,6 +6883,8 @@ def send_field_interview_first_feedback_reminder():
     the daily send_field_interview_feedback_reminders() job takes over
     for all reminders after this first one.
     """
+    if not _field_reminder_columns_exist():
+        return
     now = frappe.utils.now_datetime()
 
     schedules = frappe.get_all(
@@ -6656,6 +6898,7 @@ def send_field_interview_first_feedback_reminder():
             "interview_round",
             "organizer_email",
             "feedback_form_link",
+            "department",
             "interview_date",
             "end_time",
         ],
@@ -6682,13 +6925,23 @@ def send_field_interview_first_feedback_reminder():
         elapsed = now - end_dt
         if elapsed < timedelta(minutes=5):
             continue
+        if elapsed > timedelta(days=1):
+            # Not "just finished" any more — e.g. the backlog of old
+            # interviews when these fields were first added. Close it out
+            # without an email; the daily job (up to 7 days) covers it.
+            frappe.db.set_value(
+                "Field Interview Schedule", s.name, "first_reminder_sent", 1,
+                update_modified=False,
+            )
+            frappe.db.commit()
+            continue
 
         doc = frappe.get_doc("Field Interview Schedule", s.name)
-        interviewer_emails = [
-            row.interviewer_email
-            for row in (doc.interviewer_email or [])
-            if row.interviewer_email
-        ]
+        # Panel only — never the candidate (attendees).
+        interviewer_emails = _field_without_candidate(
+            [row.interviewer_email for row in (doc.interviewer_email or [])],
+            doc.get("attendees"),
+        )
 
         if not interviewer_emails:
             continue
@@ -6705,10 +6958,19 @@ def send_field_interview_first_feedback_reminder():
             frappe.db.commit()
             continue
 
+        # Same link as the invite — feedback_form_link alone is usually blank.
+        feedback_link = _resolve_field_feedback_url(
+            s.department,
+            s.interview_round,
+            s.role,
+            s.application_id,
+            s.applicants_name,
+            s.feedback_form_link,
+        )
         feedback_link_html = (
             f"<p><strong>Feedback form:</strong> "
-            f'<a href="{s.feedback_form_link}" target="_blank">Click here</a></p>'
-            if s.feedback_form_link
+            f'<a href="{feedback_link}" target="_blank">Click here</a></p>'
+            if feedback_link
             else ""
         )
         reminder_body = f"""
@@ -6726,12 +6988,24 @@ def send_field_interview_first_feedback_reminder():
         ):
             sender_arg = {"sender": s.organizer_email}
 
+        names = _field_panelist_names(interviewer_emails)
         for email in interviewer_emails:
+            # Each interviewer's own link (see send_field_panel_feedback_links).
+            body = (
+                reminder_body.replace(
+                    feedback_link,
+                    _field_personal_feedback_url(
+                        feedback_link, email, names.get(email.strip().lower(), "")
+                    ),
+                )
+                if feedback_link
+                else reminder_body
+            )
             try:
                 frappe.sendmail(
                     recipients=[email],
                     subject=f"Reminder: Interview Feedback Pending – {s.applicants_name}",
-                    message=reminder_body,
+                    message=body,
                     delayed=False,
                     reference_doctype="Field Interview Schedule",
                     reference_name=s.name,
