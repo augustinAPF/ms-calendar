@@ -997,8 +997,18 @@ def _field_feedback_site_url(url):
     """The feedback URLs above are hard-coded to the production hosts. A site
     with "feedback_form_base_url" in site_config (e.g. ms.local:
     http://127.0.0.1:8002) gets them on its own host instead, so a local
-    test opens the local web forms. Not set on production → unchanged."""
+    test opens the local web forms. Without that setting, any site that is
+    not production (e.g. UAT) uses its own address — its invites used to open
+    the production forms, which may not have the same form scripts yet.
+    Production (one of _FEEDBACK_FORM_HOSTS) → unchanged."""
+    from urllib.parse import urlparse
+
     base = (frappe.conf.get("feedback_form_base_url") or "").rstrip("/")
+    if not base:
+        own = (frappe.utils.get_url() or "").rstrip("/")
+        prod_hosts = {urlparse(h).netloc for h in _FEEDBACK_FORM_HOSTS}
+        if own and urlparse(own).netloc not in prod_hosts:
+            base = own
     if not (url and base):
         return url
     for host in _FEEDBACK_FORM_HOSTS:
