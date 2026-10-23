@@ -420,20 +420,94 @@ class MasterData {
 			</span>`);
 	}
 
-	download() {
+	// Fetched here (not a plain link) so a loading box can stay up the whole
+	// time: "Building" while the server writes the workbook, then a real %
+	// bar while the file comes down, then the browser saves it. Cancel aborts.
+	async download() {
+		if (this._dl) return;
 		const q = this.args();
 		const qs = Object.keys(q).filter(k => q[k] !== null && q[k] !== undefined && q[k] !== '')
 			.map(k => `${encodeURIComponent(k)}=${encodeURIComponent(q[k])}`).join('&');
-		const a = document.createElement('a');
-		a.href = `/api/method/${MDT_API}download_excel?${qs}`;
-		a.rel = 'noopener';
-		document.body.appendChild(a);
-		a.click();
-		a.remove();
-		frappe.show_alert({
-			message: __('Preparing Excel of {0} applicants (both sheets)…', [this.n((this.data || {}).total || 0)]),
-			indicator: 'blue'
-		}, 6);
+		const total = (this.data || {}).total || 0;
+		const ctrl = window.AbortController ? new AbortController() : null;
+		const $box = $(`<div class="mdt-dl" role="alertdialog" aria-live="polite">
+			<div class="mdt-dl-card">
+				<div class="mdt-dl-spin" aria-hidden="true"></div>
+				<div class="mdt-dl-title">${this.esc(__('Preparing your Excel'))}</div>
+				<div class="mdt-dl-sub">${this.esc(__('{0} applicants · Master Tracker + Offer Tracker', [this.n(total)]))}</div>
+				<div class="mdt-dl-step">${this.esc(__('Building the sheets on the server…'))}</div>
+				<div class="mdt-dl-bar is-wait"><span></span></div>
+				<button class="btn btn-default btn-sm mdt-dl-cancel">${this.esc(__('Cancel'))}</button>
+			</div></div>`).appendTo(this.$root.find('.mdt-root').first());
+		const step = (t) => $box.find('.mdt-dl-step').text(t);
+		const $btn = this.$root.find('#mdt-download').prop('disabled', true);
+		this._dl = true;
+		$box.find('.mdt-dl-cancel').on('click', () => ctrl && ctrl.abort());
+		try {
+			const res = await fetch(`/api/method/${MDT_API}download_excel?${qs}`, {
+				credentials: 'same-origin',
+				headers: { 'X-Frappe-CSRF-Token': frappe.csrf_token },
+				signal: ctrl ? ctrl.signal : undefined,
+			});
+			if (!res.ok) throw new Error(await this.dl_error(res));
+			// Bytes so far / Content-Length → the % bar.
+			const size = +res.headers.get('Content-Length') || 0;
+			const parts = [];
+			let got = 0;
+			$box.find('.mdt-dl-bar').removeClass('is-wait');
+			if (res.body && res.body.getReader) {
+				const reader = res.body.getReader();
+				for (;;) {
+					const { done, value } = await reader.read();
+					if (done) break;
+					parts.push(value);
+					got += value.length;
+					const pct = size ? Math.min(100, Math.round(got * 100 / size)) : 0;
+					$box.find('.mdt-dl-bar span').css('width', `${size ? pct : 100}%`);
+					step(size ? __('Downloading… {0}% ({1} of {2})', [pct, this.mb(got), this.mb(size)])
+						: __('Downloading… {0}', [this.mb(got)]));
+				}
+			} else {
+				parts.push(await res.arrayBuffer());
+			}
+			const name = ((res.headers.get('Content-Disposition') || '').match(/filename="?([^";]+)"?/) || [])[1]
+				|| `Master_Tracker_${frappe.datetime.get_today()}.xlsx`;
+			const url = URL.createObjectURL(new Blob(parts, { type: res.headers.get('Content-Type') || 'application/octet-stream' }));
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = name;
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
+			URL.revokeObjectURL(url);
+			frappe.show_alert({ message: __('Downloaded {0}', [name]), indicator: 'green' });
+		} catch (e) {
+			if (e && e.name === 'AbortError') {
+				frappe.show_alert({ message: __('Download cancelled'), indicator: 'orange' });
+			} else {
+				frappe.msgprint({ title: __('Excel download failed'), indicator: 'red',
+					message: this.esc((e && e.message) || __('Something went wrong. Please try again.')) });
+			}
+		} finally {
+			$box.remove();
+			$btn.prop('disabled', false);
+			this._dl = false;
+		}
+	}
+
+	// The server's own message (permission, error) from a failed response.
+	async dl_error(res) {
+		try {
+			const j = await res.json();
+			const msgs = JSON.parse(j._server_messages || '[]').map(m => (JSON.parse(m) || {}).message).filter(Boolean);
+			return frappe.utils.html2text(msgs.join(' ')) || j.exception || `${res.status} ${res.statusText}`;
+		} catch (e) {
+			return `${res.status} ${res.statusText}`;
+		}
+	}
+
+	mb(bytes) {
+		return bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 	}
 }
 
@@ -456,6 +530,23 @@ const MDT_CSS = `
 .mdt-preset.is-on { background:var(--brand); border-color:var(--brand); color:#fff; }
 #mdt-apply, #mdt-download { background:var(--brand); border-color:var(--brand); color:#fff; }
 #mdt-apply:hover, #mdt-download:hover { filter:brightness(1.08); }
+#mdt-download:disabled { opacity:.6; cursor:progress; }
+/* download loading box (CSS animation only, no JS timers) */
+.mdt-dl { position:fixed; inset:0; z-index:1060; display:flex; align-items:center; justify-content:center;
+	background:rgba(15,23,42,.35); }
+.mdt-dl-card { width:min(380px, calc(100vw - 32px)); background:var(--bg); border:1px solid var(--border); border-radius:10px;
+	padding:22px 22px 16px; text-align:center; box-shadow:0 12px 32px rgba(16,24,40,.18); }
+.mdt-dl-spin { width:34px; height:34px; margin:0 auto 12px; border-radius:50%; border:3px solid var(--border);
+	border-top-color:var(--brand); animation:mdt-spin .8s linear infinite; }
+.mdt-dl-title { font-size:15px; font-weight:700; color:var(--text); }
+.mdt-dl-sub { font-size:12px; color:var(--muted); margin-top:2px; }
+.mdt-dl-step { font-size:12.5px; color:var(--text-2); margin:14px 0 8px; font-variant-numeric:tabular-nums; }
+.mdt-dl-bar { position:relative; height:6px; border-radius:3px; background:var(--border-soft); overflow:hidden; margin-bottom:14px; }
+.mdt-dl-bar span { position:absolute; left:0; top:0; bottom:0; width:0; background:var(--brand); border-radius:3px; transition:width .2s; }
+.mdt-dl-bar.is-wait span { width:35%; animation:mdt-slide 1.2s ease-in-out infinite; }
+@keyframes mdt-spin { to { transform:rotate(360deg); } }
+@keyframes mdt-slide { 0% { left:-35%; } 100% { left:100%; } }
+@media (prefers-reduced-motion: reduce) { .mdt-dl-spin, .mdt-dl-bar.is-wait span { animation:none; } }
 .mdt-filter-row { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; }
 .mdt-f { display:flex; flex-direction:column; gap:3px; }
 .mdt-f label { font-size:10.5px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin:0; }
