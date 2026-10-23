@@ -1007,12 +1007,14 @@ def _field_feedback_site_url(url):
     return url
 
 
-# ── Personal feedback link per panel member ─────────────────────────────────
-# The Outlook invite carries ONE feedback link shared by the whole panel, so
-# each panel member is also emailed their own link carrying
-# ?panelist_email=&panelist_name= . public/js/feedback_form_draft.js (web
-# form side) fills the form's panelist fields from those and keeps that
-# panelist's Save draft under them.
+# ── Feedback link for the panel ─────────────────────────────────────────────
+# The Outlook invite carries ONE feedback link for the whole panel (see
+# _field_panel_feedback_block): one member → their own
+# ?panelist_email=&panelist_name= link; several → ?panel= and the form asks
+# who is filling it. Reminders send each member their own link.
+# public/js/feedback_form_draft.js (web form side) fills the panelist fields
+# and keeps each panelist's Save draft. The site serving the form needs that
+# script — see feedback_form_base_url in _field_feedback_site_url.
 
 
 def _field_without_candidate(emails, candidate_email):

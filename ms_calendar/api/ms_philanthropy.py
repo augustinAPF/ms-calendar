@@ -866,47 +866,27 @@ def _fetch_teams_join_details(
 ):
     """Join link, meeting ID and passcode of an event's Teams meeting.
     Read from `event_json` (the event Graph just returned) when it has them;
-    only otherwise is the event polled — Graph doesn't always have the Teams
-    meeting attached the instant it's created/added. poll=False skips that
-    wait (an existing event whose body no longer has them can't get them
-    back by polling). Returns (join_web_url, join_meeting_id, join_passcode).
+    otherwise — when poll — the same resolver as Field interviews
+    (ms_field._fetch_teams_meeting_info): it polls until Exchange has written
+    its "Meeting ID / Passcode" footer, which lands a few seconds AFTER the
+    join link, then tries the onlineMeetings lookup by the organizer's object
+    id. The old loop here gave up ~4 s after the join link appeared and its
+    lookup used the organizer's email (that API only takes the GUID), so
+    invites — Hybrid ones especially — often went out with a Join link but no
+    Meeting ID / Passcode. poll=False (an existing event whose body no longer
+    has them) only reads `event_json`.
+    Returns (join_web_url, join_meeting_id, join_passcode).
     """
     join_web_url, join_meeting_id, join_passcode = _teams_from_event(event_json)
 
     if poll and not (join_web_url and join_meeting_id and join_passcode):
-        for attempt in range(8):
-            ev = requests.get(
-                event_url,
-                headers=headers,
-                params={"$select": "onlineMeeting,body"},
-                timeout=30,
-            ).json()
-            j, m, p = _teams_from_event(ev)
-            join_web_url = j or join_web_url
-            join_meeting_id = m or join_meeting_id
-            join_passcode = p or join_passcode
-            if join_web_url and join_meeting_id and join_passcode:
-                break
-            # The footer can trail the join link by a few seconds — but don't
-            # burn the whole loop if it never shows up at all.
-            if join_web_url and attempt >= 4:
-                break
-            time.sleep(1)
+        from ms_calendar.api.ms_field import _fetch_teams_meeting_info
 
-    # Last resort, only when the body didn't have them — this lookup 403s
-    # without a Teams application access policy.
-    if join_web_url and not (join_meeting_id and join_passcode):
-        filter_url = (
-            f"https://graph.microsoft.com/v1.0/users/{organizer_email}"
-            f"/onlineMeetings?$filter=JoinWebUrl eq '{join_web_url}'"
-        )
-        om = requests.get(filter_url, headers=headers, timeout=30)
-        if om.status_code == 200:
-            values = om.json().get("value", [])
-            if values:
-                m = values[0]
-                join_meeting_id = m.get("joinMeetingId", "") or join_meeting_id
-                join_passcode = m.get("passcode", "") or join_passcode
+        event_id = event_url.rstrip("/").rsplit("/", 1)[-1]
+        j, m, p = _fetch_teams_meeting_info(organizer_email, event_id, headers, True)
+        join_web_url = join_web_url or j
+        join_meeting_id = join_meeting_id or m
+        join_passcode = join_passcode or p
 
     return join_web_url, join_meeting_id, join_passcode
 
