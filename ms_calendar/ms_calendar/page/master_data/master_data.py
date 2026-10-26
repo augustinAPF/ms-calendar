@@ -211,8 +211,9 @@ REG_FIELDS = list(dict.fromkeys([
     "offer", "date_offer", *DIRECT.values(),
 ]))
 
-# Filters: client key → registration field.
-FILTER_FIELDS = {"units": "units", "subunits": "department", "locations": "location", "job_codes": "job_code",
+# Filters: client key → registration field. (No Units filter — the
+# recruitment team asked for it to be dropped; Sub-unit covers it.)
+FILTER_FIELDS = {"subunits": "department", "locations": "location", "job_codes": "job_code",
                  "roles": "role", "statuses": "application_status"}
 
 # Cards (same definitions as the Pathways dashboard's headline funnel).
@@ -332,7 +333,10 @@ class _Base:
     def __init__(self, f, card=None, search=None):
         self.sql, self.present = _scoped(REG, REG_FIELDS)
         c = self.c
-        self.adate = f"DATE(COALESCE({c('date_of_applied')}, {c('application_date')}, r.creation))"
+        # The Application Date field drives the date filter, sort and the
+        # "Date of Application" column; date_of_applied / creation only fill
+        # in for records without one.
+        self.adate = f"DATE(COALESCE({c('application_date')}, {c('date_of_applied')}, r.creation))"
         conds, params = ["1=1"], {}
         if f.fd:
             conds.append(f"{self.adate} >= %(fd)s")
@@ -657,7 +661,7 @@ def _build_rows(base, names):
 # ── page data ──────────────────────────────────────────────────────────────
 
 def _summary(f):
-    key = "master_data:v1:" + hashlib.sha1(frappe.as_json([frappe.session.user, f]).encode()).hexdigest()
+    key = "master_data:v2:" + hashlib.sha1(frappe.as_json([frappe.session.user, f]).encode()).hexdigest()
     hit = frappe.cache.get_value(key)
     if hit:
         return hit

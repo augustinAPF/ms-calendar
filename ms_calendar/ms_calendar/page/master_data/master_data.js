@@ -6,14 +6,14 @@
 // every matching row).
 //
 // Filters / multiselects look and behave like the Pathways dashboard
-// (Apply button, Select all / Clear, cascading Unit → Sub-unit → Job code
-// options). Every number and row comes from permission-scoped server calls;
+// (Apply button, Select all / Clear, cascading Sub-unit → Job code
+// options). The date filter is on each registration's Application Date. Every number and row comes from permission-scoped server calls;
 // the table pages and sorts on the server. Every value rendered into HTML
 // goes through esc().
 
 const MDT_API = 'ms_calendar.ms_calendar.page.master_data.master_data.';
 const MDT_STORE_KEY = 'mdt-filters-v1';
-const MDT_LIST_FILTERS = ['units', 'subunits', 'locations', 'job_codes', 'roles', 'statuses'];
+const MDT_LIST_FILTERS = ['subunits', 'locations', 'job_codes', 'roles', 'statuses'];
 const MDT_PAGE_SIZES = [25, 50, 100, 250, 500];
 
 frappe.pages['master-data'].on_page_load = function (wrapper) {
@@ -117,7 +117,6 @@ class MasterData {
 					<div class="mdt-filter-row">
 						<div class="mdt-f"><label title="${__('Application date from')}">${__('Applied from')}</label><input type="date" id="mdt-from"></div>
 						<div class="mdt-f"><label>${__('To')}</label><input type="date" id="mdt-to"></div>
-						<div class="mdt-f"><label>${__('Units')}</label><div class="mdt-ms" id="mdt-ms-units" data-placeholder="${__('All units')}"></div></div>
 						<div class="mdt-f"><label>${__('Sub-units')}</label><div class="mdt-ms" id="mdt-ms-subunits" data-placeholder="${__('All sub-units')}"></div></div>
 						<div class="mdt-f"><label>${__('Location')}</label><div class="mdt-ms" id="mdt-ms-locations" data-placeholder="${__('All locations')}"></div></div>
 						<div class="mdt-f"><label>${__('Job code')}</label><div class="mdt-ms" id="mdt-ms-job_codes" data-placeholder="${__('All job codes')}"></div></div>
@@ -218,20 +217,15 @@ class MasterData {
 		$(document).on('click.mdt', (e) => { if (!$(e.target).closest('.mdt-ms').length) $('.mdt-ms.open').removeClass('open'); });
 	}
 
-	// Cascading OPTIONS (never gating): Units narrow the Sub-unit list, and
-	// Units + Sub-units narrow the Job-code list.
+	// Cascading OPTIONS (never gating): Sub-units narrow the Job-code list.
+	// combos are [unit, sub-unit, job code]; 'all' fills both lists afresh.
 	cascade(changed) {
-		if (!['units', 'subunits'].includes(changed) || !this.data) return;
+		if (!['all', 'subunits'].includes(changed) || !this.data) return;
 		const combos = (this.data.options || {}).combos || [];
-		const units = this.ms.units.val();
 		const uniq = (a) => [...new Set(a.filter(Boolean))].sort();
-		if (changed === 'units') {
-			this.ms.subunits.setOptions(uniq(combos.filter(c => !units.length || units.includes(c[0])).map(c => c[1])));
-		}
+		if (changed === 'all') this.ms.subunits.setOptions(uniq(combos.map(c => c[1])));
 		const subs = this.ms.subunits.val();
-		this.ms.job_codes.setOptions(uniq(combos
-			.filter(c => (!units.length || units.includes(c[0])) && (!subs.length || subs.includes(c[1])))
-			.map(c => c[2])));
+		this.ms.job_codes.setOptions(uniq(combos.filter(c => !subs.length || subs.includes(c[1])).map(c => c[2])));
 	}
 
 	// Same chip multiselect as the Pathways / Field dashboards (search,
@@ -319,12 +313,11 @@ class MasterData {
 					$c.find('#mdt-from').val(f.from_date || '');
 					$c.find('#mdt-to').val(f.to_date || '');
 					const o = this.data.options || {};
-					this.ms.units.setOptions(o.units || []);
 					this.ms.locations.setOptions(o.locations || []);
 					this.ms.roles.setOptions(o.roles || []);
 					this.ms.statuses.setOptions(o.statuses || []);
-					['units', 'locations', 'roles', 'statuses', 'subunits', 'job_codes'].forEach(k => this.ms[k].setVal(f[k]));
-					this.cascade('units');
+					['locations', 'roles', 'statuses', 'subunits', 'job_codes'].forEach(k => this.ms[k].setVal(f[k]));
+					this.cascade('all');
 					this.mark_preset();
 				}
 				this.render_cards();
