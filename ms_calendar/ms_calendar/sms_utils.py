@@ -10,6 +10,18 @@ INTERVIEW_ROUND_STATUSES = {
 	"Round Two",
 	"Round Three",
 	"Calibration Process",
+	# Set by scheduling a Field interview (ms_field.move_field_status_to_scheduled)
+	# — the interview invite already notifies the candidate.
+	"Recruiter Round Scheduled",
+	"Education Capacity Round Scheduled",
+	"Subject Round Scheduled",
+	"Technical Round Scheduled",
+	"Functional Round Scheduled",
+	"Demo Round Scheduled",
+	"Leader Round-1 Scheduled",
+	"Leader Round-2 Scheduled",
+	"Leader Round-3 Scheduled",
+	"Calibration Process Scheduled",
 }
 
 

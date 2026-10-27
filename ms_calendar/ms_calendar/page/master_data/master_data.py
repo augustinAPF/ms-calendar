@@ -39,6 +39,7 @@ import re
 import frappe
 from frappe.utils import cint, flt, getdate
 
+from ms_calendar.api.ms_field import FIELD_ROUND_SCHEDULED_STATUS
 from ms_calendar.ms_calendar.page.pathways_overall_dashboard.pathways_overall_dashboard import (
     _BY_FIELDS,
     _RESULT_FIELDS,
@@ -248,6 +249,7 @@ ROUND_GROUP = {base.lower(): g for g, base, _ in _ROUNDS}
 STATUS_ROUND = {}
 for _g, _base, _pfx in _ROUNDS:
     STATUS_ROUND[_base.lower()] = (_g, None, _base)
+    STATUS_ROUND[FIELD_ROUND_SCHEDULED_STATUS[_base].lower()] = (_g, None, _base)
     STATUS_ROUND[f"{_pfx} select".lower()] = (_g, "Select", _base)
     STATUS_ROUND[f"{_pfx} reject".lower()] = (_g, "Reject", _base)
 

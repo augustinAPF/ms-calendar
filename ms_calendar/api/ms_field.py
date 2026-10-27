@@ -4370,144 +4370,10 @@ def download_field_dashboard_excel():
 
 # ── Field Overall Dashboard Excel (Field Registration Form1) ──────────────────
 
-_FOV_STATUS_TO_KEY = {
-    "New Applicant": "cv_pending",
-    "CV Shortlist": "cv_shortlist",
-    "CV Reject": "cv_regret",
-    "Test Process": "written_select",
-    "Test Select": "written_select",
-    "Test Reject": "written_regret",
-    "Recruiter Round": "recruiter_select",
-    "Recruiter Reject": "recruiter_regret",
-    "Round One": "functional_select",
-    "Round 1 Reject": "functional_regret",
-    "Round Two": "final_select",
-    "Round 2 Reject": "final_regret",
-    "Round Three": "final_select",
-    "Round 3 Reject": "final_regret",
-    "Document Collection": "offer_in_process",
-    "Offer": "offer_made",
-    "Offer Accepted": "offer_accepted",
-    "Joined": "joined",
-    "Offer Declined": "offer_declined",
-    "Offer Revoked": "offer_revoked",
-    "Applied": "cv_pending",
-    "Shortlisted": "cv_shortlist",
-    "Rejected": "cv_regret",
-    "Interview Scheduled": "functional_scheduled",
-    "Selected": "joined",
-    "On Hold": "offer_in_process",
-}
-
-_FOV_STAGES = [
-    (
-        "Applications",
-        "FFF9C4",
-        [
-            (
-                "Carried forward Application from last year Before April",
-                "carried_forward",
-                False,
-            ),
-            ("Received from April this Year", "received_this_year", False),
-            ("Total Applications", "total", True),
-        ],
-    ),
-    (
-        "CV screening",
-        "DCEDC8",
-        [
-            ("Shortlist", "cv_shortlist", False),
-            ("Regret", "cv_regret", False),
-            ("Pending", "cv_pending", False),
-        ],
-    ),
-    (
-        "Written test",
-        "BBDEFB",
-        [
-            ("Select", "written_select", False),
-            ("Regret", "written_regret", False),
-        ],
-    ),
-    (
-        "Recruiter screening",
-        "DCEDC8",
-        [
-            ("Select", "recruiter_select", False),
-            ("Regret", "recruiter_regret", False),
-            ("Pending", "recruiter_pending", False),
-        ],
-    ),
-    (
-        "Functional round",
-        "BBDEFB",
-        [
-            ("Select", "functional_select", False),
-            ("Regret", "functional_regret", False),
-            ("Scheduled", "functional_scheduled", False),
-            ("Feedback Pending", "functional_feedback_pending", False),
-            ("Pending", "functional_pending", False),
-        ],
-    ),
-    (
-        "Final round",
-        "FFCCBC",
-        [
-            ("Select", "final_select", False),
-            ("Regret", "final_regret", False),
-            ("Scheduled", "final_scheduled", False),
-            ("Feedback Pending", "final_feedback_pending", False),
-            ("Pending", "final_pending", False),
-        ],
-    ),
-    (
-        "Offers",
-        "FFE0B2",
-        [
-            ("Offer in process", "offer_in_process", False),
-            ("Offer Made", "offer_made", False),
-            ("Offer Accepted", "offer_accepted", False),
-            ("Joined", "joined", False),
-            ("Offer declined", "offer_declined", False),
-            ("Offer Revoked", "offer_revoked", False),
-            ("Joined in 2025-26, Offered in 2025-26", "joined_offered_current", False),
-            ("Joined in 2025-26, Offered in 2024-25", "joined_offered_prev", False),
-        ],
-    ),
-]
-
-_FOV_ALL_KEYS = [
-    "carried_forward",
-    "received_this_year",
-    "total",
-    "cv_shortlist",
-    "cv_regret",
-    "cv_pending",
-    "written_select",
-    "written_regret",
-    "recruiter_select",
-    "recruiter_regret",
-    "recruiter_pending",
-    "functional_select",
-    "functional_regret",
-    "functional_scheduled",
-    "functional_feedback_pending",
-    "functional_pending",
-    "final_select",
-    "final_regret",
-    "final_scheduled",
-    "final_feedback_pending",
-    "final_pending",
-    "offer_in_process",
-    "offer_made",
-    "offer_accepted",
-    "joined",
-    "offer_declined",
-    "offer_revoked",
-    "joined_offered_current",
-    "joined_offered_prev",
-]
+# Stages / rows / status mapping live in ms_calendar.api.reports
+# (pipeline_stages, pipeline_status_map, pipeline_row_key, job_state) and
+# are shared with the on-screen Pipeline page (field_over_all_dashb.js).
+_FOV_STAGE_COLORS = ["DCEDC8", "BBDEFB", "FFF9C4", "FFE0B2", "E1BEE7", "FFCCBC"]
 
 DATA_COLS = ["RP", "ST", "HL", "LH"]
 SUB_COLS = ["RP", "ST", "HL", "LH", "Total"]
@@ -4605,12 +4471,16 @@ def download_field_overall_excel(
             params[pkey] = v
         conditions.append("{0} IN ({1})".format(field, ", ".join(placeholders)))
 
+    # Applied date (Date of Applied, else Application Date, else creation),
+    # same as the page — bulk imports carry a recent creation date for old
+    # applications, so creation alone pulled them all in.
+    applied_sql = "COALESCE(date_of_applied, DATE(application_date), DATE(creation))"
     if from_date:
-        conditions.append("creation >= %(fd)s")
-        params["fd"] = from_date + " 00:00:00"
+        conditions.append(applied_sql + " >= %(fd)s")
+        params["fd"] = from_date
     if to_date:
-        conditions.append("creation <= %(td)s")
-        params["td"] = to_date + " 23:59:59"
+        conditions.append(applied_sql + " <= %(td)s")
+        params["td"] = to_date
     _add_in("native_district", district_list, "district")
     _add_in("opportunity", source_list, "source")
     _add_in("role", role_list, "role")
@@ -4619,86 +4489,54 @@ def download_field_overall_excel(
 
     records = frappe.db.sql(
         """
-        SELECT native_state, role, department, location, worklocation,
-               application_status, creation
+        SELECT name, role, department, location, job_title, application_status,
+               {applied} AS applied
         FROM `tabField Registration Form`
         WHERE {conditions}
         """.format(
-            conditions=" AND ".join(conditions)
+            applied=applied_sql, conditions=" AND ".join(conditions)
         ),
         params,
         as_dict=True,
     )
 
-    # state filter matches getRecState() in the dashboard JS: location ||
-    # worklocation || native_state, applied after the SQL fetch since that
-    # derived value isn't a single column.
+    from ms_calendar.api import reports as _rpt
+
+    jo = _rpt._job_opening_locations()
+    for r in records:
+        r["state"] = _rpt.job_state(r.get("location"), jo.get(r.get("job_title")))
+    # state filter = job opening state, same as getRecState() on the page
     if state_list:
-        records = [
-            r
-            for r in records
-            if (
-                (
-                    r.get("location")
-                    or r.get("worklocation")
-                    or r.get("native_state")
-                    or ""
-                ).strip()
-                in state_list
-            )
-        ]
+        records = [r for r in records if r["state"] in state_list]
 
-    april_1 = date_cls(date_cls.today().year, 4, 1)
+    stages = _rpt.pipeline_stages()
+    all_keys = [row["key"] for st in stages for row in st["rows"]]
+    to_key, in_round = _rpt.pipeline_status_map()
+    fis = _rpt.interview_dates_by_candidate()
+    today_str = frappe.utils.today()
+    d = date_cls.today()
+    fy_start = date_cls(d.year if d.month >= 4 else d.year - 1, 4, 1)
 
-    states = sorted(
-        set(
-            (
-                r.get("location")
-                or r.get("worklocation")
-                or r.get("native_state")
-                or "Unknown"
-            ).strip()
-            for r in records
-            if (r.get("location") or r.get("worklocation") or r.get("native_state"))
-        )
-    )
+    states = sorted(set(r["state"] for r in records))
     all_entries = states + ["Grand Total"]
-
     data = {
-        e: {c: {k: 0 for k in _FOV_ALL_KEYS} for c in DATA_COLS} for e in all_entries
+        e: {c: {k: 0 for k in all_keys} for c in DATA_COLS} for e in all_entries
     }
 
     for rec in records:
-        state_val = (
-            (rec.get("location") or "").strip()
-            or (rec.get("worklocation") or "").strip()
-            or (rec.get("native_state") or "").strip()
-            or ""
-        )
-        if not state_val:
-            continue  # skip records with no state data
         col = _fov_get_col(rec.get("role") or "", rec.get("department") or "")
         if not col:
             continue
-        if state_val not in data:
-            # add dynamically in case state wasn't in initial set
-            data[state_val] = {c: {k: 0 for k in _FOV_ALL_KEYS} for c in DATA_COLS}
-            if state_val not in all_entries:
-                all_entries.insert(-1, state_val)  # insert before Grand Total
-
-        creation_date = (
-            rec["creation"].date() if rec.get("creation") else date_cls.today()
+        sk = _rpt.pipeline_row_key(
+            rec.get("application_status"), rec["name"], to_key, in_round, fis, today_str
         )
-        sk = _FOV_STATUS_TO_KEY.get(rec.get("application_status") or "")
-
-        for entry in [state_val, "Grand Total"]:
+        for entry in [rec["state"], "Grand Total"]:
             data[entry][col]["total"] += 1
-            if creation_date < april_1:
+            if rec.get("applied") and rec["applied"] < fy_start:
                 data[entry][col]["carried_forward"] += 1
             else:
                 data[entry][col]["received_this_year"] += 1
-            if sk:
-                data[entry][col][sk] += 1
+            data[entry][col][sk] += 1
 
     # ── Build Excel ──
     wb = openpyxl.Workbook()
@@ -4779,9 +4617,12 @@ def download_field_overall_excel(
 
     # Data rows
     row_cur = 4
-    for stage_name, stage_hex, rows in _FOV_STAGES:
+    for si, stage in enumerate(stages):
+        stage_name = stage["stage"]
+        stage_hex = _FOV_STAGE_COLORS[si % len(_FOV_STAGE_COLORS)]
         row_start = row_cur
-        for row_label, key, is_total in rows:
+        for row in stage["rows"]:
+            row_label, key, is_total = row["label"], row["key"], row.get("total", False)
             rbg = RTOT_BG if is_total else stage_hex
             rfg = "000000"
 
@@ -5983,6 +5824,93 @@ def send_enabler_final_feedback_pdf_to_registration_form(doc, method=None):
     )
 
 
+# ── "<Round> Scheduled" statuses ─────────────────────────────────────────────
+# Scheduling a Field interview moves the candidate's Field Registration Form
+# status to "<round> Scheduled". A candidate in "CV Shortlist" / "Test
+# Select" is scheduled straight into the Recruiter Round, without first
+# being moved to "Recruiter Round" by hand. The old plain round statuses
+# ("Recruiter Round", …) are kept and move to "… Scheduled" the same way.
+FIELD_ROUND_SCHEDULED_STATUS = {
+    "Recruiter Round": "Recruiter Round Scheduled",
+    "Education Capacity Round": "Education Capacity Round Scheduled",
+    "Subject Round": "Subject Round Scheduled",
+    "Technical Round": "Technical Round Scheduled",
+    "Functional Round": "Functional Round Scheduled",
+    "Demo Round": "Demo Round Scheduled",
+    "Leader Round-1": "Leader Round-1 Scheduled",
+    "Leader Round-2": "Leader Round-2 Scheduled",
+    "Leader Round-3": "Leader Round-3 Scheduled",
+    "Calibration Process": "Calibration Process Scheduled",
+}
+
+# Registration form status -> the round an interview scheduled from it is for.
+FIELD_STATUS_TO_ROUND = {
+    "CV Shortlist": "Recruiter Round",
+    "Test Select": "Recruiter Round",
+    **{scheduled: round_ for round_, scheduled in FIELD_ROUND_SCHEDULED_STATUS.items()},
+}
+
+
+def field_round_for_status(status):
+    """'CV Shortlist' -> 'Recruiter Round', 'Demo Round Scheduled' -> 'Demo
+    Round'; any other status comes back unchanged."""
+    status = (status or "").strip()
+    return FIELD_STATUS_TO_ROUND.get(status, status)
+
+
+def set_field_interview_round(doc, method=None):
+    """
+    Hooked to "Field Interview Schedule" validate (see hooks.py).
+    interview_round is fetched from the registration form's
+    application_status on every save, so a "CV Shortlist" or "… Scheduled"
+    status is turned back into the round name here — feedback forms, PDFs
+    and emails all key off the plain round name.
+    """
+    doc.interview_round = field_round_for_status(doc.interview_round)
+
+
+def move_field_status_to_scheduled(doc, method=None):
+    """
+    Hooked to "Field Interview Schedule" after_insert (see hooks.py) — runs
+    for the form and for the list's bulk "Schedule Interviews". Moves the
+    candidate to "<round> Scheduled" when their status is that round (or
+    CV Shortlist / Test Select for the Recruiter Round). Any other status
+    (a Select / Reject result, a later stage) is left alone.
+    """
+    round_ = (doc.interview_round or "").strip()
+    scheduled = FIELD_ROUND_SCHEDULED_STATUS.get(round_)
+    if not doc.application_id or not scheduled:
+        return
+    status = frappe.db.get_value(
+        "Field Registration Form", doc.application_id, "application_status"
+    )
+    if status == scheduled or field_round_for_status(status) != round_:
+        return
+
+    # A full save keeps the Version history and the Applicant Master sync.
+    # If the record can't be saved (an old record failing a link or
+    # mandatory check), only the status is written, so the interview is
+    # never blocked by it.
+    message_log = frappe.local.message_log
+    snapshot_len = len(message_log)
+    frappe.db.savepoint("fis_status_move")
+    try:
+        frf = frappe.get_doc("Field Registration Form", doc.application_id)
+        frf.application_status = scheduled
+        frf.flags.ignore_permissions = True
+        frf.flags.ignore_mandatory = True
+        frf.save()
+    except Exception:
+        frappe.db.rollback(save_point="fis_status_move")
+        del message_log[snapshot_len:]
+        frappe.log_error(
+            frappe.get_traceback(), f"Field interview: status move failed for {doc.application_id}"
+        )
+        frappe.db.set_value(
+            "Field Registration Form", doc.application_id, "application_status", scheduled
+        )
+
+
 # Which "<Round> Feedback Form" doctype(s) are expected for a given base
 # interview_round on "Field Interview Schedule". Grouped the same way the
 # doc_events hooks above group them (see _merge_feedback_submissions_to_registration_form
@@ -6564,6 +6492,8 @@ def check_field_interview_attachments(
     if not application_id or not frappe.db.exists("Field Registration Form", application_id):
         return result
 
+    # Callers may still pass the raw status ("CV Shortlist", "… Scheduled").
+    interview_round = field_round_for_status(interview_round)
     fields = list(
         dict.fromkeys(_field_auto_attach_fields(interview_round, applicant_role, department))
     )

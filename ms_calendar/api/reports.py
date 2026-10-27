@@ -1,8 +1,10 @@
 import io
 import json
+import re
+from datetime import timedelta
 
 import frappe
-from frappe.utils import today
+from frappe.utils import getdate, today
 
 
 def _parse_multi(val):
@@ -39,34 +41,37 @@ def _parse_multi(val):
 STF_COLS = [
 	("No. of Applications", "applications", None),
 	("CV Shortlisted", "cv_shortlisted", ["CV Shortlist", "Shortlisted"]),
-	("CV Screening Pending", "cv_pending", ["New Applicant", "Pending", "Correction Pending", "PI Edited"]),
-	("CV Rejected", "cv_rejected", ["CV Reject", "Rejected", "Not Selected", "Duplicated", "Blacklisted", "Blocklisted"]),
-	("On Hold", "on_hold", ["On Hold"]),
+	("CV Screening Pending", "cv_pending", ["New Applicant", "Pending", "Correction Pending", "Pending for Correction", "PI Edited"]),
+	("CV Rejected", "cv_rejected", ["CV Reject", "Rejected", "Not Selected", "Duplicated", "Blacklisted", "Blocklisted", "Blocklist"]),
+	("On Hold", "on_hold", ["On Hold", "Test Hold"]),
 	("Admit Card Sent", "admit_card_sent", ["Test Process", "Admit Card Sent"]),
-	("Assessment Pass", "assessment_pass", ["Test Select", "Assessment Passed"]),
-	("Assessment Fail", "assessment_fail", ["Test Reject", "Assessment Failed"]),
-	("Recruiter Round Scheduled", "rr_sched", ["Recruiter Round", "Recruiter Round-Interview Scheduled"]),
+	("Test Select", "assessment_pass", ["Test Select", "Assessment Passed"]),
+	("Test Reject", "assessment_fail", ["Test Reject", "Assessment Failed"]),
+	("Recruiter Round Scheduled", "rr_sched", ["Recruiter Round", "Recruiter Round Scheduled", "Recruiter Round-Interview Scheduled"]),
 	("Recruiter Round Selected", "rr_sel", ["Recruiter Round Select", "Recruiter Round-Interview Selected"]),
-	("Recruiter Round Rejected", "rr_rej", ["Recruiter Reject", "Recruiter Round-Interview Rejected"]),
+	("Recruiter Round Rejected", "rr_rej", ["Recruiter Round Reject", "Recruiter Reject", "Recruiter Round-Interview Rejected"]),
 	("Subject Round Interview Scheduled", "sr_sched",
-		["Round One", "Subject Round", "Subject Round-Interview Scheduled", "Functional Round-Interview Scheduled", "Functional Round-Interviewed"]),
-	("Subject Round Interview Selected", "sr_sel", ["Round One Select", "Subject Round Select", "Functional Round-Interview Selected"]),
+		["Functional Round", "Education Capacity Round", "Round One", "Subject Round", "Functional Round Scheduled", "Education Capacity Round Scheduled", "Subject Round Scheduled", "Subject Round-Interview Scheduled",
+			"Functional Round-Interview Scheduled", "Functional Round-Interviewed"]),
+	("Subject Round Interview Selected", "sr_sel",
+		["Functional Round Select", "Education Capacity Select", "Round One Select", "Subject Round Select", "Functional Round-Interview Selected"]),
 	("Subject Round Interview Rejected", "sr_rej",
-		["Round 1 Reject", "Subject Round Reject", "Subject Round-Interview Rejected", "Functional Round-Interview Rejected"]),
+		["Functional Round Reject", "Education Capacity Reject", "Round 1 Reject", "Subject Round Reject", "Subject Round-Interview Rejected",
+			"Functional Round-Interview Rejected"]),
 	("Demo Round Scheduled", "dr_sched",
-		["Round Two", "Demo Round", "Subject/Classroom Demo Round-Interview Scheduled", "Principal/Demo Round-Interview Scheduled"]),
+		["Round Two", "Demo Round", "Demo Round Scheduled", "Subject/Classroom Demo Round-Interview Scheduled", "Principal/Demo Round-Interview Scheduled"]),
 	("Demo Round Selected", "dr_sel",
 		["Round Two Select", "Demo Round Select", "Subject/Classroom Demo Round-Interview Selected", "Principal/Demo Round-Interview Selected"]),
 	("Demo Round Rejected", "dr_rej",
 		["Round 2 Reject", "Demo Round Reject", "Subject/Classroom Demo Round-Interview Rejected", "Principal/Demo Round-Interview Rejected",
 			"Demo Round-Interview Rejected", "Demo & Leader Round-Interview Rejected"]),
-	("Leader Round 1 Interview Scheduled", "lr1_sched", ["Leader Round-1", "Leader Round 1-Interview Scheduled", "Leader Round 1-Interviewed"]),
+	("Leader Round 1 Interview Scheduled", "lr1_sched", ["Leader Round-1", "Leader Round-1 Scheduled", "Leader Round 1-Interview Scheduled", "Leader Round 1-Interviewed"]),
 	("Leader Round 1 Interview Selected", "lr1_sel", ["Leader Round-1 Select", "Leader Round 1-Interview Selected", "Leader Round-Interview Selected"]),
 	("Leader Round 1 Interview Rejected", "lr1_rej", ["Leader Round-1 Reject", "Leader Round 1-Interview Rejected"]),
-	("Leader Round 2 Interview Scheduled", "lr2_sched", ["Leader Round-2"]),
+	("Leader Round 2 Interview Scheduled", "lr2_sched", ["Leader Round-2", "Leader Round-2 Scheduled"]),
 	("Leader Round 2 Interview Selected", "lr2_sel", ["Leader Round-2 Select"]),
 	("Leader Round 2 Interview Rejected", "lr2_rej", ["Leader Round-2 Reject"]),
-	("Leader Round 3 Interview Scheduled", "lr3_sched", ["Round Three", "Leader Round-3", "Leader Round 3-Interview Scheduled", "Leader Round 3-Interviewed"]),
+	("Leader Round 3 Interview Scheduled", "lr3_sched", ["Round Three", "Leader Round-3", "Leader Round-3 Scheduled", "Leader Round 3-Interview Scheduled", "Leader Round 3-Interviewed"]),
 	("Leader Round 3 Interview Selected", "lr3_sel", ["Round Three Select", "Leader Round-3 Select", "Leader Round 3-Interview Selected"]),
 	("Leader Round 3 Interview Rejected", "lr3_rej", ["Round 3 Reject", "Leader Round-3 Reject", "Leader Round 3-Interview Rejected"]),
 	("Pending with CBT (Offer Released)", "pending_cbt", ["Pending With CBT", "CBT Assigned", "Offer", "Offer Sent"]),
@@ -142,8 +147,7 @@ STF_SCHOOL_VALUES = [
 
 @frappe.whitelist()
 def download_st_district_funnel(
-	from_date=None, to_date=None, applied_from=None, applied_to=None,
-	native_state=None, school=None, job_code=None
+	applied_from=None, applied_to=None, native_state=None, school=None, job_code=None
 ):
 	"""Server-rendered .xlsx of the "School Teacher — District Funnel"
 	report, with the same header/row background colours as the on-screen
@@ -152,18 +156,14 @@ def download_st_district_funnel(
 	(openpyxl, already used for exports elsewhere in this session).
 	"""
 	filters = {}
-	if from_date or to_date:
-		filters["creation"] = [
-			"between",
-			[(from_date or "2000-01-01") + " 00:00:00", (to_date or today()) + " 23:59:59"],
-		]
-	# Separate, optional range on date_of_applied (a plain Date field, no
-	# time component) — additive to the From/To (creation) range above, same
-	# as reports.js's Applied From/Applied To fields alongside From/To.
+	# Optional range on application_date (the form's "Application Date" — a
+	# Datetime field, so the To day runs to 23:59:59) — the only date filter,
+	# same as reports.js's Application Date From/To (the creation From/To
+	# range was removed and date_of_applied swapped for this, 2026-10-15).
 	if applied_from or applied_to:
-		filters["date_of_applied"] = [
+		filters["application_date"] = [
 			"between",
-			[applied_from or "2000-01-01", applied_to or today()],
+			[(applied_from or "2000-01-01") + " 00:00:00", (applied_to or today()) + " 23:59:59"],
 		]
 
 	# "name" and "creation" are the two fields the Details sheet needs that
@@ -389,12 +389,328 @@ def download_st_district_funnel(
 	frappe.local.response.type = "binary"
 
 
+
+
+# ── Job-opening state ─────────────────────────────────────────────────────
+# Every report's "State" is the state of the JOB the candidate applied for,
+# never the candidate's own native_state (recruiter feedback 2026-10-27:
+# "West Bengal" showed as a pipeline column because a candidate lived
+# there). Source order: the job location saved on the application
+# (Field Registration Form.location — already narrowed to one option when
+# the opening offered several), then the linked Job Opening's location.
+# Both are free text ("Itki, Ranchi, Jharkhand, India", "Raigarh -
+# Chhattisgarh/Gumla - Jharkhand", ...), so they're matched against state
+# names first, then city/district names that show up without their state.
+# reports.js / field_over_all_dashb.js get these lists from get_report_meta()
+# and run the same matching (jobStateOf), so all reports agree.
+INDIA_STATES = [
+	"Andhra Pradesh", "Arunachal Pradesh", "Assam", "Bihar", "Chhattisgarh", "Goa", "Gujarat",
+	"Haryana", "Himachal Pradesh", "Jharkhand", "Karnataka", "Kerala", "Madhya Pradesh",
+	"Maharashtra", "Manipur", "Meghalaya", "Mizoram", "Nagaland", "Odisha", "Punjab", "Rajasthan",
+	"Sikkim", "Tamil Nadu", "Telangana", "Tripura", "Uttar Pradesh", "Uttarakhand", "West Bengal",
+	"Andaman and Nicobar Islands", "Chandigarh", "Dadra and Nagar Haveli and Daman and Diu", "Delhi",
+	"Jammu and Kashmir", "Ladakh", "Lakshadweep", "Puducherry",
+]
+STATE_ALIASES = {
+	"Chhattisgarh": ["chattisgarh", "chhatisgarh", "dhamtari", "raigarh", "raipur", "bilaspur", "ambikapur"],
+	"Karnataka": ["bengaluru", "bangalore", "kalaburagi", "yadgir", "jevargi"],
+	"Madhya Pradesh": ["khargone", "bhopal", "damoh", "sagar"],
+	"Rajasthan": ["tonk", "sirohi", "barmer", "udaipur", "banswara", "chittorgarh"],
+	"Uttarakhand": ["uttaranchal", "udham singh", "uttarkashi", "dehradun"],
+	"Jharkhand": ["ranchi", "dhanbad", "jamshedpur", "deoghar", "pakur", "sahibganj", "gumla", "simdega", "godda"],
+	"Uttar Pradesh": ["lucknow", "varanasi", "ayodhya"],
+	"Odisha": ["orissa", "rayagada", "keonjhar", "sambalpur"],
+	"Assam": ["guwahati", "jorhat"],
+	"Tamil Nadu": ["tamilnadu", "chennai"],
+	"Telangana": ["hyderabad"],
+	"West Bengal": ["kolkata"],
+	"Puducherry": ["pondicherry"],
+	"Maharashtra": ["nagpur", "mumbai", "pune"],
+	"Andaman and Nicobar Islands": ["andaman"],
+	"Jammu and Kashmir": ["jammu", "kashmir"],
+}
+STATE_MULTI = "Multiple States"
+STATE_NONE = "Other / Not specified"
+
+
+def _states_in(text):
+	s = (text or "").lower()
+	if not s:
+		return []
+	found = [st for st in INDIA_STATES if st.lower() in s]
+	if not found:
+		found = [st for st, keys in STATE_ALIASES.items() if any(k in s for k in keys)]
+	return found
+
+
+def job_state(location, jo_location=None):
+	multi = False
+	for text in (location, jo_location):
+		found = _states_in(text)
+		if len(found) == 1:
+			return found[0]
+		if found or "all states" in (text or "").lower():
+			multi = True
+	return STATE_MULTI if multi else STATE_NONE
+
+
+def _job_opening_locations():
+	return {r.name: r.location for r in frappe.get_all("Job Opening", fields=["name", "location"])}
+
+
+# ── Workflow rounds & pipeline rows ───────────────────────────────────────
+# Interview rounds in workflow order. Names are the Field Registration Form
+# Application Status values: "<round>" = in that round, then its select /
+# reject status. Rank = position in the hiring flow; rounds sharing a rank
+# are alternatives (a role has one of EC / Subject / Technical /
+# Functional). Used to tell whether a candidate got past a round.
+WORKFLOW_ROUNDS = [
+	("Recruiter Round", "Recruiter Round Select", "Recruiter Round Reject", 1),
+	("Education Capacity Round", "Education Capacity Select", "Education Capacity Reject", 2),
+	("Subject Round", "Subject Round Select", "Subject Round Reject", 2),
+	("Technical Round", "Technical Round Select", "Technical Round Reject", 2),
+	("Functional Round", "Functional Round Select", "Functional Round Reject", 2),
+	("Demo Round", "Demo Round Select", "Demo Round Reject", 3),
+	("Leader Round-1", "Leader Round-1 Select", "Leader Round-1 Reject", 4),
+	("Leader Round-2", "Leader Round-2 Select", "Leader Round-2 Reject", 5),
+	("Leader Round-3", "Leader Round-3 Select", "Leader Round-3 Reject", 6),
+]
+ROUND_RANK = {r[0]: r[3] for r in WORKFLOW_ROUNDS}
+MAX_ROUND_RANK = 6
+# Older status / interview-round spellings (same mapping as STF_COLS above).
+_LEGACY_ROUNDS = [
+	("recruiter", "Recruiter Round"),
+	("round one", "Functional Round"), ("round 1", "Functional Round"),
+	("round two", "Demo Round"), ("round 2", "Demo Round"),
+	("round three", "Leader Round-3"), ("round 3", "Leader Round-3"),
+]
+# Statuses that come after every interview round.
+_AFTER_ROUNDS = ("calibration", "document", "fitment", "compensation", "offer", "addendum",
+	"pre joining", "it team", "it email", "joined", "erp id")
+
+
+def canon_round(text):
+	"""Workflow round name for an Application Status / Interview Round
+	value ("Leader Round-2 Reject" -> "Leader Round-2"), or None."""
+	s = re.sub(r"leader round (\d)", r"leader round-\1", (text or "").strip().lower())
+	if not s:
+		return None
+	for name, sel, rej, _rank in WORKFLOW_ROUNDS:
+		if s.startswith(name.lower()) or s in (sel.lower(), rej.lower()):
+			return name
+	for prefix, name in _LEGACY_ROUNDS:
+		if s.startswith(prefix):
+			return name
+	return None
+
+
+def _round_result(status):
+	"""'select' / 'reject' / 'in' for a round status."""
+	s = (status or "").lower()
+	if "select" in s:
+		return "select"
+	if "reject" in s:
+		return "reject"
+	return "in"
+
+
+def passed_rank(status):
+	"""Highest round rank the candidate's current status shows they passed
+	(0 = none / unknown, e.g. Not Selected, Interview No Show)."""
+	rnd = canon_round(status)
+	if rnd:
+		return ROUND_RANK[rnd] - (0 if _round_result(status) == "select" else 1)
+	s = (status or "").lower()
+	if any(k in s for k in _AFTER_ROUNDS):
+		return MAX_ROUND_RANK
+	return 0
+
+
+def _slug(text):
+	return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+
+
+_STATUS_ROW = {
+	"New Applicant": "cv_pending", "Applied": "cv_pending",
+	"CV Shortlist": "cv_shortlist", "Shortlisted": "cv_shortlist",
+	"CV Reject": "cv_reject", "Rejected": "cv_reject",
+	"On Hold": "cv_hold",
+	"Test Initiated": "test_process", "Test Process": "test_process",
+	"Test Select": "test_select", "Test Reject": "test_reject", "Test Hold": "test_hold",
+	"No Show": "test_no_show", "Test No Show": "test_no_show",
+	"Interview No Show": "interview_no_show", "Interview-No Show": "interview_no_show",
+	"Calibration Process": "calibration_process", "Calibration Select": "calibration_select",
+	"Calibration Reject": "calibration_reject",
+	"Not Selected": "not_selected", "Blocklisted": "blocklisted", "Blocklist": "blocklisted",
+	"Duplicated": "duplicated", "Pending for Correction": "correction_pending",
+	"Correction Pending": "correction_pending", "PI Edited": "pi_edited",
+	"Selected": "o_joined",
+}
+_OFFER_ROWS = [
+	"Document Collection", "Document Verification Pass", "Document Verification Fail",
+	"Fitment Stage", "Fitment Reject", "Compensation Due", "Compensation Approved",
+	"Offer", "Offer Sent", "Offer Not Sent", "Offer Accepted", "Offer Declined", "Offer Revoked",
+	"Addendum Accepted", "Addendum Declined", "Pre joining", "IT Team", "IT Email Sent",
+	"IT Email Not Sent", "Joined", "Not Joined", "ERP ID Created", "ERP ID Not Created",
+]
+
+
+def pipeline_stages():
+	"""Pipeline report rows, in workflow order: [{stage, rows: [{label, key,
+	total?}]}]. Each interview round has Select / Reject plus three rows for
+	candidates still in it: Scheduled (interview date today or later),
+	Feedback Pending (interview held, no result yet) and Pending (no
+	interview scheduled yet) — see pipeline_row_key()."""
+	stages = [
+		{"stage": "Applications", "rows": [
+			{"label": "Carried forward (applied before 1 April this FY)", "key": "carried_forward"},
+			{"label": "Received from 1 April this FY", "key": "received_this_year"},
+			{"label": "Total Applications", "key": "total", "total": True},
+		]},
+		{"stage": "CV Screening", "rows": [
+			{"label": "CV Shortlist", "key": "cv_shortlist"},
+			{"label": "CV Reject", "key": "cv_reject"},
+			{"label": "New Applicant (Pending)", "key": "cv_pending"},
+			{"label": "On Hold", "key": "cv_hold"},
+		]},
+		{"stage": "Written Test", "rows": [
+			{"label": "Test Initiated / In Process", "key": "test_process"},
+			{"label": "Test Select", "key": "test_select"},
+			{"label": "Test Reject", "key": "test_reject"},
+			{"label": "Test Hold", "key": "test_hold"},
+			{"label": "No Show", "key": "test_no_show"},
+		]},
+	]
+	for name, sel, rej, _rank in WORKFLOW_ROUNDS:
+		k = _slug(name)
+		stages.append({"stage": name, "rows": [
+			{"label": sel, "key": k + "_select"},
+			{"label": rej, "key": k + "_reject"},
+			{"label": "Scheduled", "key": k + "_scheduled"},
+			{"label": "Feedback Pending", "key": k + "_feedback"},
+			{"label": "Pending (not scheduled)", "key": k + "_pending"},
+		]})
+	stages += [
+		{"stage": "Interview No Show", "rows": [{"label": "Interview No Show", "key": "interview_no_show"}]},
+		{"stage": "Calibration", "rows": [
+			{"label": "Calibration Process", "key": "calibration_process"},
+			{"label": "Calibration Select", "key": "calibration_select"},
+			{"label": "Calibration Reject", "key": "calibration_reject"},
+		]},
+		{"stage": "Offer & Joining", "rows": [{"label": s, "key": "o_" + _slug(s)} for s in _OFFER_ROWS]},
+		{"stage": "Closed / Other", "rows": [
+			{"label": "Not Selected", "key": "not_selected"},
+			{"label": "Blocklisted", "key": "blocklisted"},
+			{"label": "Duplicated", "key": "duplicated"},
+			{"label": "Correction Pending", "key": "correction_pending"},
+			{"label": "PI Edited", "key": "pi_edited"},
+			{"label": "Other / Blank status", "key": "other"},
+		]},
+	]
+	return stages
+
+
+def pipeline_status_map():
+	"""{status: row key} for non-round statuses and round select/reject, and
+	{status: round} for "in this round" statuses (resolved per candidate by
+	pipeline_row_key). Covers every Application Status option plus legacy
+	spellings; anything else lands in "other" so the rows add up to Total."""
+	meta = frappe.get_meta("Field Registration Form").get_field("application_status")
+	statuses = [s.strip() for s in (meta.options or "").split("\n") if s.strip()] if meta else []
+	statuses += list(_STATUS_ROW) + ["Round One", "Round Two", "Round Three", "Recruiter Reject",
+		"Round 1 Reject", "Round 2 Reject", "Round 3 Reject"]
+	to_key, in_round = {}, {}
+	for st in statuses:
+		if st in _STATUS_ROW:
+			to_key[st] = _STATUS_ROW[st]
+		elif st in _OFFER_ROWS:
+			to_key[st] = "o_" + _slug(st)
+		else:
+			rnd = canon_round(st)
+			if not rnd:
+				continue
+			res = _round_result(st)
+			if res == "in":
+				in_round[st] = rnd
+			else:
+				to_key[st] = _slug(rnd) + "_" + res
+	return to_key, in_round
+
+
+def interview_dates_by_candidate():
+	"""{application_id: {round: latest interview date 'YYYY-MM-DD'}} from
+	non-cancelled Field Interview Schedules."""
+	out = {}
+	for r in frappe.db.sql(
+		"""select application_id, interview_round, max(interview_date) d
+		from `tabField Interview Schedule`
+		where ifnull(is_cancelled, 0) = 0 and ifnull(application_id, '') != '' and interview_date is not null
+		group by application_id, interview_round""",
+		as_dict=True,
+	):
+		rnd = canon_round(r.interview_round)
+		if not rnd:
+			continue
+		d = str(r.d)
+		cur = out.setdefault(r.application_id, {})
+		if d > cur.get(rnd, ""):
+			cur[rnd] = d
+	return out
+
+
+def pipeline_row_key(status, app_id, to_key, in_round, fis, today_str):
+	status = (status or "").strip()
+	if status in to_key:
+		return to_key[status]
+	rnd = in_round.get(status)
+	if not rnd:
+		return "other"
+	dates = fis.get(app_id) or {}
+	d = dates.get(rnd)
+	if not d:
+		# EC / Subject / Technical / Functional are alternatives — an
+		# interview booked under a sibling name still counts.
+		d = max((v for k, v in dates.items() if ROUND_RANK.get(k) == ROUND_RANK[rnd]), default=None)
+	k = _slug(rnd)
+	if not d:
+		return k + "_pending"
+	return k + ("_scheduled" if d >= today_str else "_feedback")
+
+
+@frappe.whitelist()
+def get_report_meta(with_pipeline=0):
+	"""Lookups the report pages share: Job Opening locations + the state
+	lists for jobStateOf(), and (with_pipeline) the workflow pipeline rows,
+	status map and per-candidate interview dates."""
+	frappe.has_permission("Field Registration Form", "read", throw=True)
+	out = {
+		"jo": _job_opening_locations(),
+		"states": INDIA_STATES,
+		"aliases": STATE_ALIASES,
+		"multi": STATE_MULTI,
+		"none": STATE_NONE,
+		"rounds": [r[0] for r in WORKFLOW_ROUNDS],
+	}
+	if frappe.utils.cint(with_pipeline):
+		to_key, in_round = pipeline_status_map()
+		out.update({
+			"stages": pipeline_stages(),
+			"status_to_key": to_key,
+			"in_round": in_round,
+			"round_rank": ROUND_RANK,
+			"fis": interview_dates_by_candidate(),
+			"today": today(),
+		})
+	return out
+
+
+# ── Interviewers Data ─────────────────────────────────────────────────────
 @frappe.whitelist()
 def get_interviewer_data(from_date, to_date):
 	"""Rows for the "Interviewers Data" report in reports.js — one row per
 	(interview, interviewer) for non-cancelled Field Interview Schedules
 	dated from_date..to_date, joined to the candidate's Field Registration
-	Form for state / status.
+	Form.
 
 	Done in SQL rather than frappe.client.get_list because interviewers
 	live in two Table MultiSelect fields (interviewer_email and
@@ -403,16 +719,25 @@ def get_interviewer_data(from_date, to_date):
 	fields apart (checked 2026-09-28: both came back identical). Here the
 	join is on parentfield explicitly. An interview with no interviewer
 	still returns one row, with interviewer NULL.
+
+	Each row also gets:
+	  round    — workflow round of the interview (canon_round), "Other" if none
+	  selected — 1 if the candidate got past THIS round. A panel member is
+	             only credited for the round they sat on (a Leader-round
+	             panelist no longer shows Functional-round selections).
+	             "Got past" = Select status for the round, a status from a
+	             later round / offer stage, or an interview in a later round.
+	  _state   — state of the job applied for (job_state)
 	"""
 	frappe.has_permission("Field Interview Schedule", "read", throw=True)
-	return frappe.db.sql(
+	rows = frappe.db.sql(
 		"""
 		select
 			s.name, s.application_id, s.applicants_name, s.interview_round, s.interview_date,
 			s.role as fis_role, s.department as fis_department, s.location as fis_location,
 			c.interviewer_email as interviewer, l.interviewer_name,
-			f.application_status, f.role, f.department, f.location, f.native_state,
-			f.date_of_final_round
+			f.name as frf, f.application_status, f.role, f.department, f.location, f.job_title,
+			f.date_of_functional_round, f.date_of_final_round
 		from `tabField Interview Schedule` s
 		left join `tabInterviewer Email Child` c
 			on c.parent = s.name and c.parenttype = 'Field Interview Schedule'
@@ -426,3 +751,155 @@ def get_interviewer_data(from_date, to_date):
 		{"from_date": from_date, "to_date": to_date},
 		as_dict=True,
 	)
+	jo = _job_opening_locations()
+
+	# Furthest round each candidate is known to have passed: their status,
+	# the round dates on the form, and any later-round interview.
+	fis = interview_dates_by_candidate()
+	passed = {}
+	for r in rows:
+		app = r.application_id or r.name
+		if app in passed:
+			continue
+		p = passed_rank(r.application_status)
+		if r.date_of_final_round:
+			p = max(p, 3)
+		elif r.date_of_functional_round:
+			p = max(p, 1)
+		for rnd in (fis.get(r.application_id) or {}):
+			p = max(p, ROUND_RANK[rnd] - 1)
+		passed[app] = p
+
+	for r in rows:
+		r["round"] = canon_round(r.interview_round) or "Other"
+		rank = ROUND_RANK.get(r["round"])
+		r["selected"] = 1 if rank and passed[r.application_id or r.name] >= rank else 0
+		r["_state"] = (job_state(r.location, jo.get(r.job_title)) if r.frf
+			else job_state(r.fis_location))
+	return {"rows": rows, "rounds": [w[0] for w in WORKFLOW_ROUNDS]}
+
+
+# ── Cycle Time ────────────────────────────────────────────────────────────
+# Stage dates per candidate. Field Registration Form only stores the
+# Applied / Recruiter / Functional / Final round dates (often blank), and
+# no Written test or Offer date at all, so each stage takes the first of:
+#   1. the date field on the form (when there is one)
+#   2. the interview date on Field Interview Schedule for that round
+#   3. the day the Application Status first moved into that stage's
+#      result statuses (Version history + Field Application Status Log)
+_CT_STATUS_STAGE = {"Test Select": "test", "Test Reject": "test", "Test Hold": "test"}
+for _n, _sel, _rej, _rk in WORKFLOW_ROUNDS:
+	_stage = "recruiter" if _rk == 1 else ("ec" if _rk == 2 else ("final" if _rk >= 4 else None))
+	if _stage:
+		_CT_STATUS_STAGE[_sel] = _CT_STATUS_STAGE[_rej] = _stage
+for _st in _OFFER_ROWS[7:]:  # Offer and everything after it
+	_CT_STATUS_STAGE[_st] = "offer"
+_VERSION_STATUS_RE = re.compile(r'\["application_status",\s*"[^"]*",\s*"([^"]*)"\]')
+
+
+def _status_change_dates(since, until):
+	"""{frf name: {stage: date}} — earliest status change into each stage
+	(latest for "final", the last leader round) between since and until."""
+	out = {}
+
+	def add(name, status, d):
+		stage = _CT_STATUS_STAGE.get((status or "").strip())
+		if not stage or not d:
+			return
+		d = str(d)[:10]
+		cur = out.setdefault(name, {})
+		old = cur.get(stage)
+		if not old or (d > old if stage == "final" else d < old):
+			cur[stage] = d
+
+	for v in frappe.db.sql(
+		"""select docname, data, creation from `tabVersion`
+		where ref_doctype = 'Field Registration Form' and creation between %s and %s
+			and data like %s""",
+		(since, until + " 23:59:59", '%"application_status"%'),
+		as_dict=True,
+	):
+		for status in _VERSION_STATUS_RE.findall(v.data or ""):
+			add(v.docname, status, v.creation)
+	if frappe.db.table_exists("Field Application Status Log"):
+		for lg in frappe.db.sql(
+			"""select parent, application_status, changed_on from `tabField Application Status Log`
+			where parenttype = 'Field Registration Form' and changed_on between %s and %s""",
+			(since, until + " 23:59:59"),
+			as_dict=True,
+		):
+			add(lg.parent, lg.application_status, lg.changed_on)
+	return out
+
+
+@frappe.whitelist()
+def get_cycle_time_data(from_date, to_date):
+	"""Candidates with at least one stage date in from_date..to_date (a
+	financial year), each with `d` = {applied, test, recruiter, ec, final,
+	offer} as 'YYYY-MM-DD' (missing stages left out) and `_state`."""
+	frappe.has_permission("Field Registration Form", "read", throw=True)
+	fy_from, fy_to = str(getdate(from_date)), str(getdate(to_date))
+	# Look back a year so a stage that started before the FY (e.g. the
+	# application) is still found for a transition that ended inside it.
+	since = str(getdate(from_date) - timedelta(days=366))
+
+	changes = _status_change_dates(since, fy_to)
+	fis = {}
+	for r in frappe.db.sql(
+		"""select application_id, interview_round, min(interview_date) first_d, max(interview_date) last_d
+		from `tabField Interview Schedule`
+		where ifnull(is_cancelled, 0) = 0 and ifnull(application_id, '') != ''
+			and interview_date between %s and least(%s, curdate())
+		group by application_id, interview_round""",
+		(since, fy_to),
+		as_dict=True,
+	):
+		rank = ROUND_RANK.get(canon_round(r.interview_round))
+		stage = "recruiter" if rank == 1 else ("ec" if rank == 2 else ("final" if rank and rank >= 4 else None))
+		if not stage:
+			continue
+		cur = fis.setdefault(r.application_id, {})
+		d = str(r.last_d if stage == "final" else r.first_d)
+		old = cur.get(stage)
+		if not old or (d > old if stage == "final" else d < old):
+			cur[stage] = d
+
+	names = set(changes) | set(fis)
+	names.update(frappe.db.sql_list(
+		"""select name from `tabField Registration Form`
+		where date_of_recruiter_round between %(f)s and %(t)s
+			or date_of_functional_round between %(f)s and %(t)s
+			or date_of_final_round between %(f)s and %(t)s""",
+		{"f": fy_from, "t": fy_to},
+	))
+
+	jo = _job_opening_locations()
+	out = []
+	names = list(names)
+	for i in range(0, len(names), 5000):
+		for r in frappe.get_all(
+			"Field Registration Form",
+			filters={"name": ["in", names[i:i + 5000]]},
+			fields=["name", "full_name_aadhaar", "application_status", "role", "department", "location",
+				"job_title", "date_of_applied", "application_date", "creation", "date_of_recruiter_round",
+				"date_of_functional_round", "date_of_final_round"],
+		):
+			ch, iv = changes.get(r.name, {}), fis.get(r.name, {})
+			d = {
+				"applied": r.date_of_applied or r.application_date or r.creation,
+				"test": ch.get("test"),
+				"recruiter": r.date_of_recruiter_round or iv.get("recruiter") or ch.get("recruiter"),
+				"ec": r.date_of_functional_round or iv.get("ec") or ch.get("ec"),
+				"final": r.date_of_final_round or iv.get("final") or ch.get("final"),
+				"offer": ch.get("offer"),
+			}
+			d = {k: str(v)[:10] for k, v in d.items() if v}
+			if not any(fy_from <= v <= fy_to for k, v in d.items() if k != "applied"):
+				continue
+			out.append({
+				"name": r.name, "full_name_aadhaar": r.full_name_aadhaar,
+				"application_status": r.application_status, "role": r.role,
+				"department": r.department, "location": r.location, "job_title": r.job_title,
+				"_state": job_state(r.location, jo.get(r.job_title)), "d": d,
+			})
+	return out

@@ -447,6 +447,12 @@ doc_events = {
             "ms_calendar.api.otp.enforce_otp_verification",
         ],
     },
+    # Scheduling an interview moves the candidate to "<round> Scheduled"
+    # (CV Shortlist / Test Select go straight to the Recruiter Round).
+    "Field Interview Schedule": {
+        "validate": "ms_calendar.api.ms_field.set_field_interview_round",
+        "after_insert": "ms_calendar.api.ms_field.move_field_status_to_scheduled",
+    },
     "Phil Registration Form": {
         "validate": [
             "ms_calendar.api.ms_field.check_registration_duplicate_on_save",
@@ -684,12 +690,21 @@ fixtures = [
 # differs from a normal (non-custom) doctype like "Job Opening" below.
 doctype_js = {
     "Job Opening": "public/js/job_opening.js",
+    # Scholarship "Interview Schedule" is a normal DocType here (its own
+    # interview_schedule.js loads by itself) but a Custom DocType on live,
+    # where this file is the Client Script "Interview Schedule Theme".
+    "Interview Schedule": "public/js/interview_schedule_theme.js",
 }
 doctype_list_js = {
     "Field Registration Form": "public/js/frf_list.js",
+    # On live: List Client Script "Interview Schedule List View".
+    "Interview Schedule": "public/js/interview_schedule_list.js",
     "Phil Registration Form": "public/js/phil_registration_form_list.js",
     "Scholarship Recruitment Form": "public/js/scholarship_recruitment_form_list.js",
     "Applicant Master": "public/js/applicant_master_list.js",
+    # On live: List Client Script "Job Opening List View" (loading both is
+    # harmless — the file wraps the list settings only once).
+    "Job Opening": "public/js/job_opening_list.js",
 }
 app_include_js = [
     # frf_list.js carries a manual "?v=" cache-buster: this file has no
