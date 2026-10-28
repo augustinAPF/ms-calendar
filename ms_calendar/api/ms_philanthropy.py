@@ -5,6 +5,15 @@ from frappe.utils import get_url, formatdate, format_time, get_datetime
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
+# Field's panel-feedback helpers (one feedback link per invite, personal
+# links in reminders, candidate kept off panel emails) — shared with Philanthropy.
+from ms_calendar.api.ms_field import (
+    _field_panel_feedback_block,
+    _field_panelist_names,
+    _field_personal_feedback_url,
+    _field_without_candidate,
+)
+
 # @frappe.whitelist()
 # def create_interview_event(
 #     start_datetime,
@@ -386,6 +395,18 @@ def _logo_html():
     with open(logo_path, "rb") as f:
         logo_base64 = base64.b64encode(f.read()).decode("utf-8")
     return f'<img src="data:image/png;base64,{logo_base64}" style="height:48px;">'
+
+
+def _phil_feedback_url(application_id, applicants_name, role):
+    """The Philanthrophy Feedback Form web form on this site, applicant and
+    role filled in from the link (public/js/feedback_form_draft.js adds the
+    Save draft and the "Who is filling this feedback?" picker)."""
+    return get_url(
+        "/philanthrophy-feedback-form/new"
+        f"?app_id={quote(str(application_id or ''), safe='')}"
+        f"&applicant_name={quote(str(applicants_name or ''), safe='')}"
+        f"&role={quote(str(role or ''), safe='')}"
+    )
 
 
 def _theme_geo_subline(theme, geo):
@@ -1077,6 +1098,11 @@ def create_interview_event(
     hybrid_list = _hybrid_interviewer_list(
         interview_mode, hybrid_interviewer_emails, interviewer_list
     )
+    # The panel invite carries the feedback link — never the candidate, even
+    # if their address was also typed into a panel/CC list.
+    interviewer_list = _field_without_candidate(interviewer_list, interviewee_email)
+    hybrid_list = _field_without_candidate(hybrid_list, interviewee_email)
+    cc_emails = ",".join(_field_without_candidate((cc_emails or "").split(","), interviewee_email))
     online_names = (
         (HybridInterviewersName or ", ".join(hybrid_list)) if hybrid_list else ""
     )
@@ -1156,9 +1182,9 @@ def create_interview_event(
     logo_html = _logo_html()
 
     # ---- EMAIL BODY PARTS ----
-    feedback_url = get_url(
-        f"/philanthrophy-feedback-form/new"
-        f"?app_id={application_id}&applicant_name={Applicants_name}&role={Applicants_Role}"
+    feedback_html = _field_panel_feedback_block(
+        _phil_feedback_url(application_id, Applicants_name, Applicants_Role),
+        interviewer_list + hybrid_list,
     )
 
     meeting_room_html = (
@@ -1201,8 +1227,7 @@ def create_interview_event(
     {details_mode_html}
     </div>
     {after_details_html}
-    <p><strong>Feedback form:</strong>
-    <a href="{feedback_url}" target="_blank">Click here</a></p>
+    {feedback_html}
     {note_html}
     <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
     {logo_html}
@@ -1356,6 +1381,11 @@ def update_interview_event(
     hybrid_list = _hybrid_interviewer_list(
         interview_mode, hybrid_interviewer_emails, interviewer_list
     )
+    # The panel invite carries the feedback link — never the candidate, even
+    # if their address was also typed into a panel/CC list.
+    interviewer_list = _field_without_candidate(interviewer_list, interviewee_email)
+    hybrid_list = _field_without_candidate(hybrid_list, interviewee_email)
+    cc_emails = ",".join(_field_without_candidate((cc_emails or "").split(","), interviewee_email))
     online_names = (
         (HybridInterviewersName or ", ".join(hybrid_list)) if hybrid_list else ""
     )
@@ -1482,9 +1512,9 @@ def update_interview_event(
     # a reschedule without it left anyone whose interview got rescheduled
     # (common) with no working feedback link until the next-day reminder
     # job (send_interviewer_feedback_reminders) eventually caught it.
-    feedback_url = get_url(
-        f"/philanthrophy-feedback-form/new"
-        f"?app_id={application_id}&applicant_name={Applicants_name}&role={Applicants_Role}"
+    feedback_html = _field_panel_feedback_block(
+        _phil_feedback_url(application_id, Applicants_name, Applicants_Role),
+        interviewer_list + hybrid_list,
     )
 
     # One invite for the whole panel — see create_interview_event.
@@ -1511,8 +1541,7 @@ def update_interview_event(
     {details_mode_html}
     </div>
     {after_details_html}
-    <p><strong>Feedback form:</strong>
-    <a href="{feedback_url}" target="_blank">Click here</a></p>
+    {feedback_html}
     <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
     {logo_html}
     """
@@ -1809,27 +1838,50 @@ def _pending_feedback_interviewers(schedule_name, application_id):
     Hybrid Interview Email group) who haven't submitted a Philanthrophy
     Feedback Form for this applicant yet. Returns (all_emails, pending)."""
     doc = frappe.get_doc("Philanthropy Interview Schedule", schedule_name)
-    interviewer_emails = _schedule_interviewer_emails(doc)
+    # Panel only — never the candidate (attendees).
+    interviewer_emails = _field_without_candidate(
+        _schedule_interviewer_emails(doc), doc.get("attendees")
+    )
     if not interviewer_emails:
         return [], []
 
-    submitted_emails = {
-        (e or "").strip().lower()
-        for e in frappe.get_all(
-            "Philanthrophy Feedback Form",
-            filters={"applicant_id": application_id},
-            pluck="email",
-        )
-    }
+    names = _field_panelist_names(interviewer_emails)
+    submitted_emails = set()
+    for fb in frappe.get_all(
+        "Philanthrophy Feedback Form",
+        # This interview's feedback only, not an earlier round's.
+        filters={"applicant_id": application_id, "creation": [">=", doc.creation]},
+        fields=["email", "owner", "interviewer_name"],
+    ):
+        submitted_emails |= _feedback_panel_emails(fb, interviewer_emails, names)
     pending = [e for e in interviewer_emails if e not in submitted_emails]
     return interviewer_emails, pending
 
 
+def _feedback_panel_emails(fb, panel_emails, names):
+    """Which panel members a Philanthrophy Feedback Form was submitted for.
+    The web form's "email" field is hidden on the live site and always holds
+    the default grants.recruitment@ address, so it rarely says who
+    submitted. Tried in order: a real panel email in "email", the logged-in
+    owner, then the name(s) in interviewer_name — the form's "Who is filling
+    this feedback?" picker fills the exact Interviewer Email List name, and
+    Consolidated fills every member's name, comma-separated."""
+    email = (fb.get("email") or "").strip().lower()
+    if email in panel_emails:
+        return {email}
+    owner = (fb.get("owner") or "").strip().lower()
+    if owner in panel_emails:
+        return {owner}
+    typed = {
+        n.strip().lower()
+        for n in re.split(r"[,;&/]|\band\b", fb.get("interviewer_name") or "")
+        if n.strip()
+    }
+    return {e for e in panel_emails if (names.get(e) or "").strip().lower() in typed}
+
+
 def _send_feedback_reminder(s, pending_emails, error_title):
-    feedback_url = get_url(
-        f"/philanthrophy-feedback-form/new"
-        f"?app_id={s.application_id}&applicant_name={s.applicants_name}&role={s.role or ''}"
-    )
+    feedback_url = _phil_feedback_url(s.application_id, s.applicants_name, s.role)
     reminder_body = f"""
     <p>Hi,</p>
     <p>This is a reminder that the interview with <b>{s.applicants_name}</b>
@@ -1837,6 +1889,8 @@ def _send_feedback_reminder(s, pending_emails, error_title):
     is still pending.</p>
     <p><strong>Feedback form:</strong>
     <a href="{feedback_url}" target="_blank">Click here</a></p>
+    <p>You can click <b>Save</b> on the form to keep a draft and finish it
+    later; your feedback is recorded only when you click <b>Submit</b>.</p>
     <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
     """
 
@@ -1846,12 +1900,18 @@ def _send_feedback_reminder(s, pending_emails, error_title):
     ):
         sender_arg = {"sender": s.organizer_email}
 
+    names = _field_panelist_names(pending_emails)
     for email in pending_emails:
+        # Each interviewer's own link — the form opens with their name filled
+        # in and their saved draft loaded.
+        body = reminder_body.replace(
+            feedback_url, _field_personal_feedback_url(feedback_url, email, names.get(email, ""))
+        )
         try:
             frappe.sendmail(
                 recipients=[email],
                 subject=f"Reminder: Interview Feedback Pending – {s.applicants_name}",
-                message=reminder_body,
+                message=body,
                 delayed=False,
                 reference_doctype="Philanthropy Interview Schedule",
                 reference_name=s.name,
@@ -2107,17 +2167,19 @@ def _schedule_interviewer_emails(schedule):
     return [e for e in dict.fromkeys(emails) if e]
 
 
-def _find_schedule_for_feedback(applicant_id, submitter_email):
+def _find_schedule_for_feedback(feedback_doc):
     """The interview this feedback belongs to: the most recent scheduled
-    (not cancelled) interview for the applicant that the submitter was an
-    interviewer on. Falls back to the applicant's most recent scheduled
-    interview if the submitter typed an email that isn't on any of them."""
+    (not cancelled) interview for the applicant that the submitter was on
+    the panel of (_feedback_panel_emails). Falls back to the applicant's
+    most recent scheduled interview."""
     names = frappe.get_all(
         "Philanthropy Interview Schedule",
         filters={
-            "application_id": applicant_id,
+            "application_id": feedback_doc.applicant_id,
             "is_cancelled": 0,
             "event_id": ["is", "set"],
+            # An interview scheduled after this feedback can't be its interview.
+            "creation": ["<=", feedback_doc.creation or frappe.utils.now_datetime()],
         },
         order_by="interview_date desc, start_time desc, creation desc",
         pluck="name",
@@ -2126,7 +2188,8 @@ def _find_schedule_for_feedback(applicant_id, submitter_email):
         return None
     for name in names:
         schedule = frappe.get_doc("Philanthropy Interview Schedule", name)
-        if submitter_email in _schedule_interviewer_emails(schedule):
+        panel = _schedule_interviewer_emails(schedule)
+        if _feedback_panel_emails(feedback_doc, panel, _field_panelist_names(panel)):
             return schedule
     return frappe.get_doc("Philanthropy Interview Schedule", names[0])
 
@@ -2147,24 +2210,26 @@ def send_feedback_submitted_email(feedback_doc):
     """
     from frappe.core.doctype.communication.email import _make as make_communication
 
-    submitter_email = (feedback_doc.email or "").strip().lower()
-    schedule = _find_schedule_for_feedback(feedback_doc.applicant_id, submitter_email)
+    schedule = _find_schedule_for_feedback(feedback_doc)
     if not schedule:
         return
 
-    interviewer_emails = _schedule_interviewer_emails(schedule)
-    recipients = list(
-        dict.fromkeys(
-            interviewer_emails + ([submitter_email] if submitter_email else [])
-        )
+    # Panel only — never the candidate (attendees). The form's own "email"
+    # (the hidden grants.recruitment@ default) isn't a panel member.
+    interviewer_emails = _field_without_candidate(
+        _schedule_interviewer_emails(schedule), schedule.get("attendees")
     )
+    recipients = list(interviewer_emails)
     if not recipients:
         return
-    cc_list = [
-        (r.interviewer_email or "").strip().lower()
-        for r in (schedule.interviewers_cc_email or [])
-        if r.interviewer_email
-    ]
+    cc_list = _field_without_candidate(
+        [
+            (r.interviewer_email or "").strip().lower()
+            for r in (schedule.interviewers_cc_email or [])
+            if r.interviewer_email
+        ],
+        schedule.get("attendees"),
+    )
     cc_list = [c for c in dict.fromkeys(cc_list) if c not in recipients]
 
     # All feedback for THIS interview so far: submitted by one of its
@@ -2180,6 +2245,7 @@ def send_feedback_submitted_email(feedback_doc):
             "name",
             "interviewer_name",
             "email",
+            "owner",
             "application_status",
             "interview_status",
             "feedback_date",
@@ -2187,24 +2253,21 @@ def send_feedback_submitted_email(feedback_doc):
         ],
         order_by="creation asc",
     )
-    feedbacks = [
-        f
-        for f in feedbacks
-        if (f.email or "").strip().lower() in recipients or f.name == feedback_doc.name
-    ]
 
-    names = {}
-    for e in recipients:
-        names[e] = (
-            frappe.db.get_value("Interviewer Email List", e, "interviewer_name") or e
-        )
+    known = _field_panelist_names(recipients)
+    names = {e: known.get(e) or e for e in recipients}
+
+    # Feedback from this interview's panel (matched by email / owner / name,
+    # see _feedback_panel_emails) plus the one just submitted.
+    covers = {f.name: _feedback_panel_emails(f, interviewer_emails, known) for f in feedbacks}
+    feedbacks = [f for f in feedbacks if covers[f.name] or f.name == feedback_doc.name]
 
     submitter_name = (
         (feedback_doc.interviewer_name or "").strip()
-        or names.get(submitter_email)
-        or submitter_email
+        or ", ".join(names[e] for e in covers.get(feedback_doc.name, ()))
+        or "An interviewer"
     )
-    submitted = {(f.email or "").strip().lower() for f in feedbacks}
+    submitted = set().union(*covers.values()) if covers else set()
     pending = [names[e] for e in interviewer_emails if e not in submitted]
 
     applicant_name = (
@@ -2235,8 +2298,8 @@ def send_feedback_submitted_email(feedback_doc):
         is_new = f.name == feedback_doc.name
         cards += f"""
         <div style="border:1px solid {'#1e3a8a' if is_new else '#e3e3e3'};border-radius:10px;padding:14px;background:#f9fafb;margin-bottom:12px;">
-        <p><strong>Interviewer:</strong> {f.interviewer_name or names.get((f.email or '').strip().lower(), f.email)}{' <em>(new)</em>' if is_new else ''}</p>
-        <p><strong>Email:</strong> {(f.email or '').strip()}</p>
+        <p><strong>Interviewer:</strong> {f.interviewer_name or ', '.join(names[e] for e in covers.get(f.name, ())) or '-'}{' <em>(new)</em>' if is_new else ''}</p>
+        {f"<p><strong>Email:</strong> {', '.join(sorted(covers[f.name]))}</p>" if covers.get(f.name) else ''}
         <p><strong>Round:</strong> {f.application_status or ''}</p>
         <p><strong>Interview Status:</strong> {f.interview_status or ''}</p>
         <p><strong>Date:</strong> {formatdate(f.feedback_date, 'dd MMMM yyyy') if f.feedback_date else ''}</p>

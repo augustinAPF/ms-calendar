@@ -1,6 +1,6 @@
-// Save-as-draft for the Field interview feedback web forms (loaded on every
-// website page via hooks.py web_include_js; does nothing except on the
-// feedback doctypes below).
+// Save-as-draft for the Field, Health and Scholarship interview feedback web
+// forms (loaded on every website page via hooks.py web_include_js; does
+// nothing except on the feedback doctypes below).
 //
 // - "Save" keeps the answers in THIS browser only (localStorage) — nothing
 //   is sent to the server, so no feedback record / Registration Form PDF is
@@ -16,9 +16,22 @@
 //   (the reminder emails), the panelist fields are filled straight away.
 //
 // Keep FEEDBACK_DOCTYPES in sync with ms_field.FIELD_FEEDBACK_ROUND_MAP
-// (plus Calibration Process, the ARP calibration link in ms_field).
+// (plus Calibration Process, the ARP calibration link in ms_field),
+// ms_health.ROUND_TO_FEEDBACK_DOCTYPE, msgraph.SCHOLARSHIP_FEEDBACK_DOCTYPES
+// and Philanthrophy Feedback Form.
 (function () {
 	const FEEDBACK_DOCTYPES = [
+		// Health (ms_health.ROUND_TO_FEEDBACK_DOCTYPE)
+		"Health Feedback Form one",
+		"Health FeedBack Form Two",
+		"Health Feedback Form Three",
+		"Health Center Visit Form",
+		// Philanthropy (ms_philanthropy._phil_feedback_url)
+		"Philanthrophy Feedback Form",
+		// Scholarship (msgraph.SCHOLARSHIP_FEEDBACK_DOCTYPES; two spaces in "Feedback  Form Two")
+		"Feedback Form One",
+		"Feedback  Form Two",
+		// Field
 		"Calibration Process",
 		"Recruiter Feedback Form",
 		"Recruiter Assessment Form",
@@ -34,8 +47,11 @@
 		"Final Feedback Field Enabler",
 	];
 	// Filled from the link / by the form's own script, never from a draft.
-	const NEVER_RESTORE = ["applicant_id", "applicant_name", "date_time", "application_status"];
-	const PANELIST_EMAIL_FIELDS = ["panelist_email", "panelist__email"];
+	const NEVER_RESTORE = ["applicant_id", "applicant_name", "date_time", "application_status", "department", "role"];
+	// The panelist's name / email field, named differently per form
+	// (Health: panal_name / panelist_name; Scholarship: interviewer_name).
+	const PANELIST_NAME_FIELDS = ["panelist_name", "panal_name", "interviewer_name"];
+	const PANELIST_EMAIL_FIELDS = ["panelist_email", "panelist__email", "interviewer_email"];
 	const DRAFT_PREFIX = "apf_feedback_draft::";
 	const DRAFT_MAX_AGE_DAYS = 30;
 	// The cloud web forms' own client scripts set applicant_id/name at 500 ms.
@@ -49,6 +65,8 @@
 	// Panel member picked on the form (one link for the whole panel, see
 	// panel_list); a personal link's panelist_email/name win over it.
 	let chosen = null;
+	// The buttons on the "Who is filling this feedback?" card.
+	let pick_choices = [];
 
 	// ?panel= (ms_field._field_panel_feedback_block): base64url JSON
 	// [[email, name], …] of the interview's panel members.
@@ -142,7 +160,7 @@
 		const skip = NEVER_RESTORE.slice();
 		// Panelist fields from the link / the picked name win over a draft.
 		const p = panelist();
-		if (p.name) skip.push("panelist_name");
+		if (p.name) skip.push(...PANELIST_NAME_FIELDS);
 		if (p.email) skip.push(...PANELIST_EMAIL_FIELDS);
 		if (chosen && type_field()) skip.push(type_field());
 		return skip;
@@ -221,14 +239,10 @@
 			if ($(this).siblings(".apf-save-draft-btn").length) return;
 			// v16's default label is also "Save" — the real button must read Submit.
 			$(this).text(__("Submit"));
+			// Clicks are handled in on_click_capture.
 			$(
 				`<button type="button" class="apf-save-draft-btn btn btn-default btn-sm ml-2">${__("Save")}</button>`
-			)
-				.insertBefore(this)
-				.on("click", (e) => {
-					e.preventDefault();
-					save_draft(true);
-				});
+			).insertBefore(this);
 		});
 		$(".web-form-footer .left-area").each(function () {
 			if (!$(this).find(".apf-draft-status").length) {
@@ -270,6 +284,7 @@
 		// that feedback type: one feedback on behalf of the whole panel.
 		const choices = panel.slice();
 		if (type_field()) choices.push(consolidated(panel));
+		pick_choices = choices;
 		const $pick = $(`
 			<div class="apf-panel-pick" style="border:1px solid var(--border-color,#d1d5db);border-left:4px solid #1d4ed8;
 				border-radius:6px;padding:12px 14px;margin-bottom:16px;">
@@ -282,22 +297,49 @@
 					${__("Your name and email are filled in, and your saved draft (if any) is loaded.")}
 					${type_field() ? __("Consolidated is one feedback for the whole panel.") : ""}</div>
 			</div>`);
-		$pick.on("click", ".apf-pick", (e) => {
-			chosen = choices[+e.currentTarget.getAttribute("data-i")];
-			$pick.remove();
-			start_filling();
-			const who = chosen.consolidated ? `${chosen.label} — ${chosen.name}` : chosen.name || chosen.email;
-			const $who = $(`<div class="apf-panel-who text-muted small" style="margin-bottom:12px;">
-				${__("Filling as {0}", [`<b>${esc(who)}</b>`])} ·
-				<a href="#" class="apf-not-me">${__("Change")}</a></div>`);
-			// Your answers so far are kept as your draft; the page reopens the choice.
-			$who.find(".apf-not-me").on("click", (ev) => {
-				ev.preventDefault();
-				window.location.reload();
-			});
-			$(".web-form-wrapper").first().before($who);
-		});
+		// Clicks are handled in on_click_capture → pick().
 		$(".web-form-wrapper").first().before($pick);
+	}
+
+	function pick(i) {
+		const esc = (v) => frappe.utils.escape_html(v || "");
+		chosen = pick_choices[i];
+		if (!chosen) return;
+		$(".apf-panel-pick").remove();
+		start_filling();
+		const who = chosen.consolidated ? `${chosen.label} — ${chosen.name}` : chosen.name || chosen.email;
+		const $who = $(`<div class="apf-panel-who text-muted small" style="margin-bottom:12px;">
+			${__("Filling as {0}", [`<b>${esc(who)}</b>`])} ·
+			<a href="#" class="apf-not-me">${__("Change")}</a></div>`);
+		// Your answers so far are kept as your draft; the page reopens the choice.
+		$who.find(".apf-not-me").on("click", (ev) => {
+			ev.preventDefault();
+			window.location.reload();
+		});
+		$(".web-form-wrapper").first().before($who);
+	}
+
+	// Our buttons are handled here, in the window's capture phase, before any
+	// other click listener sees them. The Health web forms on the live site
+	// have their own "Saving your feedback…" guard (a document capture
+	// listener) that treats any Save / Submit / primary button as Submit and
+	// shows its popup — so Save and the name buttons stop here, and so does
+	// a Submit while no panel member has been picked.
+	function on_click_capture(e) {
+		const el = e.target && e.target.closest && e.target.closest(
+			".apf-save-draft-btn, .apf-pick, .web-form-footer .submit-btn"
+		);
+		if (!el) return;
+		if (el.classList.contains("submit-btn")) {
+			if (!picking()) return; // a real Submit — let it through
+			ask_to_pick();
+		} else if (el.classList.contains("apf-pick")) {
+			pick(+el.getAttribute("data-i"));
+		} else {
+			save_draft(true);
+		}
+		e.preventDefault();
+		e.stopPropagation();
 	}
 
 	function ask_to_pick() {
@@ -331,10 +373,12 @@
 		const { email, name } = panelist();
 		const values = {};
 		// Most forms' own scripts set these from the link; some (the Enablers
-		// Functional/Final forms) have no script, so fill whatever is still empty.
+		// Functional/Final forms) have no script, and the Philanthropy form's
+		// leaves Role out, so fill whatever is still empty.
 		[
 			["applicant_id", params.get("app_id") || params.get("applicant_id")],
 			["applicant_name", params.get("applicant_name")],
+			["role", params.get("role")],
 		].forEach(([f, v]) => {
 			if (v && wf.fields_dict[f] && !wf.get_value(f)) values[f] = v.trim();
 		});
@@ -343,7 +387,11 @@
 				if (wf.fields_dict[f]) values[f] = email;
 			});
 		}
-		if (name && wf.fields_dict.panelist_name) values.panelist_name = name;
+		if (name) {
+			PANELIST_NAME_FIELDS.forEach((f) => {
+				if (wf.fields_dict[f]) values[f] = name;
+			});
+		}
 		// Picked on the form: the feedback type follows the choice.
 		const tf = type_field();
 		if (chosen && tf) values[tf] = chosen.consolidated ? "Consolidated" : "Individual";
@@ -418,7 +466,9 @@
 			PANELIST_EMAIL_FIELDS.forEach((f) => {
 				if (wf.fields_dict[f] && !values[f]) values[f] = by.email;
 			});
-			if (by.name && wf.fields_dict.panelist_name && !values.panelist_name) values.panelist_name = by.name;
+			PANELIST_NAME_FIELDS.forEach((f) => {
+				if (by.name && wf.fields_dict[f] && !values[f]) values[f] = by.name;
+			});
 		}
 		if (!Object.keys(values).length) return Promise.resolve();
 		return wf.set_values(values).then(() => {
@@ -465,6 +515,7 @@
 		draft_key = make_key();
 
 		purge_old_drafts();
+		window.addEventListener("click", on_click_capture, true);
 		add_buttons();
 		hook_form();
 

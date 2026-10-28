@@ -1099,6 +1099,74 @@ def _field_panel_feedback_block(feedback_url, panel_emails):
     )
 
 
+# ── Feedback reminders logged on the schedule (Health / Scholarship) ────────
+# Health and Scholarship interview schedules have no first_reminder_sent
+# field, so their "feedback pending" reminders are sent as Communications on
+# the schedule: they show on its timeline, and the next run sees one was
+# already sent.
+
+FEEDBACK_REMINDER_SUBJECT = "Reminder: Interview Feedback Pending"
+
+
+def _feedback_reminder_sent_since(doctype, name, since):
+    return frappe.db.exists(
+        "Communication",
+        {
+            "reference_doctype": doctype,
+            "reference_name": name,
+            "subject": ["like", f"{FEEDBACK_REMINDER_SUBJECT}%"],
+            "creation": [">=", since],
+        },
+    )
+
+
+def _send_panel_feedback_reminders(doctype, name, emails, subject, body, feedback_url, sender=None):
+    """One email per panel member, each with their own feedback link (same
+    link as the invite, see _field_panel_feedback_block)."""
+    from frappe.core.doctype.communication.email import _make as make_communication
+
+    names = _field_panelist_names(emails)
+    for email in emails:
+        own_body = (
+            body.replace(
+                feedback_url,
+                _field_personal_feedback_url(feedback_url, email, names.get(email.strip().lower(), "")),
+            )
+            if feedback_url
+            else body
+        )
+        try:
+            make_communication(
+                doctype=doctype,
+                name=name,
+                content=own_body,
+                subject=subject,
+                sender=sender,
+                recipients=[email],
+                send_email=True,
+                add_signature=False,
+            )
+        except Exception:
+            frappe.log_error(
+                title=f"{doctype} Feedback Reminder Error",
+                message=f"{name} → {email}: {frappe.get_traceback()[:2000]}",
+            )
+
+
+def _outgoing_sender(organizer_email):
+    """The organizer's mailbox if it's set up as an outgoing Email Account,
+    else the default outgoing account — never the session user, which for
+    the public feedback web forms is Guest and for scheduled jobs is
+    Administrator."""
+    if organizer_email and frappe.db.exists(
+        "Email Account", {"email_id": organizer_email, "enable_outgoing": 1}
+    ):
+        return organizer_email
+    return frappe.db.get_value(
+        "Email Account", {"default_outgoing": 1, "enable_outgoing": 1}, "email_id"
+    )
+
+
 def _field_auto_attach_fields(interview_round, applicant_role, department=None):
     """
     Field Registration Form attach fields auto-attached to a Field

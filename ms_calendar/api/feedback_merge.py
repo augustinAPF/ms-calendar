@@ -148,10 +148,37 @@ def on_feedback_form_submitted(doc, method=None):
     """
     if not doc.applicant_id:
         return
+    # PDF + email run in a background job, so Submit on the web form returns
+    # at once instead of waiting for them.
+    frappe.enqueue(
+        "ms_calendar.api.feedback_merge._after_feedback_form_submitted_job",
+        queue="short",
+        enqueue_after_commit=True,
+        docname=doc.name,
+    )
+
+
+def _after_feedback_form_submitted_job(docname):
+    doc = frappe.get_doc("Philanthrophy Feedback Form", docname)
     try:
         _build_feedback_pdf(doc.applicant_id)
+        frappe.db.commit()
     except Exception:
+        frappe.db.rollback()
         frappe.log_error(
             title="Feedback PDF Auto-Generate Error",
+            message=f"Philanthrophy Feedback Form {doc.name} ({doc.applicant_id}): {frappe.get_traceback()}",
+        )
+
+    # Tell every interviewer of this interview that feedback was submitted
+    # (later submissions reply in the same email thread). Best-effort too.
+    try:
+        from ms_calendar.api.ms_philanthropy import send_feedback_submitted_email
+
+        send_feedback_submitted_email(doc)
+        frappe.db.commit()
+    except Exception:
+        frappe.log_error(
+            title="Feedback Submitted Email Error",
             message=f"Philanthrophy Feedback Form {doc.name} ({doc.applicant_id}): {frappe.get_traceback()}",
         )

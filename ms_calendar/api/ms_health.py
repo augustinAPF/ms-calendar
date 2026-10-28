@@ -13,6 +13,17 @@ from ms_calendar.api.msgraph import (
     _interview_schedule_hybrid_panel_html,
     _interview_schedule_map_html,
 )
+# Field's panel-feedback helpers (one feedback link per invite, personal
+# links in reminders, candidate kept off panel emails) — shared with Health.
+from ms_calendar.api.ms_field import (
+    FEEDBACK_REMINDER_SUBJECT,
+    _feedback_reminder_sent_since,
+    _field_panelist_names,
+    _field_personal_feedback_url,
+    _field_without_candidate,
+    _outgoing_sender,
+    _send_panel_feedback_reminders,
+)
 
 # Health Interview Schedule's "Application ID" (application_id) Link always
 # points to Health Registration Form now — Health Application Form (this
@@ -190,10 +201,20 @@ def _health_feedback_url(interview_round, application_id, applicants_name, role=
     comes from depends on the applicant's Role (see _resolve_sub_unit) —
     with application_id/applicants_name pre-filled as query params (same
     pattern as every other feedback-form link already sent from this app,
-    e.g. ms_philanthropy.py's feedback_url)."""
+    e.g. ms_philanthropy.py's feedback_url).
+
+    `app_id` (not `applicant_id`): the Health web forms' own scripts only
+    read app_id. Local / UAT get their own host (_field_feedback_site_url)."""
+    from urllib.parse import quote
+
+    from ms_calendar.api.ms_field import _field_feedback_site_url
+
     table = FEEDBACK_FORM_URLS[_resolve_sub_unit(role)]
     base_url = table[_health_feedback_round(interview_round, role)]
-    return f"{base_url}?applicant_id={application_id}&applicant_name={applicants_name}"
+    return _field_feedback_site_url(
+        f"{base_url}?app_id={quote(str(application_id or ''), safe='')}"
+        f"&applicant_name={quote(str(applicants_name or ''), safe='')}"
+    )
 
 
 def _document_attachment_paths(application_id):
@@ -222,9 +243,15 @@ def _document_attachment_paths(application_id):
     return [v for v in values.values() if v]
 
 
-def _new_feedback_link_html(interview_round, application_id, applicants_name, role=None):
+def _new_feedback_link_html(interview_round, application_id, applicants_name, role=None, panel_emails=None):
+    """ONE feedback link for the whole panel, same as Field's invite
+    (ms_field._field_panel_feedback_block): one member → their own link,
+    several → the form asks "Who is filling this feedback?". The form keeps
+    a Save draft per member (public/js/feedback_form_draft.js)."""
+    from ms_calendar.api.ms_field import _field_panel_feedback_block
+
     url = _health_feedback_url(interview_round, application_id, applicants_name, role)
-    return f'<p style="margin:6px 0;">Feedback form to share your views: <a href="{url}" target="_blank">Click here</a></p>'
+    return _field_panel_feedback_block(url, panel_emails)
 
 
 def _coerce_is_online(value):
@@ -899,6 +926,11 @@ def create_interview_event(
     hybrid_list = _hybrid_interviewer_list(
         hybrid, hybrid_interviewer_emails, interviewer_list
     )
+    # The panel invite carries the feedback link — never the candidate, even
+    # if their address was also typed into a panel/CC list.
+    interviewer_list = _field_without_candidate(interviewer_list, interviewee_email)
+    cc_list = _field_without_candidate(cc_list, interviewee_email)
+    hybrid_list = _field_without_candidate(hybrid_list, interviewee_email)
     online_names = (HybridInterviewersName or ", ".join(hybrid_list)) if hybrid_list else ""
     attendees = (
         [{"emailAddress": {"address": i}, "type": "required"} for i in interviewer_list]
@@ -983,7 +1015,8 @@ def create_interview_event(
     )
 
     feedback_link_html = _new_feedback_link_html(
-        interview_round, application_id, Applicants_name, Applicants_Role
+        interview_round, application_id, Applicants_name, Applicants_Role,
+        panel_emails=interviewer_list + hybrid_list,
     )
 
     # One invite for the whole panel. Hybrid lists the Offline Panel (venue)
@@ -1165,11 +1198,15 @@ def update_interview_event(
     hybrid_list = _hybrid_interviewer_list(
         hybrid, hybrid_interviewer_emails, interviewer_list
     )
-    online_names = (HybridInterviewersName or ", ".join(hybrid_list)) if hybrid_list else ""
     # Separate online event from before Hybrid was merged into one invite.
     hybrid_event_id = doc.get("hybrid_event_id") or ""
     cc_list = [i.strip() for i in (cc_emails or "").split(",") if i.strip()]
     room_list = [r.strip() for r in (room_emails or "").split(",") if r.strip()]
+    # Panel only on the invite (it carries the feedback link) — never the candidate.
+    interviewer_list = _field_without_candidate(interviewer_list, interviewee_email)
+    cc_list = _field_without_candidate(cc_list, interviewee_email)
+    hybrid_list = _field_without_candidate(hybrid_list, interviewee_email)
+    online_names = (HybridInterviewersName or ", ".join(hybrid_list)) if hybrid_list else ""
     attendees = (
         [{"emailAddress": {"address": i}, "type": "required"} for i in interviewer_list]
         + [{"emailAddress": {"address": h}, "type": "required"} for h in hybrid_list]
@@ -1296,7 +1333,8 @@ def update_interview_event(
     )
 
     feedback_link_html = _new_feedback_link_html(
-        interview_round, application_id, Applicants_name, Applicants_Role
+        interview_round, application_id, Applicants_name, Applicants_Role,
+        panel_emails=interviewer_list + hybrid_list,
     )
 
     # One invite for the whole panel — see create_interview_event.
@@ -1691,25 +1729,17 @@ def send_interviewer_feedback_reminders():
             continue
 
         doc = frappe.get_doc("Health Interview Schedule", s.name)
-        interviewer_emails = _schedule_interviewer_emails(doc)
+        # Panel only — never the candidate (attendees).
+        interviewer_emails = _field_without_candidate(
+            _schedule_interviewer_emails(doc), doc.get("attendees")
+        )
 
         if not interviewer_emails:
             frappe.db.set_value("Health Interview Schedule", s.name, "reminder_sent", 1)
             frappe.db.commit()
             continue
 
-        feedback_doctype = ROUND_TO_FEEDBACK_DOCTYPE[
-            _health_feedback_round(s.interview_round, s.role)
-        ]
-        feedback_submitted = frappe.db.exists(
-            feedback_doctype,
-            {
-                "applicant_id": s.application_id,
-                "creation": [">=", s.interview_date],
-            },
-        )
-
-        if feedback_submitted:
+        if _health_feedback_submitted(s):
             frappe.db.set_value("Health Interview Schedule", s.name, "reminder_sent", 1)
             frappe.db.commit()
             continue
@@ -1722,15 +1752,7 @@ def send_interviewer_feedback_reminders():
         feedback_url = _health_feedback_url(
             s.interview_round, s.application_id, s.applicants_name, s.role
         )
-        reminder_body = f"""
-        <p>Hi,</p>
-        <p>This is a reminder that the interview with <b>{s.applicants_name}</b>
-        for the role of <b>{s.role or ''}</b> has concluded, and your feedback
-        is still pending.</p>
-        <p><strong>Feedback form:</strong>
-        <a href="{feedback_url}" target="_blank">Click here</a></p>
-        <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
-        """
+        reminder_body = _health_reminder_body(s, feedback_url)
 
         sender_arg = {}
         if s.organizer_email and frappe.db.exists(
@@ -1738,12 +1760,19 @@ def send_interviewer_feedback_reminders():
         ):
             sender_arg = {"sender": s.organizer_email}
 
+        names = _field_panelist_names(interviewer_emails)
         for email in interviewer_emails:
+            # Each interviewer's own link (as in the invite) — the form opens
+            # with their name filled in and their saved draft loaded.
+            body = reminder_body.replace(
+                feedback_url,
+                _field_personal_feedback_url(feedback_url, email, names.get(email, "")),
+            )
             try:
                 frappe.sendmail(
                     recipients=[email],
-                    subject=f"Reminder: Interview Feedback Pending – {s.applicants_name}",
-                    message=reminder_body,
+                    subject=f"{FEEDBACK_REMINDER_SUBJECT} – {s.applicants_name}",
+                    message=body,
                     delayed=False,
                     reference_doctype="Health Interview Schedule",
                     reference_name=s.name,
@@ -1755,6 +1784,101 @@ def send_interviewer_feedback_reminders():
                     message=frappe.get_traceback()[:2000],
                 )
 
+        frappe.db.commit()
+
+
+def _health_feedback_submitted(s):
+    """Any feedback for the applicant in this round's feedback doctype since
+    the interview date (see ROUND_TO_FEEDBACK_DOCTYPE)."""
+    feedback_doctype = ROUND_TO_FEEDBACK_DOCTYPE[
+        _health_feedback_round(s.interview_round, s.role)
+    ]
+    return frappe.db.exists(
+        feedback_doctype,
+        {"applicant_id": s.application_id, "creation": [">=", s.interview_date]},
+    )
+
+
+def _health_reminder_body(s, feedback_url):
+    return f"""
+        <p>Hi,</p>
+        <p>This is a reminder that the interview with <b>{s.applicants_name}</b>
+        for the role of <b>{s.role or ''}</b> has concluded, and your feedback
+        is still pending.</p>
+        <p><strong>Feedback form:</strong>
+        <a href="{feedback_url}" target="_blank">Click here</a></p>
+        <p>You can click <b>Save</b> on the form to keep a draft and finish it
+        later; your feedback is recorded only when you click <b>Submit</b>.</p>
+        <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+        """
+
+
+def send_interviewer_first_feedback_reminder():
+    """Runs every 5 minutes (see hooks.py scheduler_events["cron"]) — same as
+    Field's send_field_interview_first_feedback_reminder.
+
+    Sends the FIRST "feedback pending" reminder 5 minutes after an interview
+    ends, if no feedback has been submitted yet. Each panel member gets their
+    own link. Sent as Communications on the schedule (no first_reminder_sent
+    field on Health Interview Schedule), so it is sent only once. The daily
+    send_interviewer_feedback_reminders takes over from day 1."""
+    now = frappe.utils.now_datetime()
+    schedules = frappe.get_all(
+        "Health Interview Schedule",
+        filters={
+            "reminder_sent": 0,
+            "is_cancelled": 0,
+            "event_id": ["is", "set"],
+            # Only interviews that may have just ended.
+            "interview_date": ["between", [frappe.utils.add_days(now.date(), -1), now.date()]],
+        },
+        fields=[
+            "name",
+            "application_id",
+            "applicants_name",
+            "role",
+            "organizer_email",
+            "interview_date",
+            "end_time",
+            "interview_round",
+        ],
+    )
+
+    for s in schedules:
+        if not (s.interview_date and s.end_time and s.application_id):
+            continue
+        try:
+            end_dt = frappe.utils.get_datetime(f"{s.interview_date} {s.end_time}")
+        except Exception:
+            continue
+        elapsed = now - end_dt
+        # Older than a day: the daily job covers it.
+        if elapsed < timedelta(minutes=5) or elapsed > timedelta(days=1):
+            continue
+        if _health_feedback_submitted(s):
+            continue
+        if _feedback_reminder_sent_since("Health Interview Schedule", s.name, end_dt):
+            continue
+
+        doc = frappe.get_doc("Health Interview Schedule", s.name)
+        interviewer_emails = _field_without_candidate(
+            _schedule_interviewer_emails(doc), doc.get("attendees")
+        )
+        if not interviewer_emails:
+            continue
+
+        feedback_url = _health_feedback_url(
+            s.interview_round, s.application_id, s.applicants_name, s.role
+        )
+        _send_panel_feedback_reminders(
+            "Health Interview Schedule",
+            s.name,
+            interviewer_emails,
+            f"{FEEDBACK_REMINDER_SUBJECT} – {s.applicants_name}",
+            _health_reminder_body(s, feedback_url),
+            feedback_url,
+            sender=_outgoing_sender(s.organizer_email),
+        )
         frappe.db.commit()
 
 
@@ -2067,12 +2191,26 @@ def on_mbbs_feedback_form_submitted(doc, method=None):
     """
     if not doc.applicant_id:
         return
+    # Built in a background job, so Submit on the web form returns at once
+    # instead of waiting for the PDF.
+    frappe.enqueue(
+        "ms_calendar.api.ms_health._build_mbbs_feedback_pdf_job",
+        queue="short",
+        enqueue_after_commit=True,
+        doctype=doc.doctype,
+        docname=doc.name,
+        applicant_id=doc.applicant_id,
+    )
+
+
+def _build_mbbs_feedback_pdf_job(doctype, docname, applicant_id):
     try:
-        _build_mbbs_feedback_pdf(doc.applicant_id)
+        _build_mbbs_feedback_pdf(applicant_id)
+        frappe.db.commit()
     except Exception:
         frappe.log_error(
             title="MBBS Feedback PDF Auto-Generate Error",
-            message=f"{doc.doctype} {doc.name} ({doc.applicant_id}): {frappe.get_traceback()}",
+            message=f"{doctype} {docname} ({applicant_id}): {frappe.get_traceback()}",
         )
 
 
@@ -2130,14 +2268,28 @@ def send_feedback_submitted_email(doc, method=None):
     for the same interview goes as a reply in the SAME email thread and
     carries every feedback filed for it so far.
 
-    Best-effort: never blocks the feedback submission itself.
+    Best-effort: never blocks the feedback submission itself. Sent from a
+    background job so Submit doesn't wait for it.
     """
+    if not doc.get("applicant_id"):
+        return
+    frappe.enqueue(
+        "ms_calendar.api.ms_health._send_feedback_submitted_email_job",
+        queue="short",
+        enqueue_after_commit=True,
+        doctype=doc.doctype,
+        docname=doc.name,
+    )
+
+
+def _send_feedback_submitted_email_job(doctype, docname):
     try:
-        _send_feedback_submitted_email(doc)
+        _send_feedback_submitted_email(frappe.get_doc(doctype, docname))
+        frappe.db.commit()
     except Exception:
         frappe.log_error(
             title="Health Feedback Submitted Email Error",
-            message=f"{doc.doctype} {doc.name} ({doc.get('applicant_id')}): {frappe.get_traceback()}",
+            message=f"{doctype} {docname}: {frappe.get_traceback()}",
         )
 
 
@@ -2150,14 +2302,20 @@ def _send_feedback_submitted_email(feedback_doc):
     if not schedule:
         return
 
-    recipients = _schedule_interviewer_emails(schedule)
+    # Panel only — never the candidate (attendees).
+    recipients = _field_without_candidate(
+        _schedule_interviewer_emails(schedule), schedule.get("attendees")
+    )
     if not recipients:
         return
-    cc_list = [
-        (r.interviewer_email or "").strip().lower()
-        for r in (schedule.interviewers_cc_email or [])
-        if r.interviewer_email
-    ]
+    cc_list = _field_without_candidate(
+        [
+            (r.interviewer_email or "").strip().lower()
+            for r in (schedule.interviewers_cc_email or [])
+            if r.interviewer_email
+        ],
+        schedule.get("attendees"),
+    )
     cc_list = [c for c in dict.fromkeys(cc_list) if c not in recipients]
 
     # All feedback for THIS interview so far — earlier interviews' feedback
@@ -2177,10 +2335,8 @@ def _send_feedback_submitted_email(feedback_doc):
     if feedback_doc.name not in {f.name for f in feedbacks}:
         feedbacks.append(feedback_doc)
 
-    names = {
-        e: frappe.db.get_value("Interviewer Email List", e, "interviewer_name") or e
-        for e in recipients
-    }
+    known = _field_panelist_names(recipients)
+    names = {e: known.get(e) or e for e in recipients}
     applicant_name = schedule.applicants_name or feedback_doc.get("applicant_name") or ""
     role = schedule.role or ""
     subject = f"Interview Feedback – {applicant_name}" + (f" ({role})" if role else "")

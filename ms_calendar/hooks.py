@@ -518,6 +518,14 @@ doc_events = {
         "on_update": "ms_calendar.api.ms_health.on_mbbs_feedback_form_submitted",
         "after_insert": "ms_calendar.api.ms_health.send_feedback_submitted_email",
     },
+    # Scholarship feedback web forms feedback-form-one / feedback-form-two:
+    # email the interview's panel the submitted answers (same as Field).
+    "Feedback Form One": {
+        "after_insert": "ms_calendar.api.msgraph.send_scholarship_feedback_submitted_email",
+    },
+    "Feedback  Form Two": {
+        "after_insert": "ms_calendar.api.msgraph.send_scholarship_feedback_submitted_email",
+    },
     "Scholarship Recruitment Form": {
         "on_update": [
             "ms_calendar.api.resume_rename.on_scholarship_registration",
@@ -735,13 +743,14 @@ app_include_js = [
     # inventing redirect behavior nobody's described.
 ]
 # Website pages (incl. the public feedback web forms). feedback_form_draft.js
-# adds Save (browser-only draft) to the Field feedback web forms and does
+# adds Save (browser-only draft) to the Field, Health, Scholarship and
+# Philanthropy feedback web forms and does
 # nothing on any other page. It goes here and not in webform_include_js
 # because that hook only reaches standard (in-app) web forms, and the
 # feedback web forms are custom records on the site.
 # Manual "?v=" cache-buster like frf_list.js: bump it when the file changes.
 web_include_js = [
-    "/assets/ms_calendar/js/feedback_form_draft.js?v=7",
+    "/assets/ms_calendar/js/feedback_form_draft.js?v=9",
 ]
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -859,6 +868,7 @@ scheduler_events = {
 		"ms_calendar.api.ms_philanthropy.send_candidate_interview_reminders",
 		"ms_calendar.api.ms_field.send_field_interview_feedback_reminders",
 		"ms_calendar.api.ms_health.send_interviewer_feedback_reminders",
+		"ms_calendar.api.msgraph.send_scholarship_interview_feedback_reminders",
 	],
 	"cron": {
 		"*/5 * * * *": [
@@ -881,6 +891,10 @@ scheduler_events = {
 			# the start, learning from the fix above — no reason to repeat
 			# the once-daily mistake here.
 			"ms_calendar.api.ms_health.send_candidate_interview_reminders",
+			# First "feedback pending" reminder 5 minutes after the interview
+			# ends — same as Field's; the daily jobs take over from day 1.
+			"ms_calendar.api.ms_health.send_interviewer_first_feedback_reminder",
+			"ms_calendar.api.msgraph.send_scholarship_interview_first_feedback_reminder",
 		],
 		# No scheduled MeritTrac results pull on purpose. The every-minute
 		# pull_pending_merittrac_results job got the APF account blocked by

@@ -1433,6 +1433,33 @@ def _classify_interview_schedule_round(interview_round):
     return _INTERVIEW_SCHEDULE_FEEDBACK_SLUGS.get(str(interview_round or "").strip().lower())
 
 
+# Feedback doctype behind each Scholarship feedback web form (feedback-form-<slug>).
+# "Feedback  Form Two" really has two spaces in its name.
+SCHOLARSHIP_FEEDBACK_DOCTYPES = {
+    "one": "Feedback Form One",
+    "two": "Feedback  Form Two",
+}
+
+
+def _scholarship_feedback_url(interview_round, application_id, applicants_name):
+    """The round's feedback form, or "" when the round has none — or when
+    this site has no such web form (no Recruiter Round form exists yet, so
+    that link used to 404). Local / UAT get their own host
+    (ms_field._field_feedback_site_url)."""
+    from urllib.parse import quote
+
+    from ms_calendar.api.ms_field import _field_feedback_site_url
+
+    slug = _classify_interview_schedule_round(interview_round)
+    if not slug or not frappe.db.exists("Web Form", {"route": f"feedback-form-{slug}", "published": 1}):
+        return ""
+    return _field_feedback_site_url(
+        f"https://careers.frappe.cloud/feedback-form-{slug}/new"
+        f"?app_id={quote(str(application_id or ''), safe='')}"
+        f"&applicant_name={quote(str(applicants_name or ''), safe='')}"
+    )
+
+
 def _interview_schedule_teams_from_event(event_json):
     """(join_url, meeting_id, passcode) read straight off an event payload.
     Graph returns the Teams footer (Join / Meeting ID / Passcode) in the
@@ -1631,6 +1658,275 @@ def _save_interview_schedule_hybrid_event_id(name, hybrid_event_id):
         )
 
 
+def _interview_schedule_panel_feedback(
+    interviewer_list, hybrid_list, interviewee_email, interview_round, application_id, applicants_name
+):
+    """(interviewer_list, hybrid_list, feedback_html) for the panel invite,
+    same as Field's: the candidate is dropped from the panel lists (the
+    invite carries the feedback link), and the invite has ONE feedback link
+    for the whole panel (ms_field._field_panel_feedback_block) — the form
+    asks who is filling it and keeps a Save draft per member."""
+    from ms_calendar.api.ms_field import _field_panel_feedback_block, _field_without_candidate
+
+    interviewer_list = _field_without_candidate(interviewer_list, interviewee_email)
+    hybrid_list = _field_without_candidate(hybrid_list, interviewee_email)
+    feedback_url = _scholarship_feedback_url(interview_round, application_id, applicants_name)
+    return interviewer_list, hybrid_list, _field_panel_feedback_block(
+        feedback_url, interviewer_list + hybrid_list
+    )
+
+
+# ---------------------------------------------------------------------------
+# Scholarship feedback: "feedback submitted" email + "feedback pending"
+# reminders — the same as Field's (ms_field.send_field_feedback_submitted_email
+# and the two reminder jobs). Interview Schedule has no reminder flags, so the
+# first reminder is checked against the Communications on the schedule, and
+# the daily one only runs for interviews that ended 1-7 days ago.
+# ---------------------------------------------------------------------------
+
+
+def _interview_schedule_panel_emails(schedule):
+    """Main panel plus, in Hybrid mode, the online panel — lower-cased,
+    de-duplicated, never the candidate (attendees)."""
+    from ms_calendar.api.ms_field import _field_without_candidate
+
+    rows = list(schedule.get("interviewer_email") or [])
+    if (schedule.get("interview_mode") or "").strip().lower() == "hybrid":
+        rows += list(schedule.get("hybrid_interview_email") or [])
+    emails = [(r.interviewer_email or "").strip().lower() for r in rows]
+    return _field_without_candidate([e for e in dict.fromkeys(emails) if e], schedule.get("attendees"))
+
+
+def _scholarship_feedback_doctype(interview_round):
+    return SCHOLARSHIP_FEEDBACK_DOCTYPES.get(_classify_interview_schedule_round(interview_round) or "")
+
+
+def _find_interview_schedule_for_feedback(feedback_doc):
+    """The most recent scheduled (not cancelled) Interview Schedule for the
+    applicant whose round uses this feedback doctype, else the applicant's
+    most recent scheduled interview."""
+    rows = frappe.get_all(
+        "Interview Schedule",
+        filters={
+            "application_id": feedback_doc.applicant_id,
+            "is_cancelled": 0,
+            "event_id": ["is", "set"],
+            # An interview scheduled after this feedback can't be its interview.
+            "creation": ["<=", feedback_doc.creation or frappe.utils.now_datetime()],
+        },
+        fields=["name", "interview_round"],
+        order_by="interview_date desc, creation desc",
+    )
+    if not rows:
+        return None
+    match = next(
+        (r for r in rows if _scholarship_feedback_doctype(r.interview_round) == feedback_doc.doctype),
+        rows[0],
+    )
+    return frappe.get_doc("Interview Schedule", match.name)
+
+
+def send_scholarship_feedback_submitted_email(doc, method=None):
+    """doc_events hook (after_insert) on the Scholarship feedback doctypes.
+    Sent from a background job so Submit on the web form doesn't wait."""
+    if not doc.get("applicant_id"):
+        return
+    frappe.enqueue(
+        "ms_calendar.api.msgraph._send_scholarship_feedback_submitted_email_job",
+        queue="short",
+        enqueue_after_commit=True,
+        doctype=doc.doctype,
+        docname=doc.name,
+    )
+
+
+def _send_scholarship_feedback_submitted_email_job(doctype, docname):
+    try:
+        _send_scholarship_feedback_submitted_email(frappe.get_doc(doctype, docname))
+        frappe.db.commit()
+    except Exception:
+        frappe.log_error(
+            title="Scholarship Feedback Submitted Email Error",
+            message=f"{doctype} {docname}: {frappe.get_traceback()}",
+        )
+
+
+def _send_scholarship_feedback_submitted_email(feedback_doc):
+    """Every panel member of the interview gets the submitted answers; each
+    later submission for the same interview is a reply in the SAME email
+    thread and carries every submission so far."""
+    from frappe.core.doctype.communication.email import _make as make_communication
+    from frappe.utils import format_datetime, formatdate
+
+    from ms_calendar.api.ms_field import _field_feedback_table_html, _outgoing_sender
+
+    schedule = _find_interview_schedule_for_feedback(feedback_doc)
+    if not schedule:
+        return
+    recipients = _interview_schedule_panel_emails(schedule)
+    if not recipients:
+        return
+
+    # Every submission for THIS interview so far — earlier interviews'
+    # feedback is excluded by the creation filter.
+    feedbacks = [
+        feedback_doc if n == feedback_doc.name else frappe.get_doc(feedback_doc.doctype, n)
+        for n in frappe.get_all(
+            feedback_doc.doctype,
+            filters={"applicant_id": feedback_doc.applicant_id, "creation": [">=", schedule.creation]},
+            pluck="name",
+            order_by="creation asc",
+        )
+    ]
+    if feedback_doc.name not in {f.name for f in feedbacks}:
+        feedbacks.append(feedback_doc)
+
+    applicant_name = schedule.applicants_name or feedback_doc.get("applicant_name") or feedback_doc.applicant_id
+    round_label = schedule.interview_round or ""
+    subject = f"Interview Feedback – {applicant_name}" + (f" ({round_label})" if round_label else "")
+
+    root = frappe.db.get_value(
+        "Communication",
+        {
+            "reference_doctype": "Interview Schedule",
+            "reference_name": schedule.name,
+            "subject": subject,
+            "sent_or_received": "Sent",
+        },
+        "name",
+        order_by="creation asc",
+    )
+
+    cards = ""
+    for f in reversed(feedbacks):  # newest first
+        is_new = f.name == feedback_doc.name
+        by = (f.get("interviewer_name") or "").strip()
+        cards += f"""
+        <div style="border:1px solid {'#1d4ed8' if is_new else '#e5e7eb'};border-radius:8px;margin-bottom:14px;overflow:hidden;">
+          <div style="background:{'#1d4ed8' if is_new else '#f3f4f6'};color:{'#fff' if is_new else '#111'};padding:8px 14px;font-size:13px;font-weight:600;">
+            {f.doctype}{f' · {by}' if by else ''} · {format_datetime(f.creation, 'd MMM yyyy, h:mm a')}{' (new)' if is_new else ''}
+          </div>
+          {_field_feedback_table_html(f)}
+        </div>
+        """
+
+    new_by = (feedback_doc.get("interviewer_name") or "").strip()
+    body = f"""
+    <p>Dear all,</p>
+    <p>{'More interview feedback has' if root else 'Interview feedback has'} been submitted for
+    <b>{applicant_name}</b>{f' ({round_label})' if round_label else ''}{f' by <b>{new_by}</b>' if new_by else ''}.</p>
+    <p><b>Interview Date:</b> {formatdate(schedule.interview_date, 'dd MMMM yyyy') if schedule.interview_date else ''}</p>
+    {cards}
+    <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+    """
+
+    make_communication(
+        doctype="Interview Schedule",
+        name=schedule.name,
+        content=body,
+        subject=f"Re: {subject}" if root else subject,
+        sender=_outgoing_sender(schedule.organizer_email),
+        recipients=recipients,
+        send_email=True,
+        add_signature=False,
+        in_reply_to=root,
+    )
+
+
+def send_scholarship_interview_first_feedback_reminder():
+    """Runs every 5 minutes (hooks.py cron): the first reminder, 5 minutes
+    after the interview ends."""
+    _scholarship_feedback_reminders(first=True)
+
+
+def send_scholarship_interview_feedback_reminders():
+    """Runs daily (hooks.py): one reminder a day for interviews that ended
+    1-7 days ago and still have no feedback."""
+    _scholarship_feedback_reminders(first=False)
+
+
+def _scholarship_feedback_reminders(first):
+    from ms_calendar.api.ms_field import (
+        FEEDBACK_REMINDER_SUBJECT,
+        _feedback_reminder_sent_since,
+        _outgoing_sender,
+        _send_panel_feedback_reminders,
+    )
+
+    now = frappe.utils.now_datetime()
+    today = now.date()
+    oldest = frappe.utils.add_days(today, -1 if first else -8)
+    schedules = frappe.get_all(
+        "Interview Schedule",
+        filters={
+            "is_cancelled": 0,
+            "event_id": ["is", "set"],
+            "interview_date": ["between", [oldest, today]],
+        },
+        fields=[
+            "name",
+            "application_id",
+            "applicants_name",
+            "role",
+            "interview_round",
+            "organizer_email",
+            "interview_date",
+            "end_time",
+        ],
+    )
+
+    for s in schedules:
+        feedback_doctype = _scholarship_feedback_doctype(s.interview_round)
+        if not (feedback_doctype and s.application_id and s.interview_date and s.end_time):
+            continue
+        try:
+            end_dt = get_datetime(f"{s.interview_date} {s.end_time}")
+        except Exception:
+            continue
+        elapsed = now - end_dt
+        if first:
+            # Older than a day: the daily job covers it.
+            if elapsed < timedelta(minutes=5) or elapsed > timedelta(days=1):
+                continue
+            if _feedback_reminder_sent_since("Interview Schedule", s.name, end_dt):
+                continue
+        elif elapsed < timedelta(days=1) or elapsed > timedelta(days=7):
+            continue
+
+        if frappe.db.exists(
+            feedback_doctype,
+            {"applicant_id": s.application_id, "creation": [">=", s.interview_date]},
+        ):
+            continue
+
+        panel = _interview_schedule_panel_emails(frappe.get_doc("Interview Schedule", s.name))
+        feedback_url = _scholarship_feedback_url(s.interview_round, s.application_id, s.applicants_name)
+        if not (panel and feedback_url):
+            continue
+
+        body = f"""
+        <p>Dear all,</p>
+        <p>This is a reminder that the interview with <b>{s.applicants_name}</b>
+        for the role of <b>{s.role or ''}</b> ({s.interview_round}) has concluded,
+        and your feedback is still pending.</p>
+        <p><strong>Feedback form:</strong>
+        <a href="{feedback_url}" target="_blank">Click here</a></p>
+        <p>You can click <b>Save</b> on the form to keep a draft and finish it
+        later; your feedback is recorded only when you click <b>Submit</b>.</p>
+        <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+        """
+        _send_panel_feedback_reminders(
+            "Interview Schedule",
+            s.name,
+            panel,
+            f"{FEEDBACK_REMINDER_SUBJECT} – {s.applicants_name}",
+            body,
+            feedback_url,
+            sender=_outgoing_sender(s.organizer_email),
+        )
+        frappe.db.commit()
+
+
 @frappe.whitelist()
 def create_interview_schedule(
     name,
@@ -1675,25 +1971,15 @@ def create_interview_schedule(
     start_dt = datetime.fromisoformat(start_datetime)
     when_str = start_dt.strftime("%A, %d %b %Y at %I:%M %p")
 
-    round_slug = _classify_interview_schedule_round(Interview_round)
-    feedback_url = (
-        f"https://careers.frappe.cloud/feedback-form-{round_slug}/new"
-        f"?app_id={application_id}&applicant_name={Applicants_name}"
-        if round_slug
-        else ""
-    )
-    feedback_html = (
-        f'<p><b>Feedback form link:</b> <a href="{feedback_url}" target="_blank">Click here</a></p>'
-        if feedback_url
-        else ""
-    )
-
     headers = _graph_headers()
 
     interviewer_list = [i.strip() for i in (interviewer_emails or "").split(",") if i.strip()]
     room_list = [r.strip() for r in (room_emails or "").split(",") if r.strip()]
     # Hybrid: the online panel is invited on this same event.
     hybrid_list = _interview_schedule_hybrid_list(hybrid, hybrid_interviewer_emails, interviewer_list)
+    interviewer_list, hybrid_list, feedback_html = _interview_schedule_panel_feedback(
+        interviewer_list, hybrid_list, interviewee_email, Interview_round, application_id, Applicants_name
+    )
     online_names = (HybridInterviewersName or ", ".join(hybrid_list)) if hybrid_list else ""
     attendees = (
         [{"emailAddress": {"address": r}, "type": "resource"} for r in room_list]
@@ -1869,19 +2155,6 @@ def update_interview_schedule(
     start_dt = datetime.fromisoformat(start_datetime)
     when_str = start_dt.strftime("%A, %d %b %Y at %I:%M %p")
 
-    round_slug = _classify_interview_schedule_round(Interview_round)
-    feedback_url = (
-        f"https://careers.frappe.cloud/feedback-form-{round_slug}/new"
-        f"?app_id={application_id}&applicant_name={Applicants_name}"
-        if round_slug
-        else ""
-    )
-    feedback_html = (
-        f'<p><b>Feedback form link:</b> <a href="{feedback_url}" target="_blank">Click here</a></p>'
-        if feedback_url
-        else ""
-    )
-
     headers = _graph_headers()
     event_url = f"https://graph.microsoft.com/v1.0/users/{Organizer_email}/events/{doc.event_id}"
 
@@ -1889,6 +2162,9 @@ def update_interview_schedule(
     room_list = [r.strip() for r in (room_emails or "").split(",") if r.strip()]
     # Hybrid: the online panel is invited on this same event.
     hybrid_list = _interview_schedule_hybrid_list(hybrid, hybrid_interviewer_emails, interviewer_list)
+    interviewer_list, hybrid_list, feedback_html = _interview_schedule_panel_feedback(
+        interviewer_list, hybrid_list, interviewee_email, Interview_round, application_id, Applicants_name
+    )
     online_names = (HybridInterviewersName or ", ".join(hybrid_list)) if hybrid_list else ""
     attendees = (
         [{"emailAddress": {"address": r}, "type": "resource"} for r in room_list]
