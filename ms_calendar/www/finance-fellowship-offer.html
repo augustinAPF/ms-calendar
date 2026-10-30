@@ -1,0 +1,104 @@
+{% extends "templates/web.html" %}
+
+{#
+	Finance Fellowship offer response — linked from the offer email
+	(?app_id=...&key=...). Accept / Decline is a POST from the buttons, never
+	a plain link, so mail scanners that open links can't answer for the
+	applicant.
+#}
+
+{% block title %}{{ _("Your offer") }} | {{ fellowship_name }}{% endblock %}
+
+{% block page_content %}
+<style>
+	.ffo { max-width: 600px; margin: 32px auto 48px; color: #1f2933; }
+	.ffo-card { border: 1px solid #d9dee5; border-radius: 8px; background: #fff; padding: 24px; }
+	.ffo h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+	.ffo .ffo-sub { color: #5b6573; font-size: 14px; margin: 0 0 18px; }
+	.ffo p { font-size: 14px; line-height: 1.6; }
+	.ffo-actions { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+	.ffo button { border-radius: 6px; padding: 10px 20px; font-weight: 600; font-size: 14px; border: 1px solid #1f3a5f; }
+	.ffo .ffo-accept { background: #1f3a5f; color: #fff; }
+	.ffo .ffo-decline { background: #fff; color: #1f3a5f; }
+	.ffo textarea { width: 100%; border: 1px solid #c5ccd6; border-radius: 6px; padding: 9px 11px; font-size: 14px; min-height: 90px; margin-top: 6px; }
+	.ffo label { font-size: 13px; font-weight: 600; color: #3e4c59; margin-top: 14px; display: block; }
+	.ffo-msg { background: #f5f7fa; border: 1px solid #e1e6ec; border-radius: 6px; padding: 12px 14px; font-size: 14px; }
+	.ffo-err { color: #b42318; font-size: 13px; margin-top: 10px; }
+</style>
+
+<div class="ffo">
+	<div class="ffo-card" id="ffo-card"><p class="text-muted">{{ _("Loading…") }}</p></div>
+</div>
+
+<script>
+	frappe.ready(() => {
+		const params = new URLSearchParams(window.location.search);
+		const app_id = params.get("app_id");
+		const key = params.get("key");
+		const card = document.getElementById("ffo-card");
+		const esc = (s) => frappe.utils.escape_html(String(s || ""));
+
+		const render = (d) => {
+			const head = `<h1>${esc(d.fellowship_name)}</h1><p class="ffo-sub">${esc(d.applicant_name)}</p>`;
+			if (!d.open) {
+				const text = d.response
+					? `You ${d.response === "Accepted" ? "accepted" : "declined"} this offer on ${esc(d.responded_on)}. Thank you for letting us know.`
+					: "This offer is not open for a response. Please reply to our email if you have any questions.";
+				card.innerHTML = `${head}<div class="ffo-msg">${text}</div>`;
+				return;
+			}
+			card.innerHTML = `${head}
+				<p>Your offer letter${d.fellow_category ? ` (${esc(d.fellow_category)})` : ""} is attached to the email we sent you. Please read it and let us know your decision.</p>
+				<div class="ffo-actions">
+					<button class="ffo-accept" data-r="Accepted">Accept the offer</button>
+					<button class="ffo-decline" data-r="Declined">Decline the offer</button>
+				</div>
+				<div id="ffo-reason" hidden>
+					<label for="ffo-reason-text">Please tell us why you are declining</label>
+					<textarea id="ffo-reason-text"></textarea>
+					<div class="ffo-actions"><button class="ffo-decline" data-r="Declined" data-confirm="1">Confirm decline</button></div>
+				</div>
+				<div class="ffo-err" id="ffo-err" hidden></div>`;
+			card.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => respond(b)));
+		};
+
+		const respond = (btn) => {
+			const response = btn.dataset.r;
+			if (response === "Declined" && !btn.dataset.confirm) {
+				document.getElementById("ffo-reason").hidden = false;
+				return;
+			}
+			if (response === "Accepted" && !window.confirm("Accept the offer?")) return;
+			const reason = response === "Declined" ? document.getElementById("ffo-reason-text").value : "";
+			frappe.call({
+				method: "ms_calendar.api.ms_finance.respond_to_offer",
+				args: { application_id: app_id, key, response, reason },
+				callback: (r) => render(r.message),
+				// Website frappe.call never calls `error`; `always` sees every response.
+				always: (d) => {
+					if (d && "message" in d) return;
+					const err = document.getElementById("ffo-err");
+					if (!err) return;
+					err.textContent = "Could not save your response. Please try again.";
+					err.hidden = false;
+				},
+			});
+		};
+
+		if (!app_id || !key) {
+			card.innerHTML = '<div class="ffo-msg">This page opens from the link in your offer email.</div>';
+			return;
+		}
+		frappe.call({
+			method: "ms_calendar.api.ms_finance.get_offer",
+			args: { application_id: app_id, key },
+			callback: (r) => render(r.message),
+			always: (d) => {
+				if (!(d && "message" in d)) {
+					card.innerHTML = '<div class="ffo-msg">This link is not valid. Please use the link in your offer email.</div>';
+				}
+			},
+		});
+	});
+</script>
+{% endblock %}

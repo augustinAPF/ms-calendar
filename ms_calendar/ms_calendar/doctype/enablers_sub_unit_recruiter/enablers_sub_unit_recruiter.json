@@ -1,0 +1,53 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-10-29 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "sub_unit",
+  "recruiter",
+  "recruiter_email"
+ ],
+ "fields": [
+  {
+   "fieldname": "sub_unit",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Sub Unit",
+   "options": "Recruitment Department",
+   "reqd": 1
+  },
+  {
+   "description": "Only this person can change the status in Rounds 2 and 3.",
+   "fieldname": "recruiter",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Recruiter",
+   "options": "User"
+  },
+  {
+   "description": "Gets the feedback / documents notes.",
+   "fetch_from": "recruiter.email",
+   "fieldname": "recruiter_email",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Recruiter email",
+   "options": "Email"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-10-29 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Ms Calendar",
+ "name": "Enablers Sub Unit Recruiter",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

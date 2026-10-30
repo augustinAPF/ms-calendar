@@ -1,0 +1,225 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-10-29 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "general_section",
+  "sender_email",
+  "recruiter_email",
+  "column_break_general",
+  "default_organizer_email",
+  "regret_delay_days",
+  "access_section",
+  "round_1_approvers",
+  "sub_unit_recruiters",
+  "templates_tab",
+  "templates_help",
+  "application_received_section",
+  "application_received_subject",
+  "application_received_message",
+  "regret_section",
+  "regret_subject",
+  "regret_message",
+  "panel_invite_section",
+  "panel_invite_subject",
+  "panel_invite_message",
+  "candidate_invite_section",
+  "candidate_invite_subject",
+  "candidate_invite_message",
+  "document_request_section",
+  "document_request_subject",
+  "document_request_message"
+ ],
+ "fields": [
+  {
+   "fieldname": "general_section",
+   "fieldtype": "Section Break",
+   "label": "General"
+  },
+  {
+   "description": "Must be an outgoing Email Account; otherwise the default outgoing account is used.",
+   "fieldname": "sender_email",
+   "fieldtype": "Data",
+   "label": "Send emails from",
+   "options": "Email"
+  },
+  {
+   "description": "Also copied on feedback / documents notes.",
+   "fieldname": "recruiter_email",
+   "fieldtype": "Data",
+   "label": "Recruitment team email",
+   "options": "Email"
+  },
+  {
+   "fieldname": "column_break_general",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "default_organizer_email",
+   "fieldtype": "Link",
+   "label": "Default interview organizer",
+   "options": "Organizer Email"
+  },
+  {
+   "description": "0 = as soon as the status is set to a Reject status.",
+   "fieldname": "regret_delay_days",
+   "fieldtype": "Int",
+   "label": "Send regret email after (days)"
+  },
+  {
+   "description": "Workflow for Enablers: Round 1 — the approvers below; Rounds 2 and 3 — the recruiter of the applicant's sub-unit. System Managers can always change it. An empty list means no restriction.",
+   "fieldname": "access_section",
+   "fieldtype": "Section Break",
+   "label": "Who can change the status"
+  },
+  {
+   "fieldname": "round_1_approvers",
+   "fieldtype": "Table MultiSelect",
+   "label": "Round 1 approvers",
+   "options": "Enablers Approver"
+  },
+  {
+   "fieldname": "sub_unit_recruiters",
+   "fieldtype": "Table",
+   "label": "Sub-unit recruiters",
+   "options": "Enablers Sub Unit Recruiter"
+  },
+  {
+   "fieldname": "templates_tab",
+   "fieldtype": "Tab Break",
+   "label": "Email templates"
+  },
+  {
+   "fieldname": "templates_help",
+   "fieldtype": "HTML",
+   "label": "Template help",
+   "options": "<p class=\"text-muted small\">Templates use Jinja. Values: <code>{{ applicant_name }}</code>, <code>{{ application_id }}</code>, <code>{{ requirement_name }}</code>, <code>{{ track_url }}</code>, <code>{{ upload_link }}</code>. Interview templates also get <code>{{ interviewer_name }}</code>, <code>{{ interview_round }}</code>, <code>{{ interview_date }}</code>, <code>{{ interview_time }}</code>, <code>{{ mode }}</code>, <code>{{ meeting_link }}</code>, <code>{{ meeting_room }}</code>, <code>{{ venue }}</code>, <code>{{ map_link }}</code>, <code>{{ feedback_link }}</code>. Leave a field empty to use the standard text.</p>"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "application_received_section",
+   "fieldtype": "Section Break",
+   "label": "Application received (to applicant)"
+  },
+  {
+   "fieldname": "application_received_subject",
+   "fieldtype": "Data",
+   "label": "Subject"
+  },
+  {
+   "fieldname": "application_received_message",
+   "fieldtype": "Code",
+   "label": "Message",
+   "options": "HTML"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "regret_section",
+   "fieldtype": "Section Break",
+   "label": "Application regret (to applicant)"
+  },
+  {
+   "fieldname": "regret_subject",
+   "fieldtype": "Data",
+   "label": "Subject"
+  },
+  {
+   "fieldname": "regret_message",
+   "fieldtype": "Code",
+   "label": "Message",
+   "options": "HTML"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "panel_invite_section",
+   "fieldtype": "Section Break",
+   "label": "Interview details (to interviewer — Outlook invite)"
+  },
+  {
+   "fieldname": "panel_invite_subject",
+   "fieldtype": "Data",
+   "label": "Subject"
+  },
+  {
+   "fieldname": "panel_invite_message",
+   "fieldtype": "Code",
+   "label": "Message",
+   "options": "HTML"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "candidate_invite_section",
+   "fieldtype": "Section Break",
+   "label": "Interview details (to applicant)"
+  },
+  {
+   "fieldname": "candidate_invite_subject",
+   "fieldtype": "Data",
+   "label": "Subject"
+  },
+  {
+   "fieldname": "candidate_invite_message",
+   "fieldtype": "Code",
+   "label": "Message",
+   "options": "HTML"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "document_request_section",
+   "fieldtype": "Section Break",
+   "label": "Documents needed (to applicant)"
+  },
+  {
+   "fieldname": "document_request_subject",
+   "fieldtype": "Data",
+   "label": "Subject"
+  },
+  {
+   "fieldname": "document_request_message",
+   "fieldtype": "Code",
+   "label": "Message",
+   "options": "HTML"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-10-29 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Ms Calendar",
+ "name": "Enablers Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Enablers Recruiter",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

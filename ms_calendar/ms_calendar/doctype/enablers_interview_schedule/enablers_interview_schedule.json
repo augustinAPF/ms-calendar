@@ -1,0 +1,398 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "EIS-.#####",
+ "creation": "2026-10-29 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "applicant_section",
+  "application_id",
+  "applicant_name",
+  "role",
+  "sub_unit",
+  "applicant_email",
+  "column_break_applicant",
+  "interview_round",
+  "interview_mode",
+  "assignment_round",
+  "assignment_details",
+  "status",
+  "panel_section",
+  "organizer_email",
+  "interviewer_email",
+  "online_panel",
+  "interviewers_cc_email",
+  "column_break_panel",
+  "interviewer_names",
+  "check_availability",
+  "available_slots_section",
+  "available_slots",
+  "slot_section",
+  "interview_date",
+  "start_time",
+  "end_time",
+  "check_available_room",
+  "meeting_room",
+  "room_email",
+  "column_break_slot",
+  "venue",
+  "google_map_link",
+  "message_to_the_interviewer",
+  "invite_section",
+  "event_id",
+  "teams_join_url",
+  "teams_meeting_id",
+  "teams_passcode",
+  "column_break_invite",
+  "feedback_link",
+  "scheduled_on",
+  "cancel_reason",
+  "first_reminder_sent",
+  "last_reminder_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "applicant_section",
+   "fieldtype": "Section Break",
+   "label": "Applicant"
+  },
+  {
+   "fieldname": "application_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Application ID",
+   "options": "Enablers Registration Form",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "application_id.full_name",
+   "fieldname": "applicant_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Applicant's name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "application_id.role",
+   "fieldname": "role",
+   "fieldtype": "Data",
+   "label": "Role",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "application_id.department",
+   "fieldname": "sub_unit",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Sub Unit",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "application_id.email_address",
+   "fieldname": "applicant_email",
+   "fieldtype": "Data",
+   "label": "Applicant's email",
+   "options": "Email",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_applicant",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Set automatically from the applicant's status.",
+   "fieldname": "interview_round",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Interview Round",
+   "options": "\nRound 1\nRound 2\nRound 3",
+   "read_only": 1
+  },
+  {
+   "description": "Enablers: Rounds 1 and 2 on MS Teams, Round 3 an in-person panel. Finance Fellowship: Round 1 on MS Teams, Round 2 in person. Hybrid: the applicant and the Interviewers meet in person; the panel below joins on MS Teams.",
+   "fieldname": "interview_mode",
+   "fieldtype": "Select",
+   "label": "Interview Mode",
+   "options": "\nOnline (MS Teams)\nIn-person\nHybrid",
+   "reqd": 1
+  },
+  {
+   "depends_on": "eval:doc.sub_unit==\"Finance Fellowship\" && doc.interview_round==\"Round 2\"",
+   "fieldname": "assignment_round",
+   "fieldtype": "Check",
+   "label": "Includes an assignment round"
+  },
+  {
+   "depends_on": "eval:doc.assignment_round",
+   "fieldname": "assignment_details",
+   "fieldtype": "Small Text",
+   "label": "Assignment details (shown to the panel)"
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "no_copy": 1,
+   "options": "Draft\nScheduled\nCancelled\nCompleted",
+   "read_only": 1
+  },
+  {
+   "fieldname": "panel_section",
+   "fieldtype": "Section Break",
+   "label": "Interviewers"
+  },
+  {
+   "description": "The Outlook calendar the invite is sent from.",
+   "fieldname": "organizer_email",
+   "fieldtype": "Link",
+   "label": "Organizer Email",
+   "options": "Organizer Email",
+   "reqd": 1
+  },
+  {
+   "fieldname": "interviewer_email",
+   "fieldtype": "Table MultiSelect",
+   "label": "Interviewers",
+   "options": "Interviewer Email Child",
+   "reqd": 1,
+   "description": "Hybrid: the interviewers meeting the applicant in person."
+  },
+  {
+   "fieldname": "online_panel",
+   "fieldtype": "Table MultiSelect",
+   "label": "Joining online (MS Teams)",
+   "options": "Interviewer Email Child",
+   "depends_on": "eval:doc.interview_mode==\"Hybrid\"",
+   "mandatory_depends_on": "eval:doc.interview_mode==\"Hybrid\"",
+   "description": "Hybrid only: interviewers who join on MS Teams (they get the Teams link)."
+  },
+  {
+   "fieldname": "interviewers_cc_email",
+   "fieldtype": "Table MultiSelect",
+   "label": "CC",
+   "options": "Interviewer Email Child"
+  },
+  {
+   "fieldname": "column_break_panel",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "interviewer_names",
+   "fieldtype": "Small Text",
+   "label": "Interviewer names",
+   "read_only": 1
+  },
+  {
+   "fieldname": "check_availability",
+   "fieldtype": "Button",
+   "label": "Check interviewer availability"
+  },
+  {
+   "fieldname": "available_slots_section",
+   "fieldtype": "Section Break",
+   "label": "Interviewer calendars"
+  },
+  {
+   "fieldname": "available_slots",
+   "fieldtype": "HTML",
+   "label": "Available slots"
+  },
+  {
+   "fieldname": "slot_section",
+   "fieldtype": "Section Break",
+   "label": "Date, time and room"
+  },
+  {
+   "fieldname": "interview_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Interview Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "start_time",
+   "fieldtype": "Time",
+   "label": "Start Time",
+   "reqd": 1
+  },
+  {
+   "fieldname": "end_time",
+   "fieldtype": "Time",
+   "label": "End Time",
+   "reqd": 1
+  },
+  {
+   "fieldname": "check_available_room",
+   "fieldtype": "Button",
+   "label": "Find a free meeting room"
+  },
+  {
+   "fieldname": "meeting_room",
+   "fieldtype": "Data",
+   "label": "Meeting room"
+  },
+  {
+   "description": "Set by 'Find a free meeting room' — the room is booked with the invite.",
+   "fieldname": "room_email",
+   "fieldtype": "Data",
+   "label": "Room email",
+   "options": "Email",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_slot",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:[\"In-person\",\"Hybrid\",\"In-person + MS Teams\"].includes(doc.interview_mode)",
+   "fieldname": "venue",
+   "fieldtype": "Small Text",
+   "label": "Venue details",
+   "mandatory_depends_on": "eval:[\"In-person\",\"Hybrid\",\"In-person + MS Teams\"].includes(doc.interview_mode)"
+  },
+  {
+   "depends_on": "eval:[\"In-person\",\"Hybrid\",\"In-person + MS Teams\"].includes(doc.interview_mode)",
+   "fieldname": "google_map_link",
+   "fieldtype": "Data",
+   "label": "Google Maps link",
+   "options": "URL"
+  },
+  {
+   "fieldname": "message_to_the_interviewer",
+   "fieldtype": "Small Text",
+   "label": "Message to the interviewers"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "invite_section",
+   "fieldtype": "Section Break",
+   "label": "Invite"
+  },
+  {
+   "fieldname": "event_id",
+   "fieldtype": "Small Text",
+   "hidden": 1,
+   "label": "Outlook Event ID",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "teams_join_url",
+   "fieldtype": "Small Text",
+   "label": "Teams meeting link",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "teams_meeting_id",
+   "fieldtype": "Data",
+   "label": "Meeting ID",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "teams_passcode",
+   "fieldtype": "Data",
+   "label": "Passcode",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_invite",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "feedback_link",
+   "fieldtype": "Small Text",
+   "label": "Feedback link",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "scheduled_on",
+   "fieldtype": "Datetime",
+   "label": "Invite sent on",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.status==\"Cancelled\"",
+   "fieldname": "cancel_reason",
+   "fieldtype": "Small Text",
+   "label": "Reason for cancelling",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "first_reminder_sent",
+   "fieldtype": "Check",
+   "label": "First feedback reminder sent",
+   "hidden": 1,
+   "no_copy": 1,
+   "read_only": 1,
+   "default": "0"
+  },
+  {
+   "fieldname": "last_reminder_on",
+   "fieldtype": "Date",
+   "label": "Last feedback reminder on",
+   "hidden": 1,
+   "no_copy": 1,
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [
+  {
+   "group": "Feedback",
+   "link_doctype": "Enablers Feedback Form",
+   "link_fieldname": "interview_schedule"
+  }
+ ],
+ "modified": "2026-10-29 22:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Ms Calendar",
+ "name": "Enablers Interview Schedule",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Enablers Recruiter",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "applicant_name",
+ "track_changes": 1
+}

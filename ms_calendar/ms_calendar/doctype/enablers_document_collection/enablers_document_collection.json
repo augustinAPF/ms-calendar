@@ -1,0 +1,266 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "EDC-.#####",
+ "creation": "2026-10-29 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "applicant_section",
+  "application_id",
+  "applicant_name",
+  "role",
+  "sub_unit",
+  "column_break_applicant",
+  "access_key",
+  "is_fresher",
+  "identity_section",
+  "pan_card",
+  "column_break_identity",
+  "aadhaar_card",
+  "education_section",
+  "class_x",
+  "class_xii",
+  "degree",
+  "column_break_education",
+  "post_graduation",
+  "phd",
+  "employment_section",
+  "experience_letters",
+  "offer_or_revision_letter",
+  "column_break_employment",
+  "payslips",
+  "verification_section",
+  "verification_status",
+  "verification_remarks",
+  "column_break_verification",
+  "verified_by",
+  "verified_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "applicant_section",
+   "fieldtype": "Section Break",
+   "label": "Applicant"
+  },
+  {
+   "fieldname": "application_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Application ID",
+   "options": "Enablers Registration Form",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "application_id.full_name",
+   "fieldname": "applicant_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Applicant's name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "application_id.role",
+   "fieldname": "role",
+   "fieldtype": "Data",
+   "label": "Role",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "application_id.department",
+   "fieldname": "sub_unit",
+   "fieldtype": "Data",
+   "in_standard_filter": 1,
+   "label": "Sub Unit",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_applicant",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "access_key",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Access key",
+   "no_copy": 1
+  },
+  {
+   "description": "Freshers don't need to upload experience letters, offer letter or payslips.",
+   "fieldname": "is_fresher",
+   "fieldtype": "Check",
+   "label": "I am a fresher (no previous employment)"
+  },
+  {
+   "fieldname": "identity_section",
+   "fieldtype": "Section Break",
+   "label": "Identity (PDF only)"
+  },
+  {
+   "fieldname": "pan_card",
+   "fieldtype": "Attach",
+   "label": "PAN Card",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_identity",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "aadhaar_card",
+   "fieldtype": "Attach",
+   "label": "Aadhaar Card (both sides)",
+   "reqd": 1
+  },
+  {
+   "description": "Mark sheets and completion certificates (not provisional) for every course.",
+   "fieldname": "education_section",
+   "fieldtype": "Section Break",
+   "label": "Education certificates (PDF only)"
+  },
+  {
+   "fieldname": "class_x",
+   "fieldtype": "Attach",
+   "label": "Class X — mark sheet and completion certificate",
+   "reqd": 1
+  },
+  {
+   "fieldname": "class_xii",
+   "fieldtype": "Attach",
+   "label": "Class XII — mark sheet and completion certificate",
+   "reqd": 1
+  },
+  {
+   "fieldname": "degree",
+   "fieldtype": "Attach",
+   "label": "Degree — mark sheets and completion certificate",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_education",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "If applicable",
+   "fieldname": "post_graduation",
+   "fieldtype": "Attach",
+   "label": "Post-Graduation — mark sheets and completion certificate"
+  },
+  {
+   "description": "If applicable",
+   "fieldname": "phd",
+   "fieldtype": "Attach",
+   "label": "PhD — completion certificate"
+  },
+  {
+   "depends_on": "eval:!doc.is_fresher",
+   "fieldname": "employment_section",
+   "fieldtype": "Section Break",
+   "label": "Employment (PDF only)"
+  },
+  {
+   "fieldname": "experience_letters",
+   "fieldtype": "Attach",
+   "label": "Experience letters from previous organisations",
+   "mandatory_depends_on": "eval:!doc.is_fresher"
+  },
+  {
+   "fieldname": "offer_or_revision_letter",
+   "fieldtype": "Attach",
+   "label": "Latest offer or salary revision letter",
+   "mandatory_depends_on": "eval:!doc.is_fresher"
+  },
+  {
+   "fieldname": "column_break_employment",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Combine into one PDF.",
+   "fieldname": "payslips",
+   "fieldtype": "Attach",
+   "label": "Payslips of the last three months worked",
+   "mandatory_depends_on": "eval:!doc.is_fresher"
+  },
+  {
+   "fieldname": "verification_section",
+   "fieldtype": "Section Break",
+   "label": "Verification"
+  },
+  {
+   "default": "Pending",
+   "fieldname": "verification_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Verification status",
+   "options": "Pending\nVerified\nRe-submission requested"
+  },
+  {
+   "description": "Sent to the applicant when re-submission is requested.",
+   "fieldname": "verification_remarks",
+   "fieldtype": "Small Text",
+   "label": "Remarks"
+  },
+  {
+   "fieldname": "column_break_verification",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "verified_by",
+   "fieldtype": "Link",
+   "label": "Verified by",
+   "no_copy": 1,
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "verified_on",
+   "fieldtype": "Datetime",
+   "label": "Verified on",
+   "no_copy": 1,
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-29 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Ms Calendar",
+ "name": "Enablers Document Collection",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Enablers Recruiter",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "applicant_name",
+ "track_changes": 1
+}

@@ -1,0 +1,102 @@
+{% extends "templates/web.html" %}
+
+{#
+	Enablers "Track Application" page — linked from the
+	Application received email (?app_id=APFF-xxxxx). The applicant enters
+	their Application ID + registered email; ms_enablers.get_application_status
+	returns the applicant-facing stage (never the internal status).
+#}
+
+{% block title %}{{ _("Track your application") }} | {{ _("Azim Premji Foundation") }}{% endblock %}
+
+{% block page_content %}
+<style>
+	.ffs { max-width: 640px; margin: 32px auto 48px; color: #1f2933; }
+	.ffs-card { border: 1px solid #d9dee5; border-radius: 8px; background: #fff; padding: 24px; margin-bottom: 16px; }
+	.ffs h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+	.ffs .ffs-sub { color: #5b6573; font-size: 14px; margin: 0 0 20px; }
+	.ffs label { font-size: 13px; font-weight: 600; color: #3e4c59; margin-bottom: 4px; display: block; }
+	.ffs input { width: 100%; border: 1px solid #c5ccd6; border-radius: 6px; padding: 9px 11px; font-size: 14px; margin-bottom: 14px; }
+	.ffs button { background: #1f3a5f; color: #fff; border: 0; border-radius: 6px; padding: 10px 20px; font-weight: 600; font-size: 14px; }
+	.ffs button[disabled] { opacity: .6; }
+	.ffs-err { color: #b42318; font-size: 13px; margin-top: 10px; }
+	.ffs-meta { font-size: 13px; color: #5b6573; margin-bottom: 18px; }
+	.ffs-steps { list-style: none; padding: 0; margin: 0 0 18px; }
+	.ffs-steps li { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid #eef1f4; font-size: 14px; color: #7b8794; }
+	.ffs-steps li:last-child { border-bottom: 0; }
+	.ffs-dot { width: 22px; height: 22px; border-radius: 50%; border: 1px solid #c5ccd6; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; flex: none; }
+	.ffs-steps li.done { color: #3e4c59; }
+	.ffs-steps li.done .ffs-dot { background: #e6ece6; border-color: #9cb59c; color: #2f5d2f; }
+	.ffs-steps li.now { color: #1f2933; font-weight: 600; }
+	.ffs-steps li.now .ffs-dot { background: #1f3a5f; border-color: #1f3a5f; color: #fff; }
+	.ffs-msg { background: #f5f7fa; border: 1px solid #e1e6ec; border-radius: 6px; padding: 12px 14px; font-size: 14px; }
+</style>
+
+<div class="ffs">
+	<div class="ffs-card">
+		<h1>{{ _("Track your application") }}</h1>
+		<p class="ffs-sub">{{ _("Azim Premji Foundation") }}</p>
+		<form id="ffs-form" autocomplete="on">
+			<label for="ffs-id">{{ _("Application ID") }}</label>
+			<input id="ffs-id" name="application_id" placeholder="IMFR-0001" value="{{ app_id or '' }}" required>
+			<label for="ffs-email">{{ _("Registered email address") }}</label>
+			<input id="ffs-email" name="email" type="email" required>
+			<button type="submit">{{ _("Check status") }}</button>
+			<div class="ffs-err" id="ffs-err" hidden></div>
+		</form>
+	</div>
+	<div class="ffs-card" id="ffs-result" hidden></div>
+</div>
+
+<script>
+	frappe.ready(() => {
+		const form = document.getElementById("ffs-form");
+		const err = document.getElementById("ffs-err");
+		const out = document.getElementById("ffs-result");
+		const esc = (s) => frappe.utils.escape_html(String(s || ""));
+
+		form.addEventListener("submit", (e) => {
+			e.preventDefault();
+			err.hidden = true;
+			const btn = form.querySelector("button");
+			btn.disabled = true;
+			frappe.call({
+				method: "ms_calendar.api.ms_enablers.get_application_status",
+				args: {
+					application_id: form.application_id.value,
+					email: form.email.value,
+				},
+				callback: (r) => {
+					const d = r.message || {};
+					if (!d.found) {
+						out.hidden = true;
+						err.textContent = "{{ _('We could not find an application with this ID and email address.') }}";
+						err.hidden = false;
+						return;
+					}
+					const steps = d.closed ? "" : `<ul class="ffs-steps">${d.stages.map((s, i) => {
+						const cls = i < d.current ? "done" : i === d.current ? "now" : "";
+						const mark = i < d.current ? "&#10003;" : i + 1;
+						return `<li class="${cls}"><span class="ffs-dot">${mark}</span>${esc(s)}</li>`;
+					}).join("")}</ul>`;
+					out.innerHTML = `
+						<h1 style="font-size:18px">${esc(d.full_name)}</h1>
+						<div class="ffs-meta">${esc(d.name)}${d.role ? " · " + esc(d.role) : ""} · {{ _("Applied on") }} ${esc(d.applied_on)}</div>
+						${steps}
+						<div class="ffs-msg">${esc(d.message)}</div>`;
+					out.hidden = false;
+				},
+				// Website frappe.call never calls `error` (and skips `callback`
+				// on non-200, e.g. the rate limit); `always` sees every response.
+				always: (d) => {
+					btn.disabled = false;
+					if (d && "message" in d) return;
+					out.hidden = true;
+					err.textContent = "{{ _('Something went wrong. Please try again in a few minutes.') }}";
+					err.hidden = false;
+				},
+			});
+		});
+	});
+</script>
+{% endblock %}

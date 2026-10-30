@@ -320,7 +320,8 @@
 					// even if it was last opened with the list's read-only View).
 					d.$body.find('.pod-c360-edit').on('click', () => {
 						d.hide();
-						frappe.frf_view_only = null;
+						frappe.frf_view_only = frappe.pw_view_only_phil = frappe.pw_view_only_health = null;
+						frappe.pw_view_only_scholarship = frappe.pw_view_only_enablers = null;
 						frappe.set_route('Form', doctype, c.id);
 					});
 					d.show();
@@ -696,13 +697,21 @@ a.pod-c360-doc:hover { background:var(--hover); border-color:var(--link); }
 		'Field Registration Form': { program: 'Field', title: 'full_name_aadhaar', email: 'email_address', phone: 'phone_number',
 			role: 'role', job_code: 'job_code', subunit: 'department', location: 'location', status: 'application_status', applied: 'application_date' },
 		'Health Registration Form': { program: 'Health', title: 'full_name', email: 'email_address', phone: 'phone_number',
-			role: 'role', job_code: 'job_code', subunit: 'department', location: 'location', status: 'application_status' },
+			role: 'role', job_code: 'job_code', subunit: 'department', location: 'location', status: 'application_status',
+			applied: 'application_date' },
 		'Phil Registration Form': { program: 'Philanthropy', title: 'name1', email: 'email', phone: 'phone',
-			role: 'role', job_code: 'job_code', location: 'location', status: 'application_status' },
+			role: 'role', job_code: 'job_code', location: 'location', status: 'application_status', applied: 'application_date' },
 		'Scholarship Recruitment Form': { program: 'Scholarship', title: 'full_name_as_per_aadhar', email: 'email', phone: 'phone_number',
 			role: 'role', subunit: 'department', location: 'location', status: 'application_status' },
+		// Header + layout only (no profile popup: the dashboard has no Enablers programme).
+		'Enablers Registration Form': { program: 'Enablers', title: 'full_name', email: 'email_address', phone: 'phone_number',
+			role: 'role', subunit: 'department', location: 'location', status: 'application_status', applied: 'application_date' },
 	};
-	var PW_HEAD_PROGRAM_COLORS = { 'Field': '#2a78d6', 'Health': '#eb6834', 'Philanthropy': '#1baf7a', 'Scholarship': '#eda100' };
+	// Forms that get the full layout (cards, Jump to, full width) — not only the header.
+	var PW_SKIN_DTS = { 'Field Registration Form': 1, 'Health Registration Form': 1, 'Phil Registration Form': 1,
+		'Scholarship Recruitment Form': 1, 'Enablers Registration Form': 1 };
+	var PW_HEAD_PROGRAM_COLORS = { 'Field': '#2a78d6', 'Health': '#eb6834', 'Philanthropy': '#1baf7a', 'Scholarship': '#eda100',
+		'Enablers': '#6B5BB5' };
 	var PW_HEAD_STAGE_COLORS = { 'New': '#8A96A3', 'In process': '#2C5F8A', 'On hold': '#B7791F', 'Offer / Selected': '#2F7D4F', 'Not selected': '#B83232' };
 	var PW_HEAD_OFFER = ['offer', 'offered', 'offer accepted', 'joined', 'pre joining', 'document collection', 'document verification pass',
 		'it team', 'compensation due', 'compensation approved', 'offer sent', 'offer not sent', 'addendum accepted', 'pre-join form submitted',
@@ -790,7 +799,7 @@ a.pod-c360-doc:hover { background:var(--hover); border-color:var(--link); }
 		</div>`);
 		$h.find('.pw-head-id').on('click', () => frappe.utils.copy_to_clipboard(d.name));
 		$h.find('.pw-head-status').on('click', () => m.status && frm.scroll_to_field(m.status));
-		if (frm.doctype === 'Field Registration Form') pw_frf_extras(frm, $h);
+		if (PW_SKIN_DTS[frm.doctype]) pw_frf_extras(frm, $h);
 		$layout.prepend($h);
 	}
 
@@ -801,8 +810,11 @@ a.pod-c360-doc:hover { background:var(--hover); border-color:var(--link); }
 	function pw_frf_extras(frm, $h) {
 		const esc = (x) => frappe.utils.escape_html(x === null || x === undefined ? '' : String(x));
 		// Labelled sections that are on screen (depends_on / empty ones are skipped).
+		// A section in a hidden tab (e.g. Enablers-only tabs on a Fellowship applicant) is skipped too.
+		const tab_hidden = (s) => (frm.layout.tabs || []).some(t => t.wrapper && t.wrapper[0] && t.wrapper[0].contains(s.wrapper[0])
+			&& t.df && (t.df.hidden || t.df.hidden_due_to_dependency));
 		const secs = (frm.layout.sections || []).filter(s => s.df && s.df.label && s.wrapper && !s.df.hidden
-			&& !s.wrapper.hasClass('hide-control') && !s.wrapper.hasClass('empty-section'));
+			&& !s.wrapper.hasClass('hide-control') && !s.wrapper.hasClass('empty-section') && !tab_hidden(s));
 		if (secs.length > 1) {
 			$h.append(`<div class="pw-jump"><span class="pw-jump-l">${esc(__('Jump to'))}</span>${secs.map((s, i) =>
 				`<button type="button" class="pw-jump-chip" data-i="${i}">${esc(__(s.df.label))}</button>`).join('')}</div>`);
@@ -838,11 +850,14 @@ a.pod-c360-doc:hover { background:var(--hover); border-color:var(--link); }
 			frm._pw_conn_obs = new MutationObserver(adopt);
 			frm._pw_conn_obs.observe($layout[0], { childList: true, subtree: true });
 		}
-		setTimeout(adopt, 0);
+		adopt();
 		$h.on('click', '.pw-jump-chip', (e) => {
 			const s = secs[+e.currentTarget.getAttribute('data-i')];
 			if (!s) return;
 			if (s.is_collapsed && s.is_collapsed()) s.collapse(false);
+			// A section on another tab (e.g. Health's "Additional C & B"): open that tab first.
+			const tab = (frm.layout.tabs || []).find(t => t.wrapper && t.wrapper[0] && t.wrapper[0].contains(s.wrapper[0]));
+			if (tab && tab.set_active && !tab.wrapper.hasClass('active')) tab.set_active();
 			s.wrapper[0].scrollIntoView({ behavior: 'smooth', block: 'start' });
 		});
 		// "Back to top" — shown once the header card has scrolled out of view.
@@ -858,7 +873,7 @@ a.pod-c360-doc:hover { background:var(--hover); border-color:var(--link); }
 	}
 
 	function pw_frf_skin(frm) {
-		const on = frm.doctype === 'Field Registration Form';
+		const on = !!PW_SKIN_DTS[frm.doctype];
 		frm.page.wrapper.toggleClass('frf-form-skin', on);
 		if (!on) return;
 		// A section without a heading continues the card above it — the
@@ -991,13 +1006,32 @@ a.pod-c360-doc:hover { background:var(--hover); border-color:var(--link); }
 	}
 
 	// Registration forms: summary header + "View profile" button on saved records.
-	Object.keys(AP_PROGRAMS).forEach((doctype) => {
-		frappe.ui.form.on(doctype, {
-			refresh(frm) {
-				pw_form_header(frm);
-				if (frm.is_new()) return;
-				frm.add_custom_button(__('View profile'), () => window.pathways_applicant_profile.open_for(doctype, frm.doc.name));
-			},
+	// The handler is moved to the front of the form's refresh handlers: Frappe
+	// runs them one by one and waits for every pending server call after each,
+	// so behind the slow duplicate checks the header appeared seconds late.
+	// The CV scripts on these forms call frm.clear_custom_buttons() in their own
+	// refresh (before or after this one, depending on which form loaded first),
+	// so the button is put back every time the buttons are cleared.
+	function pw_profile_button(frm) {
+		if (frm.is_new() || !AP_PROGRAMS[frm.doctype]) return;
+		frm.add_custom_button(__('View profile'), () => window.pathways_applicant_profile.open_for(frm.doctype, frm.doc.name));
+	}
+	// Every form with a header (Enablers too — it only gets no profile button).
+	Object.keys(PW_HEAD_MAP).forEach((doctype) => {
+		frappe.ui.form.on(doctype, 'refresh', (frm) => {
+			pw_form_header(frm);
+			if (!frm._pw_clear_wrapped) {
+				frm._pw_clear_wrapped = true;
+				const clear = frm.clear_custom_buttons;
+				frm.clear_custom_buttons = function () {
+					const out = clear.apply(this, arguments);
+					pw_profile_button(this);
+					return out;
+				};
+			}
+			pw_profile_button(frm);
 		});
+		const handlers = frappe.ui.form.get_event_handler_list && frappe.ui.form.get_event_handler_list(doctype, 'refresh');
+		if (handlers && handlers.length > 1) handlers.unshift(handlers.pop());
 	});
 })();

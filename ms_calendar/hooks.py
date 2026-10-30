@@ -485,6 +485,15 @@ doc_events = {
     "Health Document Collection": {
         "on_update": "ms_calendar.api.resume_rename.on_health_document_collection"
     },
+    # Custom (DB-only) DocType — no controller, so the Enablers workflow
+    # (status rules per round / sub-unit, emails) is hooked here. It is also
+    # the Desk form for Finance Fellowship applicants (sub-unit "Finance
+    # Fellowship"), whose rules — incl. the email OTP — live in ms_finance.
+    "Enablers Registration Form": {
+        "validate": "ms_calendar.api.ms_enablers.validate_registration",
+        "after_insert": "ms_calendar.api.ms_enablers.after_registration_insert",
+        "on_update": "ms_calendar.api.ms_enablers.on_registration_update",
+    },
     "Philanthrophy Document Collection": {
         "on_update": "ms_calendar.api.resume_rename.on_philanthropy_document_collection"
     },
@@ -702,6 +711,9 @@ doctype_js = {
     # interview_schedule.js loads by itself) but a Custom DocType on live,
     # where this file is the Client Script "Interview Schedule Theme".
     "Interview Schedule": "public/js/interview_schedule_theme.js",
+    # Card layout like the other units' interview forms (its own
+    # enablers_interview_schedule.js does the scheduling).
+    "Enablers Interview Schedule": "public/js/enablers_interview_schedule_theme.js",
 }
 doctype_list_js = {
     "Field Registration Form": "public/js/frf_list.js",
@@ -713,6 +725,7 @@ doctype_list_js = {
     # On live: List Client Script "Job Opening List View" (loading both is
     # harmless — the file wraps the list settings only once).
     "Job Opening": "public/js/job_opening_list.js",
+    "Enablers Interview Schedule": "public/js/enablers_interview_schedule_list.js",
 }
 app_include_js = [
     # frf_list.js carries a manual "?v=" cache-buster: this file has no
@@ -732,7 +745,7 @@ app_include_js = [
     # Applicant profile popup — shared by the Pathways Overall Dashboard and
     # the four registration lists (click a name) / forms ("View profile").
     # Manual "?v=" cache-buster like frf_list.js: bump it when the file changes.
-    "/assets/ms_calendar/js/applicant_profile.js?v=16",
+    "/assets/ms_calendar/js/applicant_profile.js?v=18",
     # Form Activity timeline shows the exact date/time instead of "2 days ago".
     # Manual "?v=" cache-buster: bump it when the file changes.
     "/assets/ms_calendar/js/activity_exact_time.js?v=2",
@@ -750,7 +763,7 @@ app_include_js = [
 # feedback web forms are custom records on the site.
 # Manual "?v=" cache-buster like frf_list.js: bump it when the file changes.
 web_include_js = [
-    "/assets/ms_calendar/js/feedback_form_draft.js?v=9",
+    "/assets/ms_calendar/js/feedback_form_draft.js?v=10",
 ]
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -802,7 +815,15 @@ before_migrate = ["ms_calendar.patches.fix_pkg_resources.execute"]
 # synced from their actual .js source files on every migrate, so editing
 # the file is enough. See ms_calendar.api.sync_client_scripts for the list
 # of doctypes this covers.
-after_migrate = ["ms_calendar.api.sync_client_scripts.sync_custom_doctype_client_scripts"]
+after_migrate = [
+    "ms_calendar.api.sync_client_scripts.sync_custom_doctype_client_scripts",
+    # Adds the Enablers workflow fields / statuses / connections to the custom
+    # (DB-only) "Enablers Registration Form" — idempotent, skips sites without it.
+    "ms_calendar.api.ms_enablers.ensure_enablers_schema",
+    # Saved Enablers / Finance Fellowship invite templates get the attached
+    # documents list + Hybrid panel lines (only where the old text is unchanged).
+    "ms_calendar.api.enablers_panel.upgrade_invite_templates",
+]
 
 # before_install = "ms_calendar.install.before_install"
 # after_install = "ms_calendar.install.after_install"
@@ -863,12 +884,23 @@ after_migrate = ["ms_calendar.api.sync_client_scripts.sync_custom_doctype_client
 # ---------------
 
 scheduler_events = {
+	# Finance Fellowship regret email — goes out N days (Finance Fellowship
+	# Settings, default 3) after the applicant was marked Regret.
+	"hourly": [
+		"ms_calendar.api.ms_finance.send_due_regret_emails",
+		# Enablers regret email when Enablers Settings has a delay (0 = sent
+		# straight away on the status change).
+		"ms_calendar.api.ms_enablers.send_due_regret_emails",
+	],
 	"daily": [
 		"ms_calendar.api.ms_philanthropy.send_interviewer_feedback_reminders",
 		"ms_calendar.api.ms_philanthropy.send_candidate_interview_reminders",
 		"ms_calendar.api.ms_field.send_field_interview_feedback_reminders",
 		"ms_calendar.api.ms_health.send_interviewer_feedback_reminders",
 		"ms_calendar.api.msgraph.send_scholarship_interview_feedback_reminders",
+		# Enablers + Finance Fellowship panel: daily for interviews that ended
+		# 1-7 days ago, to each member still pending.
+		"ms_calendar.api.enablers_panel.send_daily_feedback_reminders",
 	],
 	"cron": {
 		"*/5 * * * *": [
@@ -895,6 +927,7 @@ scheduler_events = {
 			# ends — same as Field's; the daily jobs take over from day 1.
 			"ms_calendar.api.ms_health.send_interviewer_first_feedback_reminder",
 			"ms_calendar.api.msgraph.send_scholarship_interview_first_feedback_reminder",
+			"ms_calendar.api.enablers_panel.send_first_feedback_reminders",
 		],
 		# No scheduled MeritTrac results pull on purpose. The every-minute
 		# pull_pending_merittrac_results job got the APF account blocked by

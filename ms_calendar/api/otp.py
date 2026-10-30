@@ -101,6 +101,10 @@ _OTP_SENDER_BY_FORM = {
         "health.jobs@azimpremjifoundation.org",
         "Health Registration Form",
     ),
+    "Finance Fellowship Registration Form": (
+        "health.fellowship@azimpremjifoundation.org",
+        "Finance Fellowship Registration Form",
+    ),
 }
 _DEFAULT_OTP_SENDER = _OTP_SENDER_BY_FORM["Field Registration Form"]
 

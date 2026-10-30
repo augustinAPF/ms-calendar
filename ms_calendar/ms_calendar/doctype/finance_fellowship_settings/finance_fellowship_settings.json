@@ -1,0 +1,281 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "creation": "2026-10-28 18:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "general_section",
+  "fellowship_name",
+  "sender_email",
+  "recruiter_email",
+  "column_break_general",
+  "default_organizer_email",
+  "regret_delay_days",
+  "blank_application_form",
+  "fitment_section",
+  "associate_fellow_stipend",
+  "column_break_fitment",
+  "fellow_stipend",
+  "templates_tab",
+  "templates_help",
+  "application_received_section",
+  "application_received_subject",
+  "application_received_message",
+  "regret_section",
+  "regret_subject",
+  "regret_message",
+  "panel_invite_section",
+  "panel_invite_subject",
+  "panel_invite_message",
+  "candidate_invite_section",
+  "candidate_invite_subject",
+  "candidate_invite_message",
+  "application_form_request_section",
+  "application_form_request_subject",
+  "application_form_request_message",
+  "document_request_section",
+  "document_request_subject",
+  "document_request_message",
+  "offer_released_section",
+  "offer_released_subject",
+  "offer_released_message"
+ ],
+ "fields": [
+  {
+   "fieldname": "general_section",
+   "fieldtype": "Section Break",
+   "label": "General"
+  },
+  {
+   "fieldname": "fellowship_name",
+   "fieldtype": "Data",
+   "label": "Fellowship name"
+  },
+  {
+   "description": "Must be an outgoing Email Account; otherwise the default outgoing account is used.",
+   "fieldname": "sender_email",
+   "fieldtype": "Data",
+   "label": "Send emails from",
+   "options": "Email"
+  },
+  {
+   "description": "Gets a note when feedback or documents are submitted.",
+   "fieldname": "recruiter_email",
+   "fieldtype": "Data",
+   "label": "Recruitment team email",
+   "options": "Email"
+  },
+  {
+   "fieldname": "column_break_general",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "default_organizer_email",
+   "fieldtype": "Link",
+   "label": "Default interview organizer",
+   "options": "Organizer Email"
+  },
+  {
+   "fieldname": "regret_delay_days",
+   "fieldtype": "Int",
+   "label": "Send regret email after (days)"
+  },
+  {
+   "description": "The Foundation's application form that applicants download, fill and upload.",
+   "fieldname": "blank_application_form",
+   "fieldtype": "Attach",
+   "label": "Blank Application Form (sent after Round 1)"
+  },
+  {
+   "fieldname": "fitment_section",
+   "fieldtype": "Section Break",
+   "label": "Salary fitment"
+  },
+  {
+   "fieldname": "associate_fellow_stipend",
+   "fieldtype": "Currency",
+   "label": "Associate Fellow (0-2 years) — monthly stipend",
+   "options": "INR"
+  },
+  {
+   "fieldname": "column_break_fitment",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "fellow_stipend",
+   "fieldtype": "Currency",
+   "label": "Fellow (more than 2 years) — monthly stipend",
+   "options": "INR"
+  },
+  {
+   "fieldname": "templates_tab",
+   "fieldtype": "Tab Break",
+   "label": "Email templates"
+  },
+  {
+   "fieldname": "templates_help",
+   "fieldtype": "HTML",
+   "label": "Template help",
+   "options": "<p class=\"text-muted small\">Templates use Jinja. Common values: <code>{{ applicant_name }}</code>, <code>{{ application_id }}</code>, <code>{{ fellowship_name }}</code>, <code>{{ track_url }}</code>, <code>{{ upload_link }}</code>, <code>{{ blank_form_link }}</code>, <code>{{ offer_link }}</code>. Interview templates also get <code>{{ panel_name }}</code>, <code>{{ interview_date }}</code>, <code>{{ interview_time }}</code>, <code>{{ mode }}</code>, <code>{{ meeting_link }}</code>, <code>{{ venue }}</code>, <code>{{ meeting_room }}</code>, <code>{{ assignment }}</code>, <code>{{ feedback_link }}</code>. Leave a field empty to use the standard text.</p>"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "application_received_section",
+   "fieldtype": "Section Break",
+   "label": "1. Application received (to applicant)"
+  },
+  {
+   "fieldname": "application_received_subject",
+   "fieldtype": "Data",
+   "label": "Subject"
+  },
+  {
+   "fieldname": "application_received_message",
+   "fieldtype": "Code",
+   "label": "Message",
+   "options": "HTML"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "regret_section",
+   "fieldtype": "Section Break",
+   "label": "2. Application regret (to applicant)"
+  },
+  {
+   "fieldname": "regret_subject",
+   "fieldtype": "Data",
+   "label": "Subject"
+  },
+  {
+   "fieldname": "regret_message",
+   "fieldtype": "Code",
+   "label": "Message",
+   "options": "HTML"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "panel_invite_section",
+   "fieldtype": "Section Break",
+   "label": "5. Discussion details (to panel — Outlook invite)"
+  },
+  {
+   "fieldname": "panel_invite_subject",
+   "fieldtype": "Data",
+   "label": "Subject"
+  },
+  {
+   "fieldname": "panel_invite_message",
+   "fieldtype": "Code",
+   "label": "Message",
+   "options": "HTML"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "candidate_invite_section",
+   "fieldtype": "Section Break",
+   "label": "6. Discussion details (to applicant)"
+  },
+  {
+   "fieldname": "candidate_invite_subject",
+   "fieldtype": "Data",
+   "label": "Subject"
+  },
+  {
+   "fieldname": "candidate_invite_message",
+   "fieldtype": "Code",
+   "label": "Message",
+   "options": "HTML"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "application_form_request_section",
+   "fieldtype": "Section Break",
+   "label": "7. Application Form after Round 1 (to applicant)"
+  },
+  {
+   "fieldname": "application_form_request_subject",
+   "fieldtype": "Data",
+   "label": "Subject"
+  },
+  {
+   "fieldname": "application_form_request_message",
+   "fieldtype": "Code",
+   "label": "Message",
+   "options": "HTML"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "document_request_section",
+   "fieldtype": "Section Break",
+   "label": "8. Documents after Round 2 (to applicant)"
+  },
+  {
+   "fieldname": "document_request_subject",
+   "fieldtype": "Data",
+   "label": "Subject"
+  },
+  {
+   "fieldname": "document_request_message",
+   "fieldtype": "Code",
+   "label": "Message",
+   "options": "HTML"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "offer_released_section",
+   "fieldtype": "Section Break",
+   "label": "Offer released (to applicant)"
+  },
+  {
+   "fieldname": "offer_released_subject",
+   "fieldtype": "Data",
+   "label": "Subject"
+  },
+  {
+   "fieldname": "offer_released_message",
+   "fieldtype": "Code",
+   "label": "Message",
+   "options": "HTML"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-10-28 18:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Ms Calendar",
+ "name": "Finance Fellowship Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Finance Fellowship Recruiter",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

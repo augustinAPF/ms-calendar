@@ -28,6 +28,10 @@
 		"Health Center Visit Form",
 		// Philanthropy (ms_philanthropy._phil_feedback_url)
 		"Philanthrophy Feedback Form",
+		// Enablers + Finance Fellowship (enablers_panel.panel_feedback_link;
+		// their links carry ?schedule= instead of ?app_id=)
+		"Enablers Feedback Form",
+		"Finance Fellowship Feedback Form",
 		// Scholarship (msgraph.SCHOLARSHIP_FEEDBACK_DOCTYPES; two spaces in "Feedback  Form Two")
 		"Feedback Form One",
 		"Feedback  Form Two",
@@ -47,7 +51,9 @@
 		"Final Feedback Field Enabler",
 	];
 	// Filled from the link / by the form's own script, never from a draft.
-	const NEVER_RESTORE = ["applicant_id", "applicant_name", "date_time", "application_status", "department", "role"];
+	const NEVER_RESTORE = ["applicant_id", "applicant_name", "date_time", "application_status", "department", "role",
+		// Enablers / Finance Fellowship forms fill these from the schedule.
+		"application_id", "interview_schedule", "interview_round", "interview_date", "sub_unit"];
 	// The panelist's name / email field, named differently per form
 	// (Health: panal_name / panelist_name; Scholarship: interviewer_name).
 	const PANELIST_NAME_FIELDS = ["panelist_name", "panal_name", "interviewer_name"];
@@ -82,6 +88,12 @@
 		} catch (e) {
 			return [];
 		}
+	}
+
+	// Who / what the feedback is about: the applicant (app_id) or, on the
+	// Enablers / Finance Fellowship forms, the interview (schedule).
+	function link_id() {
+		return params.get("app_id") || params.get("applicant_id") || params.get("schedule") || "";
 	}
 
 	function panelist() {
@@ -350,7 +362,7 @@
 
 	function make_key() {
 		const route = wf.route || window.location.pathname.split("/")[1] || "";
-		const app_id = params.get("app_id") || params.get("applicant_id") || "";
+		const app_id = link_id();
 		const who = chosen && chosen.consolidated ? "consolidated" : panelist().email.toLowerCase();
 		return `${DRAFT_PREFIX}${route}::${app_id}::${who}`;
 	}
@@ -427,7 +439,7 @@
 	function find_draft() {
 		const exact = storage_get(draft_key);
 		if (exact && exact.values) return { key: draft_key, d: exact };
-		const app_id = params.get("app_id") || params.get("applicant_id") || "";
+		const app_id = link_id();
 		if (!app_id) return null;
 		const me = draft_key.split("::").slice(3).join("::");
 		return saved_drafts().find((c) => c.app_id === app_id && (!me || !c.who || c.who === me)) || null;
@@ -521,7 +533,7 @@
 
 		// One link for the whole panel: one member → filled in straight away,
 		// several → they pick their name first (start_filling runs on the click).
-		if (!params.get("app_id") && !params.get("applicant_id")) offer_saved_drafts();
+		if (!link_id()) offer_saved_drafts();
 		const panel = params.get("panelist_email") ? [] : panel_list();
 		if (panel.length === 1) chosen = panel[0];
 		if (panel.length > 1) {

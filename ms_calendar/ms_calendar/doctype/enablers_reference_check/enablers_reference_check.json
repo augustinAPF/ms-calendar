@@ -1,0 +1,326 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "ERC-.#####",
+ "creation": "2026-10-29 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "part_a_section",
+  "application_id",
+  "candidate_name",
+  "position_role",
+  "function",
+  "column_break_referee",
+  "referee_name",
+  "referee_contact_number",
+  "referee_email",
+  "referee_designation",
+  "relationship_with_candidate",
+  "part_b_section",
+  "key_achievements",
+  "key_strengths",
+  "key_areas_of_development",
+  "part_c_section",
+  "subject_matter_knowledge",
+  "conceptual_ability",
+  "analytical_skills",
+  "column_break_abilities",
+  "communication_skills",
+  "interpersonal_skills",
+  "leadership_skills",
+  "abilities_comments",
+  "part_d_section",
+  "referee_comments",
+  "part_e_section",
+  "would_reemploy",
+  "reemploy_role",
+  "reemploy_why_not",
+  "supervisor_section",
+  "reference_check_result",
+  "overall_comments",
+  "process_section",
+  "check_mode",
+  "supervisor",
+  "supervisor_name",
+  "column_break_process",
+  "date_of_reference_check",
+  "signature"
+ ],
+ "fields": [
+  {
+   "fieldname": "part_a_section",
+   "fieldtype": "Section Break",
+   "label": "Part A: Candidate Details"
+  },
+  {
+   "fieldname": "application_id",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Application ID",
+   "options": "Enablers Registration Form",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fetch_from": "application_id.full_name",
+   "fieldname": "candidate_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "application_id.role",
+   "fieldname": "position_role",
+   "fieldtype": "Data",
+   "label": "Position / Role",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "application_id.department",
+   "fieldname": "function",
+   "fieldtype": "Data",
+   "label": "Function",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_referee",
+   "fieldtype": "Column Break",
+   "label": "Referee Details"
+  },
+  {
+   "fieldname": "referee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Name",
+   "reqd": 1
+  },
+  {
+   "fieldname": "referee_contact_number",
+   "fieldtype": "Data",
+   "label": "Contact Number",
+   "options": "Phone"
+  },
+  {
+   "fieldname": "referee_email",
+   "fieldtype": "Data",
+   "label": "Email ID",
+   "options": "Email"
+  },
+  {
+   "fieldname": "referee_designation",
+   "fieldtype": "Data",
+   "label": "Designation/Role"
+  },
+  {
+   "fieldname": "relationship_with_candidate",
+   "fieldtype": "Small Text",
+   "label": "Nature of relationship with the candidate"
+  },
+  {
+   "fieldname": "part_b_section",
+   "fieldtype": "Section Break",
+   "label": "Part B: Achievements, strengths and areas of development"
+  },
+  {
+   "fieldname": "key_achievements",
+   "fieldtype": "Small Text",
+   "label": "Key Achievements"
+  },
+  {
+   "fieldname": "key_strengths",
+   "fieldtype": "Small Text",
+   "label": "Key Strengths"
+  },
+  {
+   "fieldname": "key_areas_of_development",
+   "fieldtype": "Small Text",
+   "label": "Key Areas of Development"
+  },
+  {
+   "fieldname": "part_c_section",
+   "fieldtype": "Section Break",
+   "label": "Part C: Personal and professional abilities"
+  },
+  {
+   "fieldname": "subject_matter_knowledge",
+   "fieldtype": "Select",
+   "label": "Subject matter knowledge",
+   "options": "\nExcellent\nGood\nAverage\nBelow average\nNot observed"
+  },
+  {
+   "fieldname": "conceptual_ability",
+   "fieldtype": "Select",
+   "label": "Conceptual ability",
+   "options": "\nExcellent\nGood\nAverage\nBelow average\nNot observed"
+  },
+  {
+   "fieldname": "analytical_skills",
+   "fieldtype": "Select",
+   "label": "Analytical skills",
+   "options": "\nExcellent\nGood\nAverage\nBelow average\nNot observed"
+  },
+  {
+   "fieldname": "column_break_abilities",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "communication_skills",
+   "fieldtype": "Select",
+   "label": "Communication skills",
+   "options": "\nExcellent\nGood\nAverage\nBelow average\nNot observed"
+  },
+  {
+   "fieldname": "interpersonal_skills",
+   "fieldtype": "Select",
+   "label": "Interpersonal skills",
+   "options": "\nExcellent\nGood\nAverage\nBelow average\nNot observed"
+  },
+  {
+   "fieldname": "leadership_skills",
+   "fieldtype": "Select",
+   "label": "Leadership skills",
+   "options": "\nExcellent\nGood\nAverage\nBelow average\nNot observed"
+  },
+  {
+   "fieldname": "abilities_comments",
+   "fieldtype": "Small Text",
+   "label": "Comments on abilities"
+  },
+  {
+   "fieldname": "part_d_section",
+   "fieldtype": "Section Break",
+   "label": "Part D: Any other comments from referee"
+  },
+  {
+   "fieldname": "referee_comments",
+   "fieldtype": "Small Text",
+   "label": "Comments"
+  },
+  {
+   "fieldname": "part_e_section",
+   "fieldtype": "Section Break",
+   "label": "Part E: Opinion of referee on re-employment of candidate"
+  },
+  {
+   "fieldname": "would_reemploy",
+   "fieldtype": "Select",
+   "label": "Would the referee re-employ the candidate given appropriate opportunity?",
+   "options": "\nYes\nNo"
+  },
+  {
+   "depends_on": "eval:doc.would_reemploy==\"Yes\"",
+   "fieldname": "reemploy_role",
+   "fieldtype": "Data",
+   "label": "If yes, in what role?"
+  },
+  {
+   "depends_on": "eval:doc.would_reemploy==\"No\"",
+   "fieldname": "reemploy_why_not",
+   "fieldtype": "Small Text",
+   "label": "If no, why?"
+  },
+  {
+   "fieldname": "supervisor_section",
+   "fieldtype": "Section Break",
+   "label": "Comments from Supervisor who conducted the reference check"
+  },
+  {
+   "fieldname": "reference_check_result",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Reference Check",
+   "options": "\nSatisfactory\nNot Satisfactory",
+   "reqd": 1
+  },
+  {
+   "fieldname": "overall_comments",
+   "fieldtype": "Small Text",
+   "label": "Overall comments in view of the response above"
+  },
+  {
+   "fieldname": "process_section",
+   "fieldtype": "Section Break",
+   "label": "Process"
+  },
+  {
+   "fieldname": "check_mode",
+   "fieldtype": "Select",
+   "label": "Reference Check done through",
+   "options": "\nFace to face conversation (A)\nTelephonic conversation (B)",
+   "reqd": 1
+  },
+  {
+   "default": "__user",
+   "fieldname": "supervisor",
+   "fieldtype": "Link",
+   "label": "Supervisor who conducted the Reference Check",
+   "options": "User"
+  },
+  {
+   "fetch_from": "supervisor.full_name",
+   "fieldname": "supervisor_name",
+   "fieldtype": "Data",
+   "label": "Name of Supervisor"
+  },
+  {
+   "fieldname": "column_break_process",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Today",
+   "fieldname": "date_of_reference_check",
+   "fieldtype": "Date",
+   "label": "Date of reference check",
+   "reqd": 1
+  },
+  {
+   "fieldname": "signature",
+   "fieldtype": "Signature",
+   "label": "Signature"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-29 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Ms Calendar",
+ "name": "Enablers Reference Check",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Enablers Recruiter",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "candidate_name",
+ "track_changes": 1
+}
