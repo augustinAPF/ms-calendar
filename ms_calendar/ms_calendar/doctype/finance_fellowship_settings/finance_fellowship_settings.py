@@ -27,10 +27,11 @@ _SIGNATURE = "<p>Regards,<br>People Function<br>Azim Premji Foundation</p>"
 # Standard values used whenever a Settings field is left blank — so the
 # recruitment team can edit any of them, but nothing breaks before they do.
 # Texts are the ones in "Process Flow - Finance Fellowship Program - for
-# Pathways - Version 2.xlsx" (Workflow sheet).
+# Pathways - Version 3.xlsx" (Workflow sheet).
 DEFAULTS = {
 	"fellowship_name": "Azim Premji Finance Fellowship",
-	"sender_email": "health.fellowship@azimpremjifoundation.org",
+	# Used only once an outgoing Email Account for it exists (sender_kwargs).
+	"sender_email": "finance.fellowship@azimpremjifoundation.org",
 	"regret_delay_days": 3,
 	# 1. Application submission
 	"application_received_subject": "Application received - {{ fellowship_name }}",

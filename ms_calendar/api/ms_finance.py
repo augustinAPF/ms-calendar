@@ -21,6 +21,7 @@ from frappe.utils import (
 	add_days,
 	cint,
 	date_diff,
+	flt,
 	formatdate,
 	get_datetime,
 	getdate,
@@ -81,19 +82,36 @@ CONDITIONAL_REQUIRED = (
 	("association_details", "foundation_association", "Yes"),
 	("ug_degree_other", "ug_degree", "Others"),
 	("ug_year_other", "ug_year", "Other"),
-	("ug_state_other", "ug_state", "Other"),
+	("ug_state_other", "ug_state", "Others"),
+	("ug_location_other", "ug_location", "Others"),
+	("ug_university_other", "ug_university", "Others"),
+	("ug_institution_other", "ug_institution", "Others"),
+	("ug_duration_other", "ug_duration", "Other"),
 	("pg_degree_other", "pg_degree", "Others"),
-	("pg_duration_other", "pg_duration", "Other"),
 	("pg_year_other", "pg_year", "Other"),
-	("pg_state_other", "pg_state", "Other"),
+	("pg_state_other", "pg_state", "Others"),
+	("pg_location_other", "pg_location", "Others"),
+	("pg_university_other", "pg_university", "Others"),
+	("pg_institution_other", "pg_institution", "Others"),
+	("pg_duration_other", "pg_duration", "Other"),
 	("professional_qualification_other", "professional_qualification", "Others"),
 	("professional_year_other", "professional_year", "Other"),
-	("professional_duration_other", "professional_duration", "Other"),
-	("professional_state_other", "professional_state", "Other"),
+	("professional_state_other", "professional_state", "Others"),
+	("professional_location_other", "professional_location", "Others"),
+	("professional_institution_other", "professional_institution", "Others"),
+	("professional_air_rank", "professional_air", "Yes"),
 	("referral_details", "opportunity_source", "Referral from employee of Azim Premji Foundation"),
 	("source_other", "opportunity_source", "Others"),
 )
 YEAR_OTHER_FIELDS = ("ug_year_other", "pg_year_other", "professional_year_other")
+# Grading System sheet (Process Flow Version 3): one of the three boxes per
+# course. (field suffix, label, highest value, to-percentage)
+GRADES = (
+	("percentage", "Percentage", 100, lambda x: x),
+	("cgpa", "CGPA (10-point)", 10, lambda x: x * 9.5),
+	("gpa", "GPA (4-point)", 4, lambda x: x / 4 * 100),
+)
+GRADED_COURSES = (("ug", "UG"), ("pg", "PG"))
 RESUME_EXTENSIONS = (".pdf", ".doc", ".docx")
 ASSOCIATE_EXPERIENCE = ("Fresher", "1 year", "2 years")
 ASSOCIATE_FELLOW = "Associate Fellow (0-2 years)"
@@ -133,6 +151,7 @@ def fellowship_validate(doc):
 	_set_age(doc)
 	_validate_resume(doc)
 	_validate_conditional_fields(doc)
+	_validate_grading(doc)
 	if sum(cint(doc.get(f)) for f in LANGUAGE_FIELDS) < 2:
 		frappe.throw(_("Please choose at least two languages you can speak."), title=_("Languages"))
 	if doc.is_new():
@@ -185,6 +204,33 @@ def _validate_conditional_fields(doc):
 			frappe.throw(
 				_("{0}: please enter a year between 1960 and {1}.").format(_(doc.meta.get_label(field)), this_year)
 			)
+	if doc.get("professional_air") == "Yes" and cint(doc.get("professional_air_rank")) <= 0:
+		frappe.throw(_("Please state your All-India Rank (AIR) number."), title=_("All-India Rank"))
+
+
+def _validate_grading(doc):
+	"""Percentage / CGPA / GPA: exactly one per course on new applications
+	(older ones predate these boxes), and the equivalent percentage kept in step."""
+	for prefix, course in GRADED_COURSES:
+		if not doc.meta.has_field(f"{prefix}_equivalent_percentage"):
+			continue
+		filled = [g for g in GRADES if flt(doc.get(f"{prefix}_{g[0]}"))]
+		if not filled:
+			if doc.is_new():
+				frappe.throw(
+					_("Grading System of the {0} course: please fill in your Percentage, CGPA or GPA.").format(course)
+				)
+			doc.set(f"{prefix}_equivalent_percentage", None)
+			continue
+		if len(filled) > 1:
+			frappe.throw(
+				_("Grading System of the {0} course: please fill in only one of Percentage, CGPA or GPA.").format(course)
+			)
+		suffix, label, highest, to_percent = filled[0]
+		value = flt(doc.get(f"{prefix}_{suffix}"))
+		if not 0 < value <= highest:
+			frappe.throw(_("{0} {1}: please enter a number above 0 and up to {2}.").format(course, label, highest))
+		doc.set(f"{prefix}_equivalent_percentage", flt(to_percent(value), 2))
 
 
 def _validate_new_application(doc):

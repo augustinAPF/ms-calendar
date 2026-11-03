@@ -195,6 +195,8 @@ def ensure_enablers_schema():
 		if df and not df[0].depends_on:
 			df[0].depends_on = NOT_FELLOWSHIP
 			changed = True
+	if _skip_hidden_mandatory_for_fellowship(dt):
+		changed = True
 
 	# Connections to forms that no longer exist (the old Finance Fellowship
 	# Interview Schedule was merged into Enablers Interview Schedule).
@@ -221,6 +223,40 @@ def ensure_enablers_schema():
 		dt.flags.ignore_permissions = True
 		dt.save()
 		frappe.db.commit()
+
+
+FELLOWSHIP_GUARD = 'doc.department!="Finance Fellowship"'
+
+
+def _skip_hidden_mandatory_for_fellowship(dt):
+	"""Fields in the Enablers-only sections/tabs are hidden for Fellowship
+	applicants, so none of them may be mandatory for them — otherwise Desk
+	refuses to save (e.g. permanent_address: mandatory unless "same as
+	current address", which a Fellowship applicant never sees).
+	reqd → mandatory_depends_on NOT_FELLOWSHIP; an existing
+	mandatory_depends_on gets `&& department != Finance Fellowship`."""
+	changed = False
+	hidden_tab = hidden_section = False
+	for df in dt.fields:
+		if df.fieldtype == "Tab Break":
+			hidden_tab, hidden_section = df.fieldname in ENABLERS_ONLY_LAYOUT, False
+			continue
+		if df.fieldtype == "Section Break":
+			hidden_section = df.fieldname in ENABLERS_ONLY_LAYOUT
+			continue
+		if not (hidden_tab or hidden_section):
+			continue
+		if df.reqd:
+			df.reqd = 0
+			df.mandatory_depends_on = NOT_FELLOWSHIP
+			changed = True
+		elif df.mandatory_depends_on and FELLOWSHIP_GUARD not in df.mandatory_depends_on:
+			expr = df.mandatory_depends_on.strip()
+			expr = expr[len("eval:"):] if expr.startswith("eval:") else f"doc.{expr}"
+			expr = expr.strip().rstrip(";").strip()
+			df.mandatory_depends_on = f"eval:({expr}) && {FELLOWSHIP_GUARD}"
+			changed = True
+	return changed
 
 
 def _ensure_fellowship_masters():

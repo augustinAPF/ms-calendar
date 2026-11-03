@@ -6,7 +6,9 @@ Fellowship applicants are Enablers Registration Forms with sub-unit
 fields (shown only for that sub-unit). Fields both forms already had
 (name, email, resume, ug_/pg_ degree/year/university, workflow dates …)
 are shared, not repeated. Selects / Data are length-capped to keep the
-custom table's row size in MariaDB's 64 KB limit.
+custom table's row size in MariaDB's 64 KB limit — new free-text "Others"
+boxes are Small Text for the same reason. UG / PG / CA sections follow
+"Process Flow - Finance Fellowship Program - for Pathways - Version 3.xlsx".
 """
 
 FELLOWSHIP_FIELDS = [{'fieldname': 'fellowship_tab',
@@ -105,14 +107,9 @@ FELLOWSHIP_FIELDS = [{'fieldname': 'fellowship_tab',
   'label': 'Please mention the year of UG completion',
   'depends_on': 'eval:doc.ug_year=="Other"',
   'mandatory_depends_on': 'eval:doc.ug_year=="Other"'},
- {'fieldname': 'ug_institution',
-  'fieldtype': 'Data',
-  'label': 'Name of the Institution where you completed your UG',
-  'length': 120},
- {'fieldname': 'column_break_ug', 'fieldtype': 'Column Break'},
  {'fieldname': 'ug_state',
   'fieldtype': 'Select',
-  'label': 'Name of the State where you studied your UG',
+  'label': 'Name of the State where you completed your UG degree',
   'options': '\n'
              'Andaman and Nicobar Islands\n'
              'Andhra Pradesh\n'
@@ -122,7 +119,7 @@ FELLOWSHIP_FIELDS = [{'fieldname': 'fellowship_tab',
              'Chandigarh\n'
              'Chhattisgarh\n'
              'Dadra and Nagar Haveli and Daman and Diu\n'
-             'Delhi\n'
+             'Delhi (NCT)\n'
              'Goa\n'
              'Gujarat\n'
              'Haryana\n'
@@ -150,23 +147,66 @@ FELLOWSHIP_FIELDS = [{'fieldname': 'fellowship_tab',
              'Uttar Pradesh\n'
              'Uttarakhand\n'
              'West Bengal\n'
-             'Other',
+             'Others',
   'length': 60},
  {'fieldname': 'ug_state_other',
   'fieldtype': 'Data',
-  'label': 'Please mention the State where you studied your UG',
-  'depends_on': 'eval:doc.ug_state=="Other"',
-  'mandatory_depends_on': 'eval:doc.ug_state=="Other"',
+  'label': 'Please mention the name of the State where you completed your UG',
+  'depends_on': 'eval:doc.ug_state=="Others"',
+  'mandatory_depends_on': 'eval:doc.ug_state=="Others"',
   'length': 120},
  {'fieldname': 'ug_location',
   'fieldtype': 'Data',
-  'label': 'Name of the Location where you pursued your UG',
+  'label': 'Name of the Location where you completed your UG',
   'length': 120},
+ {'fieldname': 'ug_location_other',
+  'fieldtype': 'Small Text',
+  'label': 'Please mention the name of the location where you completed your UG',
+  'depends_on': 'eval:doc.ug_location=="Others"',
+  'mandatory_depends_on': 'eval:doc.ug_location=="Others"'},
+ {'fieldname': 'ug_university_other',
+  'fieldtype': 'Small Text',
+  'label': 'Please mention the name of the University where you completed your UG',
+  'depends_on': 'eval:doc.ug_university=="Others"',
+  'mandatory_depends_on': 'eval:doc.ug_university=="Others"'},
+ {'fieldname': 'ug_institution',
+  'fieldtype': 'Data',
+  'label': 'Name of the Institution where you completed your UG',
+  'length': 120},
+ {'fieldname': 'ug_institution_other',
+  'fieldtype': 'Small Text',
+  'label': 'Please mention the name of the institution where you completed your UG',
+  'depends_on': 'eval:doc.ug_institution=="Others"',
+  'mandatory_depends_on': 'eval:doc.ug_institution=="Others"'},
+ {'fieldname': 'column_break_ug', 'fieldtype': 'Column Break'},
  {'fieldname': 'ug_mode',
   'fieldtype': 'Select',
   'label': 'Mode of Graduation',
   'options': '\nRegular\nDistance',
   'length': 60},
+ {'fieldname': 'ug_percentage',
+  'fieldtype': 'Float',
+  'label': 'Percentage (%)',
+  'precision': '2',
+  'description': 'Grading System of the UG course: fill in any one of Percentage, CGPA or GPA.'},
+ {'fieldname': 'ug_cgpa', 'fieldtype': 'Float', 'label': 'CGPA (10-point)', 'precision': '1'},
+ {'fieldname': 'ug_gpa', 'fieldtype': 'Float', 'label': 'GPA (4-point)', 'precision': '1'},
+ {'fieldname': 'ug_equivalent_percentage',
+  'fieldtype': 'Float',
+  'label': 'Equivalent percentage',
+  'precision': '2',
+  'read_only': 1,
+  'description': 'Percentage as entered, CGPA × 9.5, or GPA ÷ 4 × 100.'},
+ {'fieldname': 'ug_duration',
+  'fieldtype': 'Select',
+  'label': 'Duration of the UG course',
+  'options': '\n2 Years\n3 Years\n4 Years\nOther',
+  'length': 60},
+ {'fieldname': 'ug_duration_other',
+  'fieldtype': 'Small Text',
+  'label': 'Please mention the duration of the course',
+  'depends_on': 'eval:doc.ug_duration=="Other"',
+  'mandatory_depends_on': 'eval:doc.ug_duration=="Other"'},
  {'fieldname': 'pg_section',
   'fieldtype': 'Section Break',
   'label': 'Post Graduation (PG)',
@@ -177,6 +217,101 @@ FELLOWSHIP_FIELDS = [{'fieldname': 'fellowship_tab',
   'depends_on': 'eval:doc.pg_degree=="Others"',
   'mandatory_depends_on': 'eval:doc.pg_degree=="Others"',
   'length': 120},
+ {'fieldname': 'pg_year_other',
+  'fieldtype': 'Int',
+  'label': 'Please mention the year of PG completion',
+  'depends_on': 'eval:doc.pg_year=="Other"',
+  'mandatory_depends_on': 'eval:doc.pg_year=="Other"'},
+ {'fieldname': 'pg_state',
+  'fieldtype': 'Select',
+  'label': 'Name of the State where you completed your PG degree',
+  'options': '\n'
+             'Andaman and Nicobar Islands\n'
+             'Andhra Pradesh\n'
+             'Arunachal Pradesh\n'
+             'Assam\n'
+             'Bihar\n'
+             'Chandigarh\n'
+             'Chhattisgarh\n'
+             'Dadra and Nagar Haveli and Daman and Diu\n'
+             'Delhi (NCT)\n'
+             'Goa\n'
+             'Gujarat\n'
+             'Haryana\n'
+             'Himachal Pradesh\n'
+             'Jammu and Kashmir\n'
+             'Jharkhand\n'
+             'Karnataka\n'
+             'Kerala\n'
+             'Ladakh\n'
+             'Lakshadweep\n'
+             'Madhya Pradesh\n'
+             'Maharashtra\n'
+             'Manipur\n'
+             'Meghalaya\n'
+             'Mizoram\n'
+             'Nagaland\n'
+             'Odisha\n'
+             'Puducherry\n'
+             'Punjab\n'
+             'Rajasthan\n'
+             'Sikkim\n'
+             'Tamil Nadu\n'
+             'Telangana\n'
+             'Tripura\n'
+             'Uttar Pradesh\n'
+             'Uttarakhand\n'
+             'West Bengal\n'
+             'Others',
+  'length': 60},
+ {'fieldname': 'pg_state_other',
+  'fieldtype': 'Data',
+  'label': 'Please mention the name of the State where you completed your PG',
+  'depends_on': 'eval:doc.pg_state=="Others"',
+  'mandatory_depends_on': 'eval:doc.pg_state=="Others"',
+  'length': 120},
+ {'fieldname': 'pg_location',
+  'fieldtype': 'Data',
+  'label': 'Name of the Location where you completed your PG',
+  'length': 120},
+ {'fieldname': 'pg_location_other',
+  'fieldtype': 'Small Text',
+  'label': 'Please mention the name of the location where you completed your PG',
+  'depends_on': 'eval:doc.pg_location=="Others"',
+  'mandatory_depends_on': 'eval:doc.pg_location=="Others"'},
+ {'fieldname': 'pg_university_other',
+  'fieldtype': 'Small Text',
+  'label': 'Please mention the name of the University where you completed your PG',
+  'depends_on': 'eval:doc.pg_university=="Others"',
+  'mandatory_depends_on': 'eval:doc.pg_university=="Others"'},
+ {'fieldname': 'pg_institution',
+  'fieldtype': 'Data',
+  'label': 'Name of the Institution where you completed your PG',
+  'length': 120},
+ {'fieldname': 'pg_institution_other',
+  'fieldtype': 'Small Text',
+  'label': 'Please mention the name of the institution where you completed your PG',
+  'depends_on': 'eval:doc.pg_institution=="Others"',
+  'mandatory_depends_on': 'eval:doc.pg_institution=="Others"'},
+ {'fieldname': 'column_break_pg', 'fieldtype': 'Column Break'},
+ {'fieldname': 'pg_mode',
+  'fieldtype': 'Select',
+  'label': 'Mode of PG Completion',
+  'options': '\nRegular\nDistance',
+  'length': 60},
+ {'fieldname': 'pg_percentage',
+  'fieldtype': 'Float',
+  'label': 'Percentage (%)',
+  'precision': '2',
+  'description': 'Grading System of the PG course: fill in any one of Percentage, CGPA or GPA.'},
+ {'fieldname': 'pg_cgpa', 'fieldtype': 'Float', 'label': 'CGPA (10-point)', 'precision': '1'},
+ {'fieldname': 'pg_gpa', 'fieldtype': 'Float', 'label': 'GPA (4-point)', 'precision': '1'},
+ {'fieldname': 'pg_equivalent_percentage',
+  'fieldtype': 'Float',
+  'label': 'Equivalent percentage',
+  'precision': '2',
+  'read_only': 1,
+  'description': 'Percentage as entered, CGPA × 9.5, or GPA ÷ 4 × 100.'},
  {'fieldname': 'pg_duration',
   'fieldtype': 'Select',
   'label': 'Duration of the PG course',
@@ -188,123 +323,44 @@ FELLOWSHIP_FIELDS = [{'fieldname': 'fellowship_tab',
   'depends_on': 'eval:doc.pg_duration=="Other"',
   'mandatory_depends_on': 'eval:doc.pg_duration=="Other"',
   'length': 120},
- {'fieldname': 'pg_year_other',
-  'fieldtype': 'Int',
-  'label': 'Please mention the year of PG completion',
-  'depends_on': 'eval:doc.pg_year=="Other"',
-  'mandatory_depends_on': 'eval:doc.pg_year=="Other"'},
- {'fieldname': 'pg_institution',
-  'fieldtype': 'Data',
-  'label': 'Name of the Institution where you completed your PG',
-  'length': 120},
- {'fieldname': 'column_break_pg', 'fieldtype': 'Column Break'},
- {'fieldname': 'pg_state',
-  'fieldtype': 'Select',
-  'label': 'Name of the State where you studied your PG',
-  'options': '\n'
-             'Andaman and Nicobar Islands\n'
-             'Andhra Pradesh\n'
-             'Arunachal Pradesh\n'
-             'Assam\n'
-             'Bihar\n'
-             'Chandigarh\n'
-             'Chhattisgarh\n'
-             'Dadra and Nagar Haveli and Daman and Diu\n'
-             'Delhi\n'
-             'Goa\n'
-             'Gujarat\n'
-             'Haryana\n'
-             'Himachal Pradesh\n'
-             'Jammu and Kashmir\n'
-             'Jharkhand\n'
-             'Karnataka\n'
-             'Kerala\n'
-             'Ladakh\n'
-             'Lakshadweep\n'
-             'Madhya Pradesh\n'
-             'Maharashtra\n'
-             'Manipur\n'
-             'Meghalaya\n'
-             'Mizoram\n'
-             'Nagaland\n'
-             'Odisha\n'
-             'Puducherry\n'
-             'Punjab\n'
-             'Rajasthan\n'
-             'Sikkim\n'
-             'Tamil Nadu\n'
-             'Telangana\n'
-             'Tripura\n'
-             'Uttar Pradesh\n'
-             'Uttarakhand\n'
-             'West Bengal\n'
-             'Other',
-  'length': 60},
- {'fieldname': 'pg_state_other',
-  'fieldtype': 'Data',
-  'label': 'Please mention the State where you studied your PG',
-  'depends_on': 'eval:doc.pg_state=="Other"',
-  'mandatory_depends_on': 'eval:doc.pg_state=="Other"',
-  'length': 120},
- {'fieldname': 'pg_location',
-  'fieldtype': 'Data',
-  'label': 'Name of the Location where you pursued your PG',
-  'length': 120},
- {'fieldname': 'pg_mode',
-  'fieldtype': 'Select',
-  'label': 'Mode of Post Graduation',
-  'options': '\nRegular\nDistance',
-  'length': 60},
  {'fieldname': 'professional_section',
   'fieldtype': 'Section Break',
-  'label': 'CA (Inter) / CMA (ICWA) / CS (Inter)',
+  'label': 'CA / ICWA / CMA / CS (Inter / Qualified)',
   'depends_on': 'eval:doc.department=="Finance Fellowship"'},
  {'fieldname': 'professional_qualification',
   'fieldtype': 'Select',
-  'label': 'This Fellowship is for CA (Inter)/ CMA (ICWA)/CS (Inter) only. Please provide the details of your '
-           'qualification',
-  'options': '\nCA (Inter)\nCMA (ICWA)\nCS (Inter)\nOthers',
+  'label': 'Select Status for CA / CMA / CS / ICWA',
+  'options': '\n'
+             'CA (Inter)\n'
+             'ICWA (Inter)\n'
+             'CMA (Inter)\n'
+             'CS (Inter)\n'
+             'CA (Qualified)\n'
+             'ICWA (Qualified)\n'
+             'CMA (Qualified)\n'
+             'CS (Qualified)\n'
+             'Others',
   'in_standard_filter': 1,
   'length': 60},
  {'fieldname': 'professional_qualification_other',
   'fieldtype': 'Data',
-  'label': 'Please mention your qualification',
+  'label': 'Please mention the details',
   'depends_on': 'eval:doc.professional_qualification=="Others"',
   'mandatory_depends_on': 'eval:doc.professional_qualification=="Others"',
   'length': 120},
  {'fieldname': 'professional_year',
   'fieldtype': 'Select',
-  'label': 'In which year did you complete your CA (Inter)/ CMA (ICWA)/CS (Inter)?',
-  'options': '\n2025\n2024\n2023\n2022\n2021\n2020\n2019\n2018\nOther',
+  'label': 'Year of Completion CA/ICWA/CMA/CS (Inter/Qualified)',
+  'options': '\n2025\n2024\n2023\n2022\n2021\n2020\n2019\n2018\n2017\n2016\n2015\n2014\nOther',
   'length': 60},
  {'fieldname': 'professional_year_other',
   'fieldtype': 'Int',
-  'label': 'Please mention the year of completion',
+  'label': 'Please mention the year of CA/ICWA/CMA/CS (Inter/Qualified) completion',
   'depends_on': 'eval:doc.professional_year=="Other"',
   'mandatory_depends_on': 'eval:doc.professional_year=="Other"'},
- {'fieldname': 'professional_duration',
-  'fieldtype': 'Select',
-  'label': 'Duration of the CA (Inter)/ CMA (ICWA)/CS (Inter) course',
-  'options': '\n2 Years\n3 Years\nOther',
-  'length': 60},
- {'fieldname': 'professional_duration_other',
-  'fieldtype': 'Data',
-  'label': 'Please mention the duration of the course',
-  'depends_on': 'eval:doc.professional_duration=="Other"',
-  'mandatory_depends_on': 'eval:doc.professional_duration=="Other"',
-  'length': 120},
- {'fieldname': 'professional_institution',
-  'fieldtype': 'Data',
-  'label': 'Name of the Institution where you completed your CA (Inter)/ CMA (ICWA)/CS (Inter)',
-  'length': 120},
- {'fieldname': 'column_break_professional', 'fieldtype': 'Column Break'},
- {'fieldname': 'professional_university',
-  'fieldtype': 'Data',
-  'label': 'Name of the University / Institute where you pursued your CA (Inter)/ CMA (ICWA)/CS (Inter)',
-  'length': 120},
  {'fieldname': 'professional_state',
   'fieldtype': 'Select',
-  'label': 'Name of the State where you studied your CA (Inter)/ CMA (ICWA)/CS (Inter)',
+  'label': 'Name of the State where you pursued CA/ICWA/CMA/CS (Inter/Qualified)',
   'options': '\n'
              'Andaman and Nicobar Islands\n'
              'Andhra Pradesh\n'
@@ -314,7 +370,7 @@ FELLOWSHIP_FIELDS = [{'fieldname': 'fellowship_tab',
              'Chandigarh\n'
              'Chhattisgarh\n'
              'Dadra and Nagar Haveli and Daman and Diu\n'
-             'Delhi\n'
+             'Delhi (NCT)\n'
              'Goa\n'
              'Gujarat\n'
              'Haryana\n'
@@ -342,17 +398,72 @@ FELLOWSHIP_FIELDS = [{'fieldname': 'fellowship_tab',
              'Uttar Pradesh\n'
              'Uttarakhand\n'
              'West Bengal\n'
-             'Other',
+             'Others',
   'length': 60},
  {'fieldname': 'professional_state_other',
   'fieldtype': 'Data',
-  'label': 'Please mention the State',
-  'depends_on': 'eval:doc.professional_state=="Other"',
-  'mandatory_depends_on': 'eval:doc.professional_state=="Other"',
+  'label': 'Please mention the name of the State where you pursued CA/ICWA/CMA/CS',
+  'depends_on': 'eval:doc.professional_state=="Others"',
+  'mandatory_depends_on': 'eval:doc.professional_state=="Others"',
   'length': 120},
  {'fieldname': 'professional_location',
   'fieldtype': 'Data',
-  'label': 'Name of the Location where you pursued your CA (Inter)/ CMA (ICWA)/CS (Inter)',
+  'label': 'Name of the Location where you pursued CA/ICWA/CMA/CS (Inter/Qualified)',
+  'length': 120},
+ {'fieldname': 'professional_location_other',
+  'fieldtype': 'Small Text',
+  'label': 'Please mention the name of the location where you pursued CA/ICWA/CMA/CS (Inter/Qualified)',
+  'depends_on': 'eval:doc.professional_location=="Others"',
+  'mandatory_depends_on': 'eval:doc.professional_location=="Others"'},
+ {'fieldname': 'column_break_professional', 'fieldtype': 'Column Break'},
+ {'fieldname': 'professional_institution',
+  'fieldtype': 'Data',
+  'label': 'Name of the Institution where you pursued CA/ICWA/CMA/CS (Inter/Qualified)',
+  'length': 120},
+ {'fieldname': 'professional_institution_other',
+  'fieldtype': 'Small Text',
+  'label': 'Please mention the name of the institution where you pursued CA/ICWA/CMA/CS (Inter/Qualified)',
+  'depends_on': 'eval:doc.professional_institution=="Others"',
+  'mandatory_depends_on': 'eval:doc.professional_institution=="Others"'},
+ {'fieldname': 'professional_attempts',
+  'fieldtype': 'Select',
+  'label': 'Attempt Count for the Highest Cleared Level (Intermediate or Final)',
+  'options': '\n'
+             '1st Attempt (Both Groups together)\n'
+             '1st Attempt (Group 1 and Group 2 cleared sequentially)\n'
+             '2 Attempts\n'
+             '3 or More Attempts',
+  'length': 60},
+ {'fieldname': 'professional_air',
+  'fieldtype': 'Select',
+  'label': 'Did you secure an All-India Rank (AIR)?',
+  'options': '\nYes\nNo',
+  'length': 10},
+ {'fieldname': 'professional_air_rank',
+  'fieldtype': 'Int',
+  'label': 'Please state Rank Number',
+  'depends_on': 'eval:doc.professional_air=="Yes"',
+  'mandatory_depends_on': 'eval:doc.professional_air=="Yes"'},
+ {'fieldname': 'professional_distinction',
+  'fieldtype': 'Select',
+  'label': 'Did you pass with a "Distinction" (70%+ aggregate) on your marksheet?',
+  'options': '\nYes\nNo',
+  'length': 10},
+ {'fieldname': 'professional_duration',
+  'fieldtype': 'Select',
+  'label': 'Duration of the course (old form)',
+  'options': '\n2 Years\n3 Years\nOther',
+  'depends_on': 'eval:doc.professional_duration',
+  'length': 60},
+ {'fieldname': 'professional_duration_other',
+  'fieldtype': 'Data',
+  'label': 'Duration of the course – other (old form)',
+  'depends_on': 'eval:doc.professional_duration=="Other"',
+  'length': 120},
+ {'fieldname': 'professional_university',
+  'fieldtype': 'Data',
+  'label': 'University / Institute (old form)',
+  'depends_on': 'eval:doc.professional_university',
   'length': 120},
  {'fieldname': 'experience_section',
   'fieldtype': 'Section Break',
