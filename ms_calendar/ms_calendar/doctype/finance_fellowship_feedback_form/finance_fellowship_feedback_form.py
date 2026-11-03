@@ -33,6 +33,15 @@ RATING_FIELDS = (
 )
 TEXT_FIELDS = ("strengths", "concerns", "summary")
 
+# Panel recommendation -> applicant status for that round
+# (ms_finance.FELLOWSHIP_STATUSES). Only an applicant still at
+# "Round N Scheduled" is moved, so the FIRST feedback of a round decides and
+# later panel members' feedback never flips it (and never re-sends emails);
+# the recruiter can still change the status by hand.
+ROUND_SCHEDULED_STATUS = {"Round 1": "Round 1 Scheduled", "Round 2": "Round 2 Scheduled"}
+ROUND_SUFFIX = {"Round 1": "R1", "Round 2": "R2"}
+RECOMMENDATION_STATUS = {"Select": "Shortlist", "On hold": "On hold", "Regret": "Regret"}
+
 
 class FinanceFellowshipFeedbackForm(Document):
 	def validate(self):
@@ -68,6 +77,7 @@ class FinanceFellowshipFeedbackForm(Document):
 	def after_insert(self):
 		if self.interview_schedule:
 			frappe.db.set_value(SCHEDULE_DOCTYPE, self.interview_schedule, "status", "Completed")
+		self.move_applicant_status()
 		if self.interview_schedule:
 			# Round PDF + "feedback submitted" email to the panel, in the background.
 			enablers_panel.enqueue_feedback_submitted(self)
@@ -93,6 +103,42 @@ class FinanceFellowshipFeedbackForm(Document):
 			self.doctype,
 			self.name,
 		)
+
+	def move_applicant_status(self):
+		"""Select -> "Shortlist - R1/R2", On hold -> "On hold - R1/R2",
+		Regret -> "Regret - R1/R2". Saving the applicant runs the usual status
+		emails (Shortlist - R1: Application Form request, Shortlist - R2:
+		document request, Regret: regret email after the Settings delay)."""
+		suffix = ROUND_SUFFIX.get(self.interview_round)
+		decision = RECOMMENDATION_STATUS.get(self.recommendation)
+		if not (suffix and decision and self.application_id):
+			return
+		if not frappe.db.exists(REGISTRATION_DOCTYPE, self.application_id):
+			return
+		registration = frappe.get_doc(REGISTRATION_DOCTYPE, self.application_id)
+		if registration.application_status != ROUND_SCHEDULED_STATUS[self.interview_round]:
+			return
+		new_status = f"{decision} - {suffix}"
+		# A problem on the applicant's record must not lose the panel's
+		# feedback: undo only the status change and tell the recruiter.
+		frappe.db.savepoint("ff_feedback_status")
+		try:
+			registration.application_status = new_status
+			registration.flags.ignore_permissions = True  # panel members submit as Guest
+			registration.save()
+			registration.add_comment(
+				"Info",
+				_("Status set to {0} from {1}'s {2} feedback ({3}).").format(
+					new_status, self.panelist_name or self.panelist_email, self.interview_round, self.name
+				),
+			)
+		except Exception:
+			frappe.db.rollback(save_point="ff_feedback_status")
+			frappe.log_error(
+				title=f"Finance feedback {self.name}: could not set {self.application_id} to {new_status}",
+				reference_doctype=self.doctype,
+				reference_name=self.name,
+			)
 
 
 def feedback_html(application_id, interview_round):
