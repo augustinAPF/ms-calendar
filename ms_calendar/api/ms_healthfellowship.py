@@ -265,9 +265,10 @@ def create_interview_event(
         )
 
     # -------- LOGO --------
-    file_path = frappe.get_site_path("public", "files", "apf email.png")
-    with open(file_path, "rb") as f:
-        logo_base64 = base64.b64encode(f.read()).decode("utf-8")
+    # Outlook / Teams invites block inline base64 (data:) images, so the logo
+    # showed as a broken image. Link the public file on this site instead.
+    logo_url = frappe.utils.get_url("/files/apf%20email.png")
+    logo_html = f'<img src="{logo_url}" alt="Azim Premji Foundation" style="height:48px;">'
 
     # ---- EMAIL BODY PARTS ----
     feedback_url1= (
@@ -311,7 +312,7 @@ def create_interview_event(
     <a href="{feedback_url}" target="_blank">Click here</a></p>
     {note_html}
     <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
-    <img src="data:image/png;base64,{logo_base64}" style="height:48px;">
+    {logo_html}
     """
 
     candidate_body = f"""
@@ -328,7 +329,7 @@ def create_interview_event(
     <p>Kindly reach out to us if you have any questions.</p>
 
     <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
-    <img src="data:image/png;base64,{logo_base64}" style="height:48px;">
+    {logo_html}
     """
 
     interviewer_list = [i.strip() for i in (interviewer_emails or "").split(",") if i.strip()]

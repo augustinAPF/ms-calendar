@@ -389,12 +389,13 @@ def _resolve_meeting_room(room_emails, headers):
 
 
 def _logo_html():
+    # Outlook / Teams invites block inline base64 (data:) images, so the logo
+    # showed as a broken image. Link the public file on this site instead.
     logo_path = frappe.get_site_path("public", "files", "apf email.png")
     if not os.path.isfile(logo_path):
         return ""
-    with open(logo_path, "rb") as f:
-        logo_base64 = base64.b64encode(f.read()).decode("utf-8")
-    return f'<img src="data:image/png;base64,{logo_base64}" style="height:48px;">'
+    logo_url = frappe.utils.get_url("/files/apf%20email.png")
+    return f'<img src="{logo_url}" alt="Azim Premji Foundation" style="height:48px;">'
 
 
 def _phil_feedback_url(application_id, applicants_name, role):
