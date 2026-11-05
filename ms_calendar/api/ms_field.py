@@ -1018,10 +1018,11 @@ def _field_feedback_site_url(url):
 
 
 # ── Feedback link for the panel ─────────────────────────────────────────────
-# The Outlook invite carries ONE feedback link for the whole panel (see
+# The Outlook invite carries ONE feedback button (see
 # _field_panel_feedback_block): one member → their own
 # ?panelist_email=&panelist_name= link; several → ?panel= and the form asks
-# who is filling it. Reminders send each member their own link.
+# the member's email, then offers only them and "Consolidated". Reminders
+# send each member their own link.
 # public/js/feedback_form_draft.js (web form side) fills the panelist fields
 # and keeps each panelist's Save draft. The site serving the form needs that
 # script — see feedback_form_base_url in _field_feedback_site_url.
@@ -1060,18 +1061,31 @@ def _field_personal_feedback_url(feedback_url, email, name=""):
     return url
 
 
+def _field_feedback_button(url, label):
+    return (
+        f'<a href="{url}" target="_blank" '
+        f'style="display:inline-block;margin:6px 8px 0 0;padding:8px 18px;background-color:#1d4ed8;'
+        f'color:#ffffff;text-decoration:none;border-radius:4px;font-weight:600;font-size:13px;">'
+        f"{frappe.utils.escape_html(label)}</a>"
+    )
+
+
 def _field_panel_feedback_block(feedback_url, panel_emails):
-    """The feedback-link part of the panel invite: ONE link for the whole
-    panel, so the panel gets one email (the invite) with one button.
-    One panel member → their own link (name and email filled in on open).
-    Several → the link carries the panel list (`panel=`); the form asks
-    "Who is filling this feedback?" and one click fills that member's name
-    and email and loads their saved draft (public/js/feedback_form_draft.js)."""
+    """The feedback-link part of the panel invite (one email, the invite).
+
+    ONE button for the whole panel. The invite is one Outlook meeting, so
+    every panel member gets the same body and link:
+    - one panel member → their own link (name and email filled in on open);
+    - several → the link carries the panel (`panel=`, base64url JSON
+      [[email, name], …]); the form first asks the panel member's email and
+      then offers only "<that member>" and "Consolidated (whole panel)", and
+      loads their saved draft (public/js/feedback_form_draft.js)."""
     if not feedback_url:
         return ""
     panel = list(dict.fromkeys(e.strip() for e in panel_emails or [] if e and e.strip()))
     names = _field_panelist_names(panel)
     url = feedback_url
+    note_start = "Your name and email are filled in when you open the form. "
     if len(panel) == 1:
         url = _field_personal_feedback_url(feedback_url, panel[0], names.get(panel[0].lower(), ""))
     elif panel and "panelist_email=" not in feedback_url:
@@ -1082,21 +1096,17 @@ def _field_panel_feedback_block(feedback_url, panel_emails):
             json.dumps([[e, names.get(e.lower(), "")] for e in panel], separators=(",", ":")).encode()
         ).decode().rstrip("=")
         url = f"{feedback_url}{'&' if '?' in feedback_url else '?'}panel={token}"
+        note_start = "When the form opens, enter your email address — your name and email are filled in. "
+    buttons = _field_feedback_button(url, "Click Here to Open Feedback Form")
     note = (
         ""
         if not panel
         else "<p style=\"font-size:13px;color:#555555;\">"
-        + ("Your name and email are filled in when you open the form. " if len(panel) == 1
-           else "When the form opens, click your name — your name and email are filled in. ")
+        + note_start
         + "Click <b>Save</b> to keep a draft on your device and finish it later from the same link; "
         "your feedback is recorded only when you click <b>Submit</b>.</p>"
     )
-    return (
-        f'<p><b>Feedback Form Link:</b><br><a href="{url}" target="_blank" '
-        f'style="display:inline-block;margin-top:6px;padding:8px 18px;background-color:#1d4ed8;'
-        f'color:#ffffff;text-decoration:none;border-radius:4px;font-weight:600;font-size:13px;">'
-        f"Click Here to Open Feedback Form</a></p>{note}"
-    )
+    return f"<p><b>Feedback Form Link:</b><br>{buttons}</p>{note}"
 
 
 # ── Feedback reminders logged on the schedule (Health / Scholarship) ────────

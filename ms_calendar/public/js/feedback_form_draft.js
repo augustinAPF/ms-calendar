@@ -8,12 +8,21 @@
 // - Answers are also auto-saved a moment after every change.
 // - Reopening the same link (same applicant + panelist) restores the draft.
 // - A successful Submit deletes the draft.
-// - The interview invite has ONE link for the whole panel
-//   (ms_field._field_panel_feedback_block). With several panel members it
-//   carries ?panel= and the form first asks "Who is filling this feedback?";
-//   a click fills that member's name and email and loads their own draft.
-//   With one member, or a personal ?panelist_email=&panelist_name= link
-//   (the reminder emails), the panelist fields are filled straight away.
+// - The interview invite (ms_field._field_panel_feedback_block) is one
+//   Outlook meeting with the same body for everyone, so it has ONE button.
+//   With several panel members it carries ?panel= (the whole panel) and the
+//   form first asks "Who is filling this feedback?" — the member types their
+//   email (remembered on this device for this form + applicant); it must be
+//   on the panel. Then only that member and "Consolidated (whole panel)" are
+//   offered; a click fills the name(s)/email(s) and loads that draft.
+//   A personal ?panelist_email= link that also has ?panel= skips the email
+//   question. With one member, or a personal link without ?panel= (the
+//   reminder emails), the panelist fields are filled straight away.
+// - Once a panel member has SUBMITTED (api/feedback_status.py), their link
+//   shows "Feedback already submitted" instead of the form, and on the
+//   picker their name reads "Submitted ✓" and can't be picked. The whole
+//   link closes when every member has submitted or a Consolidated feedback
+//   is in. A Save (draft) never closes the link.
 //
 // Keep FEEDBACK_DOCTYPES in sync with ms_field.FIELD_FEEDBACK_ROUND_MAP
 // (plus Calibration Process, the ARP calibration link in ms_field),
@@ -58,6 +67,10 @@
 	// (Health: panal_name / panelist_name; Scholarship: interviewer_name).
 	const PANELIST_NAME_FIELDS = ["panelist_name", "panal_name", "interviewer_name"];
 	const PANELIST_EMAIL_FIELDS = ["panelist_email", "panelist__email", "interviewer_email"];
+	// Filled from the interview schedule (api/feedback_status.py), named
+	// differently per form.
+	const INTERVIEW_DATE_FIELDS = ["interview_date", "date_of_discussion", "date", "feedback_date"];
+	const INTERVIEW_MODE_FIELDS = ["interview_mode", "mode"];
 	const DRAFT_PREFIX = "apf_feedback_draft::";
 	const DRAFT_MAX_AGE_DAYS = 30;
 	// The cloud web forms' own client scripts set applicant_id/name at 500 ms.
@@ -73,6 +86,8 @@
 	let chosen = null;
 	// The buttons on the "Who is filling this feedback?" card.
 	let pick_choices = [];
+	// {interview_date, mode, online_panel} of the interview, once known.
+	let schedule_info = {};
 
 	// ?panel= (ms_field._field_panel_feedback_block): base64url JSON
 	// [[email, name], …] of the interview's panel members.
@@ -97,6 +112,8 @@
 	}
 
 	function panelist() {
+		// Their own invite button, but they chose Consolidated for the panel.
+		if (chosen && chosen.consolidated) return chosen;
 		const email = (params.get("panelist_email") || "").trim();
 		if (email) return { email, name: (params.get("panelist_name") || "").trim() };
 		return chosen || { email: "", name: "" };
@@ -175,7 +192,54 @@
 		if (p.name) skip.push(...PANELIST_NAME_FIELDS);
 		if (p.email) skip.push(...PANELIST_EMAIL_FIELDS);
 		if (chosen && type_field()) skip.push(type_field());
+		// The schedule's date / mode win over an older draft (rescheduled).
+		if (schedule_info.interview_date) skip.push(...INTERVIEW_DATE_FIELDS);
+		if (schedule_info.mode) skip.push(...INTERVIEW_MODE_FIELDS);
 		return skip;
+	}
+
+	// The form's option for the interview's mode. Hybrid on a form without a
+	// Hybrid option (Health: In-Person / MS Teams): the panelist's own way of
+	// joining — the online group → MS Teams, everyone else → In-Person.
+	function mode_option(options) {
+		const opts = String(options || "").split("\n").map((o) => o.trim()).filter(Boolean);
+		const find = (re) => opts.find((o) => re.test(o)) || "";
+		const p = panelist();
+		const online_group = (schedule_info.online_panel || []).map((e) => String(e).toLowerCase());
+		const mine_online =
+			!p.consolidated && online_group.includes((p.email || "").trim().toLowerCase());
+		switch (schedule_info.mode) {
+			case "online":
+				return find(/teams|online/i);
+			case "phone":
+				// "Telephonic" / "Phone"
+				return find(/phon/i);
+			case "in_person":
+				return find(/person|offline|face/i);
+			case "hybrid":
+				return find(/hybrid/i) || (mine_online ? find(/teams|online/i) : find(/person|offline|face/i));
+			default:
+				return "";
+		}
+	}
+
+	// Interview date + mode from the schedule (still editable).
+	function schedule_values() {
+		const values = {};
+		if (schedule_info.interview_date) {
+			INTERVIEW_DATE_FIELDS.forEach((f) => {
+				const field = wf.fields_dict[f];
+				if (field && field.df.fieldtype === "Date") values[f] = schedule_info.interview_date;
+			});
+		}
+		if (schedule_info.mode) {
+			INTERVIEW_MODE_FIELDS.forEach((f) => {
+				const field = wf.fields_dict[f];
+				const option = field && field.df.fieldtype === "Select" && mode_option(field.df.options);
+				if (option) values[f] = option;
+			});
+		}
+		return values;
 	}
 
 	function is_empty(v) {
@@ -287,15 +351,86 @@
 		$(".web-form-wrapper").first().before($note);
 	}
 
+	// ── Already submitted? (api/feedback_status.py) ──────────────────────────
+	// Asked once when the form opens, for the panel members the link carries.
+	// Resolves to {submitted: Set of lower-case emails, consolidated: bool};
+	// any failure → nobody counts as submitted and the form opens as before.
+	function check_submitted(people) {
+		const none = { submitted: new Set(), consolidated: false, me: "" };
+		if (!people.length || !link_id()) return Promise.resolve(none);
+		return new Promise((resolve) => {
+			let settled = false;
+			const finish = (value) => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(give_up);
+				resolve(value);
+			};
+			const give_up = setTimeout(() => finish(none), 8000);
+			const req = frappe.call({
+				method: "ms_calendar.api.feedback_status.submitted_feedback",
+				args: {
+					doctype: wf.doc_type,
+					link_id: link_id(),
+					panel: JSON.stringify(people.map((p) => ({ email: p.email, name: p.name }))),
+				},
+				callback: (r) => {
+					const m = (r && r.message) || {};
+					finish({
+						submitted: new Set((m.submitted || []).map((e) => String(e).toLowerCase())),
+						consolidated: !!m.consolidated,
+						// The signed-in user, when they are on this panel.
+						me: String(m.me || "").toLowerCase(),
+						schedule: m.schedule || {},
+					});
+				},
+				error: () => finish(none),
+			});
+			// Network failure: neither callback nor error runs.
+			if (req && typeof req.fail === "function") req.fail(() => finish(none));
+		});
+	}
+
+	function is_done(p, status) {
+		return status.submitted.has((p.email || "").trim().toLowerCase());
+	}
+
+	// Hide the form while asking, so nobody starts typing into a closed link.
+	function hide_form(hidden) {
+		$(".web-form-wrapper, .web-form-footer").css("visibility", hidden ? "hidden" : "");
+	}
+
+	// The link is used up: no form, just a note (the draft is no longer needed).
+	function show_closed(text) {
+		ready = false;
+		storage_remove(draft_key);
+		$(".apf-panel-pick, .apf-draft-note, .apf-panel-who").remove();
+		$(".web-form-wrapper, .web-form-footer").hide();
+		$(".indicator-pill").addClass("hide");
+		const $card = $(`
+			<div class="apf-feedback-closed" style="border:1px solid var(--border-color,#d1d5db);border-left:4px solid #15803d;
+				border-radius:6px;padding:16px 18px;margin:8px 0 16px;">
+				<div style="font-weight:600;font-size:15px;margin-bottom:6px;">${__("Feedback already submitted")}</div>
+				<div class="text-muted" style="font-size:13px;">${frappe.utils.escape_html(text)}</div>
+			</div>`);
+		$(".web-form-wrapper").first().before($card);
+	}
+
 	// "Who is filling this feedback?" — one button per panel member, above the
 	// form. A click fills that member's name and email (locked) and loads
-	// their own draft; "Not you?" reopens the choice.
-	function show_panel_picker(panel) {
+	// their own draft; "Not you?" reopens the choice. Members who already
+	// submitted are shown as Submitted and can't be picked; Consolidated
+	// can't be picked once anyone has submitted.
+	// people: the names to offer (the whole panel, or just the member whose
+	// own invite button was clicked); full: the whole panel, for Consolidated.
+	function show_panel_picker(people, status, full) {
 		const esc = (v) => frappe.utils.escape_html(v || "");
+		const panel = full || people;
 		// Each member (Individual feedback) + Consolidated, when the form has
 		// that feedback type: one feedback on behalf of the whole panel.
-		const choices = panel.slice();
-		if (type_field()) choices.push(consolidated(panel));
+		const choices = people.map((p) => Object.assign({}, p, { done: is_done(p, status) }));
+		const anyone_done = panel.some((p) => is_done(p, status));
+		if (type_field()) choices.push(Object.assign(consolidated(panel), { done: anyone_done }));
 		pick_choices = choices;
 		const $pick = $(`
 			<div class="apf-panel-pick" style="border:1px solid var(--border-color,#d1d5db);border-left:4px solid #1d4ed8;
@@ -303,20 +438,130 @@
 				<div style="font-weight:600;margin-bottom:8px;">${__("Who is filling this feedback?")}</div>
 				<div style="display:flex;flex-wrap:wrap;gap:8px;">
 					${choices.map((p, i) => `<button type="button" class="btn btn-sm apf-pick ${p.consolidated ? "btn-primary" : "btn-default"}"
-						data-i="${i}" title="${esc(p.consolidated ? p.name : p.email)}">${esc(p.label || p.name || p.email)}</button>`).join("")}
+						data-i="${i}" ${p.done ? 'disabled aria-disabled="true" style="opacity:.55;cursor:not-allowed;"' : ""}
+						title="${esc(p.done ? __("Feedback already submitted") : p.consolidated ? p.name : p.email)}">${esc(p.label || p.name || p.email)}${
+							p.done && !p.consolidated ? ` · ${__("Submitted")} ✓` : ""
+						}</button>`).join("")}
 				</div>
 				<div class="text-muted small" style="margin-top:8px;">
 					${__("Your name and email are filled in, and your saved draft (if any) is loaded.")}
-					${type_field() ? __("Consolidated is one feedback for the whole panel.") : ""}</div>
+					${type_field() ? __("Consolidated is one feedback for the whole panel.") : ""}
+					${anyone_done ? __("Names marked Submitted have already sent their feedback.") : ""}</div>
 			</div>`);
 		// Clicks are handled in on_click_capture → pick().
 		$(".web-form-wrapper").first().before($pick);
 	}
 
+	// ── "Enter your email" (one invite button for the whole panel) ─────────
+	// The invite is one Outlook meeting — everyone gets the same link — so the
+	// form asks who is filling it, then offers only that member + Consolidated.
+	// The email is remembered on this device for this form + applicant, so
+	// reopening the link (e.g. to finish a draft) skips the question.
+	const ME_PREFIX = "apf_feedback_me::";
+	let ask_ctx = null; // {panel, status} while the email question is shown
+
+	function me_key() {
+		const route = wf.route || window.location.pathname.split("/")[1] || "";
+		return `${ME_PREFIX}${route}::${link_id()}`;
+	}
+
+	function panel_member(panel, email) {
+		const e = (email || "").trim().toLowerCase();
+		return e ? panel.find((p) => p.email.toLowerCase() === e) || null : null;
+	}
+
+	function is_guest() {
+		const user = (frappe.session && frappe.session.user) || frappe.get_cookie("user_id") || "Guest";
+		return !user || user === "Guest";
+	}
+
+	// "Sign in with Microsoft": Office 365 sign-in that returns to this same
+	// link; the signed-in user is then picked automatically (status.me).
+	// Falls back to the site's login page when there's no direct link.
+	function microsoft_sign_in() {
+		const back = window.location.pathname + window.location.search;
+		const to_login = () => (window.location.href = `/login?redirect-to=${encodeURIComponent(back)}`);
+		frappe.call({
+			method: "ms_calendar.api.feedback_status.microsoft_login_url",
+			args: { redirect_to: back },
+			callback: (r) => (r && r.message ? (window.location.href = r.message) : to_login()),
+			error: to_login,
+		});
+	}
+
+	function show_email_ask(panel, status) {
+		ask_ctx = { panel, status };
+		const ms = is_guest()
+			? `<div style="margin-bottom:10px;">
+					<button type="button" class="btn btn-sm btn-primary apf-ms-login">${__("Sign in with Microsoft")}</button>
+					<span class="text-muted small" style="margin-left:6px;">${__("— picks you automatically")}</span>
+				</div>
+				<div class="text-muted small" style="margin-bottom:6px;">${__("or enter your email:")}</div>`
+			: "";
+		const $ask = $(`
+			<div class="apf-panel-pick apf-me-ask" style="border:1px solid var(--border-color,#d1d5db);border-left:4px solid #1d4ed8;
+				border-radius:6px;padding:12px 14px;margin-bottom:16px;">
+				<div style="font-weight:600;margin-bottom:8px;">${__("Who is filling this feedback?")}</div>
+				${ms}
+				<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+					<input type="email" class="form-control apf-me-email" autocomplete="email"
+						placeholder="${__("Your email address")}" style="max-width:340px;">
+					<button type="button" class="btn btn-sm btn-default apf-me-go">${__("Continue")}</button>
+				</div>
+				<div class="apf-me-error small" style="color:#b91c1c;margin-top:6px;display:none;"></div>
+				<div class="text-muted small" style="margin-top:8px;">
+					${__("Use the email address this interview invite was sent to. Your name and email are filled in, and your saved draft (if any) is loaded.")}</div>
+			</div>`);
+		$ask.find(".apf-me-email").on("keydown", (e) => {
+			if (e.key === "Enter") {
+				e.preventDefault();
+				me_continue();
+			}
+		});
+		$(".web-form-wrapper").first().before($ask);
+		$ask.find(".apf-me-email").trigger("focus");
+	}
+
+	function me_continue(email) {
+		if (!ask_ctx) return;
+		const { panel, status } = ask_ctx;
+		const typed = email || $(".apf-me-email").val() || "";
+		const me = panel_member(panel, typed);
+		if (!me) {
+			$(".apf-me-error")
+				.text(__("{0} is not on the panel for this interview. Please use the email address the invite was sent to.", [typed.trim() || __("This email")]))
+				.show();
+			return;
+		}
+		ask_ctx = null;
+		storage_set(me_key(), me.email.toLowerCase());
+		$(".apf-me-ask").remove();
+		if (status.consolidated || is_done(me, status)) {
+			const applicant = params.get("applicant_name") || "";
+			const for_whom = applicant ? __(" for {0}", [applicant]) : "";
+			show_closed(
+				status.consolidated
+					? __("The panel's feedback{0} has been submitted. This link can't be used again.", [for_whom])
+					: __("Your feedback{0} has been submitted. This link can't be used again.", [for_whom])
+			);
+			return;
+		}
+		if (type_field()) {
+			// Their name + Consolidated (whole panel).
+			show_panel_picker([me], status, panel);
+			return;
+		}
+		pick_choices = [me];
+		pick(0);
+	}
+
 	function pick(i) {
 		const esc = (v) => frappe.utils.escape_html(v || "");
 		chosen = pick_choices[i];
-		if (!chosen) return;
+		if (!chosen || chosen.done) {
+			chosen = null;
+			return;
+		}
 		$(".apf-panel-pick").remove();
 		start_filling();
 		const who = chosen.consolidated ? `${chosen.label} — ${chosen.name}` : chosen.name || chosen.email;
@@ -326,6 +571,8 @@
 		// Your answers so far are kept as your draft; the page reopens the choice.
 		$who.find(".apf-not-me").on("click", (ev) => {
 			ev.preventDefault();
+			// Ask the email again (someone else on this device).
+			storage_remove(me_key());
 			window.location.reload();
 		});
 		$(".web-form-wrapper").first().before($who);
@@ -339,12 +586,16 @@
 	// a Submit while no panel member has been picked.
 	function on_click_capture(e) {
 		const el = e.target && e.target.closest && e.target.closest(
-			".apf-save-draft-btn, .apf-pick, .web-form-footer .submit-btn"
+			".apf-save-draft-btn, .apf-pick, .apf-me-go, .apf-ms-login, .web-form-footer .submit-btn"
 		);
 		if (!el) return;
 		if (el.classList.contains("submit-btn")) {
 			if (!picking()) return; // a real Submit — let it through
 			ask_to_pick();
+		} else if (el.classList.contains("apf-me-go")) {
+			me_continue();
+		} else if (el.classList.contains("apf-ms-login")) {
+			microsoft_sign_in();
 		} else if (el.classList.contains("apf-pick")) {
 			pick(+el.getAttribute("data-i"));
 		} else {
@@ -357,7 +608,12 @@
 	function ask_to_pick() {
 		const $pick = $(".apf-panel-pick");
 		if ($pick.length) $pick[0].scrollIntoView({ behavior: "smooth", block: "center" });
-		frappe.show_alert({ message: __("First click your name under 'Who is filling this feedback?'"), indicator: "orange" });
+		frappe.show_alert({
+			message: $(".apf-me-ask").length
+				? __("First enter your email under 'Who is filling this feedback?'")
+				: __("First click your name under 'Who is filling this feedback?'"),
+			indicator: "orange",
+		});
 	}
 
 	function make_key() {
@@ -407,7 +663,9 @@
 		// Picked on the form: the feedback type follows the choice.
 		const tf = type_field();
 		if (chosen && tf) values[tf] = chosen.consolidated ? "Consolidated" : "Individual";
-		return wf.set_values(values).then(() => {
+		// From the interview itself — filled in, but left editable.
+		const from_schedule = schedule_values();
+		return wf.set_values(Object.assign({}, from_schedule, values)).then(() => {
 			Object.keys(values).forEach((f) => {
 				wf.fields_dict[f].df.read_only = 1;
 				wf.fields_dict[f].refresh();
@@ -505,8 +763,12 @@
 			ready = false;
 			clearTimeout(autosave_timer);
 			storage_remove(draft_key);
-			$(".apf-draft-note").remove();
-			return orig_success(data);
+			$(".apf-draft-note, .apf-panel-who").remove();
+			const out = orig_success(data);
+			// "Submit another response" opens a blank form with no applicant /
+			// panelist — the link is used up once the feedback is in.
+			$(".success-page .new-btn").remove();
+			return out;
 		};
 		window.addEventListener("beforeunload", () => {
 			if (ready && frappe.form_dirty) save_draft(false);
@@ -534,13 +796,65 @@
 		// One link for the whole panel: one member → filled in straight away,
 		// several → they pick their name first (start_filling runs on the click).
 		if (!link_id()) offer_saved_drafts();
-		const panel = params.get("panelist_email") ? [] : panel_list();
+		const own_email = (params.get("panelist_email") || "").trim().toLowerCase();
+		const full_panel = panel_list();
+		// Their own button in the invite (panelist_email + the whole panel):
+		// offer only them + "Consolidated (whole panel)". Without a
+		// Consolidated option on the form, it's filled straight away as before.
+		const own_pick = !!own_email && full_panel.length > 1 && !!type_field();
+		const me = own_pick
+			? Object.assign({}, panelist(), full_panel.find((p) => p.email.toLowerCase() === own_email) || {})
+			: null;
+		const panel = own_email ? [] : full_panel;
 		if (panel.length === 1) chosen = panel[0];
-		if (panel.length > 1) {
-			show_panel_picker(panel);
-			return;
-		}
-		setTimeout(start_filling, RESTORE_DELAY_MS);
+		// Whose feedback to look up: the panel, or the one panelist.
+		const people = own_pick ? full_panel : panel.length > 1 ? panel : panelist().email ? [panelist()] : [];
+		const started = Date.now();
+		if (people.length) hide_form(true);
+		check_submitted(people).then((status) => {
+			hide_form(false);
+			schedule_info = status.schedule || {};
+			const applicant = params.get("applicant_name") || "";
+			const for_whom = applicant ? __(" for {0}", [applicant]) : "";
+			if (panel.length > 1 && (status.consolidated || panel.every((p) => is_done(p, status)))) {
+				show_closed(
+					__("The panel's feedback{0} has been submitted. This link can't be used again.", [for_whom])
+				);
+				return;
+			}
+			if (own_pick && (status.consolidated || is_done(me, status))) {
+				show_closed(
+					status.consolidated
+						? __("The panel's feedback{0} has been submitted. This link can't be used again.", [for_whom])
+						: __("Your feedback{0} has been submitted. This link can't be used again.", [for_whom])
+				);
+				return;
+			}
+			if (!own_pick && panel.length <= 1 && people.length && is_done(people[0], status)) {
+				show_closed(
+					__("Your feedback{0} has been submitted. This link can't be used again.", [for_whom])
+				);
+				return;
+			}
+			if (own_pick) {
+				show_panel_picker([me], status, full_panel);
+				return;
+			}
+			if (panel.length > 1) {
+				// One invite button for the whole panel: ask who they are (or use
+				// the email remembered on this device), then offer only them +
+				// Consolidated.
+				// Signed in (server-side session) → that person; else the email
+				// remembered on this device; else ask.
+				show_email_ask(panel, status);
+				const known = panel_member(panel, status.me) || panel_member(panel, storage_get(me_key()));
+				if (known) me_continue(known.email);
+				return;
+			}
+			// The forms' own scripts fill the applicant at 500 ms — keep the
+			// same wait from page load, not from the end of the check.
+			setTimeout(start_filling, Math.max(0, RESTORE_DELAY_MS - (Date.now() - started)));
+		});
 	}
 
 	function wait_for_form(tries) {

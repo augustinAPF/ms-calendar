@@ -734,7 +734,7 @@ app_include_js = [
     # holding onto old copies for the full 12h Cache-Control max-age even
     # across hard reloads. Bump the number any time this file changes and
     # every browser is guaranteed a fresh fetch on next page load.
-    "/assets/ms_calendar/js/frf_list.js?v=32",
+    "/assets/ms_calendar/js/frf_list.js?v=33",
     "/assets/ms_calendar/js/phil_registration_form_list.js",
     # scholarship_recruitment_form_list.js is NOT listed here: it is already
     # loaded for its list view via doctype_list_js above, and listing it
@@ -745,10 +745,13 @@ app_include_js = [
     # Applicant profile popup — shared by the Pathways Overall Dashboard and
     # the four registration lists (click a name) / forms ("View profile").
     # Manual "?v=" cache-buster like frf_list.js: bump it when the file changes.
-    "/assets/ms_calendar/js/applicant_profile.js?v=18",
+    "/assets/ms_calendar/js/applicant_profile.js?v=19",
     # Form Activity timeline shows the exact date/time instead of "2 days ago".
     # Manual "?v=" cache-buster: bump it when the file changes.
     "/assets/ms_calendar/js/activity_exact_time.js?v=2",
+    # Workspace pages: full width, sidebar hidden until "Show sidebar" / ☰.
+    # Manual "?v=" cache-buster: bump it when the file changes.
+    "/assets/ms_calendar/js/workspace_layout.js?v=2",
     # "pathways_redirect.js" was never actually added to public/js/ (checked
     # git history — no commit ever created it), so this line 404s on every
     # single desk page load, for every user, since app_include_js is loaded
@@ -763,7 +766,7 @@ app_include_js = [
 # feedback web forms are custom records on the site.
 # Manual "?v=" cache-buster like frf_list.js: bump it when the file changes.
 web_include_js = [
-    "/assets/ms_calendar/js/feedback_form_draft.js?v=10",
+    "/assets/ms_calendar/js/feedback_form_draft.js?v=15",
 ]
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}

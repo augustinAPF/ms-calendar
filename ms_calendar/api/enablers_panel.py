@@ -17,6 +17,7 @@ functions.
 
 import base64
 import json
+import re
 from datetime import timedelta
 
 import frappe
@@ -536,4 +537,52 @@ def candidate_context(schedule, ctx):
 def check_feedback_panel(schedule, email):
 	"""Guest feedback must come from someone on the panel (incl. CC)."""
 	return (email or "").strip().lower() in {e.lower() for e in panel_members(schedule, cc=True)}
+
+
+def split_emails(value):
+	"""'A@x.org, b@x.org' -> ['a@x.org', 'b@x.org'] (lower-case, no repeats)."""
+	parts = (p.strip().lower() for p in re.split(r"[,;\s]+", value or ""))
+	return [e for e in dict.fromkeys(parts) if e]
+
+
+def validate_feedback_emails(doc, email_field, word="interview"):
+	"""Enablers / Finance Fellowship feedback: the panelist email field holds
+	one email (Individual) or every panel member's (Consolidated, filled by
+	public/js/feedback_form_draft.js). Each must be a valid email; a Guest's
+	must all be on the interview's panel (incl. CC); and nobody can submit
+	twice for the same interview — so a Consolidated feedback is refused once
+	any member has submitted, and the other way round. Returns the emails."""
+	emails = split_emails(doc.get(email_field))
+	for e in emails:
+		frappe.utils.validate_email_address(e, throw=True)
+	doc.set(email_field, ", ".join(emails))
+	if len(emails) > 1 and doc.meta.has_field("interview_feedback_type"):
+		doc.interview_feedback_type = "Consolidated"
+	if not doc.interview_schedule:
+		return emails
+	schedule = frappe.get_doc(SCHEDULE_DOCTYPE, doc.interview_schedule)
+	if frappe.session.user == "Guest":
+		outside = [e for e in emails if not check_feedback_panel(schedule, e)]
+		if outside:
+			frappe.throw(
+				_("{0} is not on the panel for this {1}. Please use the email address the invite was sent to.").format(
+					", ".join(outside), word
+				)
+			)
+	if doc.is_new():
+		done = {
+			e
+			for row in frappe.get_all(
+				doc.doctype, filters={"interview_schedule": doc.interview_schedule}, pluck=email_field
+			)
+			for e in split_emails(row)
+		}
+		again = [e for e in emails if e in done]
+		if again and len(emails) == 1:
+			frappe.throw(_("You have already submitted feedback for this {0}.").format(word))
+		if again:
+			frappe.throw(
+				_("Feedback for this {0} has already been submitted by {1}.").format(word, ", ".join(again))
+			)
+	return emails
 

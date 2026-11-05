@@ -245,10 +245,11 @@ def _document_attachment_paths(application_id):
 
 
 def _new_feedback_link_html(interview_round, application_id, applicants_name, role=None, panel_emails=None):
-    """ONE feedback link for the whole panel, same as Field's invite
+    """ONE feedback button for the whole panel, same as Field's invite
     (ms_field._field_panel_feedback_block): one member → their own link,
-    several → the form asks "Who is filling this feedback?". The form keeps
-    a Save draft per member (public/js/feedback_form_draft.js)."""
+    several → the form asks the member's email, then offers only them and
+    "Consolidated". The form keeps a Save draft per member
+    (public/js/feedback_form_draft.js)."""
     from ms_calendar.api.ms_field import _field_panel_feedback_block
 
     url = _health_feedback_url(interview_round, application_id, applicants_name, role)

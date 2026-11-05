@@ -14,17 +14,15 @@ from ms_calendar.api.ms_enablers import ERF, ROUND_PDF_FIELD, SCHEDULE_DOCTYPE, 
 
 class EnablersFeedbackForm(Document):
 	def validate(self):
-		self.interviewer_email = (self.interviewer_email or "").strip().lower()
 		if self.interview_schedule:
 			self.check_schedule()
 		elif frappe.session.user == "Guest":
 			frappe.throw(
 				_("Please open the feedback form from the link in your interview invite."), frappe.PermissionError
 			)
-		if self.is_new() and self.interview_schedule and frappe.db.exists(
-			self.doctype, {"interview_schedule": self.interview_schedule, "interviewer_email": self.interviewer_email}
-		):
-			frappe.throw(_("You have already submitted feedback for this interview."))
+		# One email (Individual) or the whole panel's (Consolidated): each on
+		# the panel for a Guest, and nobody submits twice for this interview.
+		enablers_panel.validate_feedback_emails(self, "interviewer_email", "interview")
 
 	def check_schedule(self):
 		schedule = frappe.get_doc(SCHEDULE_DOCTYPE, self.interview_schedule)
@@ -32,14 +30,6 @@ class EnablersFeedbackForm(Document):
 			frappe.throw(_("This feedback link does not match the applicant."))
 		self.interview_round = schedule.interview_round
 		self.interview_date = self.interview_date or schedule.interview_date
-		if frappe.session.user != "Guest":
-			return
-		if not enablers_panel.check_feedback_panel(schedule, self.interviewer_email):
-			frappe.throw(
-				_("{0} is not an interviewer for this interview. Please use the email address the invite was sent to.").format(
-					self.interviewer_email
-				)
-			)
 
 	def after_insert(self):
 		if self.interview_schedule:
