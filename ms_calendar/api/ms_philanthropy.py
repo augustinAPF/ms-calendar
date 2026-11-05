@@ -1,5 +1,5 @@
 import frappe
-import os, ast, base64, time, re, requests
+import os, ast, base64, time, re, requests, difflib
 from datetime import datetime, timedelta, timezone
 from frappe.utils import get_url, formatdate, format_time, get_datetime
 from urllib.parse import quote
@@ -1859,26 +1859,87 @@ def _pending_feedback_interviewers(schedule_name, application_id):
     return interviewer_emails, pending
 
 
+_NAME_TITLES = {"dr", "mr", "mrs", "ms", "miss", "prof", "sir", "madam"}
+
+
+def _name_words(text):
+    """'Dr. Mahesh. K' -> ['mahesh', 'k']: lower-case words, punctuation and
+    titles dropped."""
+    words = re.sub(r"[^a-z ]+", " ", (text or "").lower()).split()
+    return [w for w in words if w not in _NAME_TITLES]
+
+
+def _typed_people(interviewer_name):
+    """Split the free-text "interviewer_name" into one word-list per person:
+    'Jitendra & Ruchi' / 'Rajkishor Mishra, Jitendra Rath, and Dhabal' /
+    'Akshat Krishna + Alok' -> [['jitendra'], ['ruchi']] etc."""
+    parts = re.split(r"[,;&/+\n]|\band\b", (interviewer_name or "").lower())
+    return [w for w in (_name_words(p) for p in parts) if w]
+
+
+def _panelist_words(email, names):
+    """Name words for one panel member: their Interviewer Email List name
+    plus the words of their email ID (rajita.kurup@ -> rajita, kurup), so a
+    list name of just 'Rajita' still matches 'Rajita Kurup'. First word =
+    first name."""
+    listed = _name_words(names.get(email) or "")
+    from_email = _name_words(email.split("@")[0].replace(".", " ").replace("_", " "))
+    first = (listed or from_email or [""])[0]
+    return first, set(listed) | set(from_email)
+
+
 def _feedback_panel_emails(fb, panel_emails, names):
     """Which panel members a Philanthrophy Feedback Form was submitted for.
+
     The web form's "email" field is hidden on the live site and always holds
-    the default grants.recruitment@ address, so it rarely says who
-    submitted. Tried in order: a real panel email in "email", the logged-in
-    owner, then the name(s) in interviewer_name — the form's "Who is filling
-    this feedback?" picker fills the exact Interviewer Email List name, and
-    Consolidated fills every member's name, comma-separated."""
+    the default grants.recruitment@ address, and "owner" is often the HR
+    person who filled the form in for someone else, so the typed name in
+    interviewer_name is the main signal. It is free text: short ('Rajita'),
+    misspelt ('Abhisek Duta'), or several people ('Jitendra & Ruchi',
+    Consolidated = every name comma-separated).
+
+    Tried in order:
+      1. a real panel email in "email";
+      2. names in interviewer_name - a typed person matches a panel member
+         when their first name matches (from the Interviewer Email List
+         name or the email ID); if two panel members share that first name,
+         the other typed words (surname / initial) pick between them;
+      3. only when no name matched: the logged-in owner, if on the panel.
+    """
+    panel_emails = [(e or "").strip().lower() for e in panel_emails if e]
     email = (fb.get("email") or "").strip().lower()
     if email in panel_emails:
         return {email}
+
+    panel = {e: _panelist_words(e, names) for e in panel_emails}
+    matched = set()
+    for typed in _typed_people(fb.get("interviewer_name")):
+        same_first = [e for e, (first, _) in panel.items() if first and first == typed[0]]
+        if not same_first and len(typed[0]) >= 4:
+            # Spelling slip in the first name ("Abhishek" for "Abhisek").
+            same_first = [
+                e
+                for e, (first, _) in panel.items()
+                if len(first) >= 4
+                and difflib.SequenceMatcher(None, first, typed[0]).ratio() >= 0.85
+            ]
+        if len(same_first) > 1 and len(typed) > 1:
+            # e.g. two "Rajesh"es on one panel - use the surname/initial.
+            narrowed = [
+                e
+                for e in same_first
+                if any(w == t or (len(t) == 1 and w.startswith(t))
+                       for t in typed[1:] for w in panel[e][1])
+            ]
+            same_first = narrowed or same_first
+        matched.update(same_first)
+    if matched:
+        return matched
+
     owner = (fb.get("owner") or "").strip().lower()
     if owner in panel_emails:
         return {owner}
-    typed = {
-        n.strip().lower()
-        for n in re.split(r"[,;&/]|\band\b", fb.get("interviewer_name") or "")
-        if n.strip()
-    }
-    return {e for e in panel_emails if (names.get(e) or "").strip().lower() in typed}
+    return set()
 
 
 def _send_feedback_reminder(s, pending_emails, error_title):
