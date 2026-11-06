@@ -470,11 +470,6 @@
 		return e ? panel.find((p) => p.email.toLowerCase() === e) || null : null;
 	}
 
-	function is_guest() {
-		const user = (frappe.session && frappe.session.user) || frappe.get_cookie("user_id") || "Guest";
-		return !user || user === "Guest";
-	}
-
 	// "Sign in with Microsoft": Office 365 sign-in that returns to this same
 	// link; the signed-in user is then picked automatically (status.me).
 	// Falls back to the site's login page when there's no direct link.
@@ -489,15 +484,34 @@
 		});
 	}
 
+	function signed_in_user() {
+		const user = (frappe.session && frappe.session.user) || frappe.get_cookie("user_id") || "Guest";
+		return user && user !== "Guest" ? decodeURIComponent(user) : "";
+	}
+
 	function show_email_ask(panel, status) {
 		ask_ctx = { panel, status };
-		const ms = is_guest()
-			? `<div style="margin-bottom:10px;">
-					<button type="button" class="btn btn-sm btn-primary apf-ms-login">${__("Sign in with Microsoft")}</button>
+		const esc = (v) => frappe.utils.escape_html(v || "");
+		// Shown to a guest AND to someone signed in to this site with an
+		// account that isn't on the panel (e.g. Administrator / a personal
+		// login) — Microsoft sign-in switches to their work account, which is
+		// then picked automatically.
+		const other = signed_in_user();
+		const ms = `<div style="margin-bottom:10px;">
+					<button type="button" class="btn btn-sm btn-primary apf-ms-login">${
+						other ? __("Sign in with Microsoft as yourself") : __("Sign in with Microsoft")
+					}</button>
 					<span class="text-muted small" style="margin-left:6px;">${__("— picks you automatically")}</span>
 				</div>
-				<div class="text-muted small" style="margin-bottom:6px;">${__("or enter your email:")}</div>`
-			: "";
+				${
+					other
+						? `<div class="text-muted small" style="margin-bottom:6px;">${__(
+								"You are signed in to this site as {0}, which is not on this interview's panel.",
+								[`<b>${esc(other)}</b>`]
+						  )}</div>`
+						: ""
+				}
+				<div class="text-muted small" style="margin-bottom:6px;">${__("or enter your email:")}</div>`;
 		const $ask = $(`
 			<div class="apf-panel-pick apf-me-ask" style="border:1px solid var(--border-color,#d1d5db);border-left:4px solid #1d4ed8;
 				border-radius:6px;padding:12px 14px;margin-bottom:16px;">
