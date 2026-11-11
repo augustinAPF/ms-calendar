@@ -1049,6 +1049,18 @@ def _field_panelist_names(emails):
     return {r.name.strip().lower(): (r.interviewer_name or "").strip() for r in rows}
 
 
+def _field_display_names(names):
+    """"Interviewers:" / "Dear …" text for the invite. The schedule forms
+    send the interviewer email addresses as the names, so each address is
+    swapped for its Interviewer Email List name (kept as the address when
+    no name is saved). Plain names pass through unchanged."""
+    parts = [p.strip() for p in str(names or "").split(",") if p.strip()]
+    if not parts:
+        return ""
+    lookup = _field_panelist_names([p for p in parts if "@" in p])
+    return ", ".join(lookup.get(p.lower()) or p if "@" in p else p for p in parts)
+
+
 def _field_personal_feedback_url(feedback_url, email, name=""):
     if not (feedback_url and email) or "panelist_email=" in feedback_url:
         return feedback_url
@@ -1070,7 +1082,19 @@ def _field_feedback_button(url, label):
     )
 
 
-def _field_panel_feedback_block(feedback_url, panel_emails):
+def _field_panel_url(feedback_url, panel, names):
+    """feedback_url + ?panel= (base64url JSON [[email, name], …] of the whole
+    panel) — read by public/js/feedback_form_draft.js (panel_list)."""
+    import base64
+    import json
+
+    token = base64.urlsafe_b64encode(
+        json.dumps([[e, names.get(e.lower(), "")] for e in panel], separators=(",", ":")).encode()
+    ).decode().rstrip("=")
+    return f"{feedback_url}{'&' if '?' in feedback_url else '?'}panel={token}"
+
+
+def _field_panel_feedback_block(feedback_url, panel_emails, personal_links=False):
     """The feedback-link part of the panel invite (one email, the invite).
 
     ONE button for the whole panel. The invite is one Outlook meeting, so
@@ -1079,23 +1103,27 @@ def _field_panel_feedback_block(feedback_url, panel_emails):
     - several → the link carries the panel (`panel=`, base64url JSON
       [[email, name], …]); the form first asks the panel member's email and
       then offers only "<that member>" and "Consolidated (whole panel)", and
-      loads their saved draft (public/js/feedback_form_draft.js)."""
+      loads their saved draft (public/js/feedback_form_draft.js).
+    personal_links (Field): with several members the invite has no button —
+    each member gets their own link in a separate email instead
+    (_field_send_personal_feedback_links), which opens straight on
+    "<that member>" + "Consolidated (whole panel)" without asking anything."""
     if not feedback_url:
         return ""
     panel = list(dict.fromkeys(e.strip() for e in panel_emails or [] if e and e.strip()))
+    if personal_links and len(panel) > 1 and "panelist_email=" not in feedback_url:
+        return (
+            "<p><b>Feedback Form Link:</b><br>"
+            "Each panel member is sent their own feedback form link in a separate email "
+            "(subject starting with <b>Feedback Form</b>).</p>"
+        )
     names = _field_panelist_names(panel)
     url = feedback_url
     note_start = "Your name and email are filled in when you open the form. "
     if len(panel) == 1:
         url = _field_personal_feedback_url(feedback_url, panel[0], names.get(panel[0].lower(), ""))
     elif panel and "panelist_email=" not in feedback_url:
-        import base64
-        import json
-
-        token = base64.urlsafe_b64encode(
-            json.dumps([[e, names.get(e.lower(), "")] for e in panel], separators=(",", ":")).encode()
-        ).decode().rstrip("=")
-        url = f"{feedback_url}{'&' if '?' in feedback_url else '?'}panel={token}"
+        url = _field_panel_url(feedback_url, panel, names)
         note_start = "When the form opens, enter your email address — your name and email are filled in. "
     buttons = _field_feedback_button(url, "Click Here to Open Feedback Form")
     note = (
@@ -1107,6 +1135,75 @@ def _field_panel_feedback_block(feedback_url, panel_emails):
         "your feedback is recorded only when you click <b>Submit</b>.</p>"
     )
     return f"<p><b>Feedback Form Link:</b><br>{buttons}</p>{note}"
+
+
+def _field_send_personal_feedback_links(
+    headers, organizer_email, feedback_url, panel_emails, subject, details_html
+):
+    """One email per panel member with THEIR OWN feedback link (Field, panel of
+    two or more — the invite then has no button, see personal_links in
+    _field_panel_feedback_block). The link carries the whole panel plus this
+    member's panelist_email/name, so the form opens straight on "<member>" +
+    "Consolidated (whole panel)" — no sign-in or email question.
+    Sent through Graph from the organizer; frappe.sendmail if that fails."""
+    import requests
+
+    panel = list(dict.fromkeys(e.strip() for e in panel_emails or [] if e and e.strip()))
+    if not feedback_url or len(panel) < 2 or "panelist_email=" in feedback_url:
+        return
+    esc = frappe.utils.escape_html
+    names = _field_panelist_names(panel)
+    panel_url = _field_panel_url(feedback_url, panel, names)
+    sender_arg = (
+        {"sender": organizer_email}
+        if frappe.db.exists("Email Account", {"email_id": organizer_email, "enable_outgoing": 1})
+        else {}
+    )
+    for email in panel:
+        name = names.get(email.lower(), "")
+        url = _field_personal_feedback_url(panel_url, email, name)
+        body = (
+            f"<p>Dear {esc(name or email)},</p>"
+            + details_html
+            + "<p><b>Your Feedback Form Link:</b><br>"
+            + _field_feedback_button(url, "Click Here to Open Feedback Form")
+            + "</p>"
+            '<p style="font-size:13px;color:#555555;">This link is only for you — it opens with your '
+            "name and email filled in. Choose your own feedback or <b>Consolidated (whole panel)</b>. "
+            "Click <b>Save</b> to keep a draft on your device and finish it later from the same link; "
+            "your feedback is recorded only when you click <b>Submit</b>.</p>"
+            "<p>Warm regards,<br>Recruitment Team<br>Azim Premji Foundation</p>"
+        )
+        try:
+            r = requests.post(
+                f"https://graph.microsoft.com/v1.0/users/{organizer_email}/sendMail",
+                headers=headers,
+                json={
+                    "message": {
+                        "subject": subject,
+                        "body": {"contentType": "HTML", "content": body},
+                        "toRecipients": [{"emailAddress": {"address": email}}],
+                    },
+                    "saveToSentItems": True,
+                },
+                timeout=30,
+            )
+            r.raise_for_status()
+            continue
+        except Exception as e:
+            frappe.log_error(
+                title="Personal Feedback Link Email Error",
+                message=f"{email}: {e}"[:2000],
+            )
+        try:
+            frappe.sendmail(
+                recipients=[email], subject=subject, message=body, delayed=False, **sender_arg
+            )
+        except Exception as e:
+            frappe.log_error(
+                title="Personal Feedback Link Email Fallback Error",
+                message=f"{email}: {e}"[:2000],
+            )
 
 
 # ── Feedback reminders logged on the schedule (Health / Scholarship) ────────
@@ -1656,7 +1753,7 @@ def create_interview_event(
             pass
     Applicants_name = (Applicants_name or "").strip()
     Applicants_Role = (Applicants_Role or "").strip()
-    InterviewersName = (InterviewersName or "").strip()
+    InterviewersName = _field_display_names(InterviewersName)
     Map_location = Map_location or ""
     address = address or ""
     commands_to_candidate = commands_to_candidate or ""
@@ -1971,10 +2068,10 @@ def create_interview_event(
     cc_list = _field_without_candidate(cc_list, interviewee_email)
     hybrid_interviewer_list = _field_without_candidate(hybrid_interviewer_list, interviewee_email)
     feedback_html_block = _field_panel_feedback_block(
-        feedback_url, interviewer_list + hybrid_interviewer_list
+        feedback_url, interviewer_list + hybrid_interviewer_list, personal_links=True
     )
     online_names = (
-        (HybridInterviewersName or "").strip() or ", ".join(hybrid_interviewer_list)
+        _field_display_names(HybridInterviewersName or ", ".join(hybrid_interviewer_list))
         if hybrid_interviewer_list
         else ""
     )
@@ -2671,6 +2768,23 @@ comments/recommendations for the calibration process and final selection decisio
                     pass
 
     # ----------------------------------------
+    # PERSONAL FEEDBACK LINK — one email per panel member (panel of 2+; the
+    # invite itself then says the link comes separately).
+    # ----------------------------------------
+    _field_send_personal_feedback_links(
+        headers,
+        Organizer_email,
+        feedback_url,
+        interviewer_list + hybrid_interviewer_list,
+        f"Feedback Form – {Applicants_name} | {round_label} for {Applicants_Role}",
+        f"<p>Please share your feedback for <b>{Applicants_name}</b> "
+        f"(<b>{Applicants_Role}</b>) after the interview.</p>"
+        f"<p><b>Interview Round:</b> {round_label}<br>"
+        f"<b>Date:</b> {interview_date_str}<br>"
+        f"<b>Interview Time:</b> {interview_time_str} – {end_time_str}</p>",
+    )
+
+    # ----------------------------------------
     # EMAIL TO DEMO FEEDBACK INTERVIEWER(S)
     # ----------------------------------------
     # Only sent when demo checkbox is checked AND demo_feedback_interviewers_email is filled.
@@ -3239,7 +3353,7 @@ def update_interview_event(
     cc_list = _field_without_candidate(cc_list, _candidate_email)
     hybrid_interviewer_list = _field_without_candidate(hybrid_interviewer_list, _candidate_email)
     online_names = (
-        (HybridInterviewersName or "").strip() or ", ".join(hybrid_interviewer_list)
+        _field_display_names(HybridInterviewersName or ", ".join(hybrid_interviewer_list))
         if hybrid_interviewer_list
         else ""
     )
@@ -3401,11 +3515,11 @@ def update_interview_event(
         doc.feedback_form_link,
     )
     feedback_html_block = _field_panel_feedback_block(
-        feedback_url, interviewer_list + hybrid_interviewer_list
+        feedback_url, interviewer_list + hybrid_interviewer_list, personal_links=True
     )
 
     cc_line = f"<b>Cc:</b> {', '.join(cc_list)}<br>" if cc_list else ""
-    interviewers_name = ", ".join(interviewer_list)
+    interviewers_name = _field_display_names(", ".join(interviewer_list))
 
     # Hybrid: "Dear <offline>, <online>" and, in place of the plain mode line
     # + location, the Offline Panel (venue) and Online Panel (Teams link)
@@ -3493,6 +3607,21 @@ def update_interview_event(
         patch_payload["onlineMeetingProvider"] = "teamsForBusiness"
     res = requests.patch(event_url, headers=headers, json=patch_payload, timeout=30)
     res.raise_for_status()
+
+    # Personal feedback links again, with the new date/time (the invite says
+    # they come separately; also covers anyone added to the panel now).
+    _field_send_personal_feedback_links(
+        headers,
+        Organizer_email,
+        feedback_url,
+        interviewer_list + hybrid_interviewer_list,
+        f"Feedback Form (Rescheduled) – {Applicants_name} | {round_label} for {Applicants_Role}",
+        f"<p>The interview with <b>{Applicants_name}</b> (<b>{Applicants_Role}</b>) has been "
+        f"<b>rescheduled</b>. Please share your feedback after the interview.</p>"
+        f"<p><b>Interview Round:</b> {round_label}<br>"
+        f"<b>Date:</b> {interview_date_str}<br>"
+        f"<b>Interview Time:</b> {interview_time_str}</p>",
+    )
 
     # Older Hybrid records had the online group on a separate event — they
     # are on this event now, so that one comes off their calendars.

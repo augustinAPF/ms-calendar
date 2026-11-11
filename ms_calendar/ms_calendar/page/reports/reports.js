@@ -19,12 +19,65 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		return 'RP';
 	}
 
-	function getState(rec) {
-		var dept = (rec.department || '').toLowerCase();
-		if (dept.includes('health') || dept.includes('livelihood')) {
-			return (rec.location || '').trim();
+	// State = state of the JOB applied for (job location on the application,
+	// else the linked Job Opening's location), never the candidate's own
+	// native_state — see job_state() in ms_calendar/api/reports.py, whose
+	// state lists arrive here via get_report_meta (_meta). Records need
+	// 'location' and 'job_title' fetched.
+	var _meta = null, _metaWaiters = [];
+	frappe.call({
+		method: 'ms_calendar.api.reports.get_report_meta',
+		callback: function (r) {
+			_meta = (r && r.message) || { jo: {}, states: [], aliases: {}, multi: 'Multiple States', none: 'Other / Not specified', rounds: [] };
+			_metaWaiters.splice(0).forEach(function (fn) { fn(); });
 		}
-		return (rec.location || rec.native_state || '').trim();
+	});
+	function withMeta(fn) { if (_meta) fn(); else _metaWaiters.push(fn); }
+
+	function statesIn(text) {
+		var s = (text || '').toLowerCase();
+		if (!s) return [];
+		var found = _meta.states.filter(function (st) { return s.indexOf(st.toLowerCase()) !== -1; });
+		if (!found.length) {
+			found = Object.keys(_meta.aliases).filter(function (st) {
+				return _meta.aliases[st].some(function (k) { return s.indexOf(k) !== -1; });
+			});
+		}
+		return found;
+	}
+	function getState(rec) {
+		if (rec._state) return rec._state;
+		var multi = false;
+		var texts = [rec.location, _meta.jo[rec.job_title]];
+		for (var i = 0; i < texts.length; i++) {
+			var found = statesIn(texts[i]);
+			if (found.length === 1) return (rec._state = found[0]);
+			if (found.length || /all states/i.test(texts[i] || '')) multi = true;
+		}
+		return (rec._state = multi ? _meta.multi : _meta.none);
+	}
+
+	// Applied date ('YYYY-MM-DD'): Date of Applied, else Application Date,
+	// else creation. Date filters use this, not creation — bulk imports
+	// (2026-07-31, 08-25/26: ~110k old applications) all have a recent
+	// creation date, so a creation filter pulled in every old application.
+	function appliedOf(r) {
+		return String(r.date_of_applied || r.application_date || r.creation || '').slice(0, 10);
+	}
+	// get_list or_filters that over-fetch every record whose applied date
+	// could fall in from..to; inAppliedRange() then keeps the exact ones.
+	function appliedOrFilters(from, to) {
+		function rng(field, isDt) {
+			var a = from ? from + (isDt ? ' 00:00:00' : '') : null, b = to ? to + (isDt ? ' 23:59:59' : '') : null;
+			if (a && b) return [field, 'between', [a, b]];
+			return a ? [field, '>=', a] : [field, '<=', b];
+		}
+		if (!from && !to) return [];
+		return [rng('date_of_applied', false), rng('application_date', true), rng('creation', true)];
+	}
+	function inAppliedRange(r, from, to) {
+		var d = appliedOf(r);
+		return (!from || d >= from) && (!to || d <= to);
 	}
 
 	// Fields needed for the Applications Received / Source reports' summary
@@ -34,17 +87,17 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 	// only for the specific cell a recruiter actually clicks into. See the
 	// fetchArData()/fetchSrcData() comments for why this split exists.
 	var AR_LEAN_FIELDS = ['name', 'application_status', 'role', 'department',
-		'location', 'worklocation', 'native_state', 'native_district', 'creation'];
+		'location', 'job_title', 'native_district', 'date_of_applied', 'application_date', 'creation'];
 	// The full field list, fetched on-demand for just the matched IDs of one
 	// clicked cell — same columns the drill-down dialog has always shown.
 	var AR_FULL_FIELDS = ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
-		'location', 'worklocation', 'native_state', 'native_district', 'opportunity',
+		'location', 'job_title', 'worklocation', 'native_state', 'native_district', 'opportunity',
 		'email_address', 'phone_number', 'alternate_no', 'gender', 'dob', 'age',
 		'highest_education', 'teaching_degrees', 'teaching_year', 'teachingexp_month',
 		'health_expyear', 'health_expmonth', 'languages_known', 'written_subject',
 		'test_location', 'apf_associated', 'former_employee',
 		'reasons_for_shortlist', 'reasons_for_reject', 'hold_reason', 'blocklist_reason',
-		'creation'];
+		'date_of_applied', 'application_date', 'creation'];
 
 	// Monday-Sunday week containing (today + offsetWeeks*7 days) — offsetWeeks
 	// -1 gives last week, 0 gives the current week.
@@ -397,7 +450,6 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		.ct-tbl thead th.ct-stage { background:#1F3A5F !important; color:#fff !important; }
 		.ct-tbl .ct-cell { cursor:pointer; min-width:130px; }
 		.ct-tbl .ct-cell:hover { background:#EEF2FF; }
-		.ct-tbl .ct-na { background:#F3F4F6 !important; color:#9CA3AF; cursor:help; }
 		.ct-tbl .ct-year td { font-weight:700; border-top:2px solid #CBD5E1; background:#F8FAFC; }
 		.ct-avg { font-size:13px; font-weight:700; color:#1F3A5F; }
 		.ct-n { font-size:10.5px; color:#6B7280; }
@@ -443,6 +495,8 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		.iv-tbl .iv-lbl { background:#F8FAFC; font-weight:600; text-align:left; }
 		.iv-tbl .iv-year td { font-weight:700; border-bottom:2px solid #CBD5E1; }
 		.iv-tbl .iv-tot { background:#F1F5F9; font-weight:700; }
+		.iv-tbl thead tr:nth-child(2) th { background:#274C77; color:#fff; }
+		.iv-tbl .iv-rd-first { border-left:2px solid #CBD5E1; }
 	</style>
 	<div class="rpt-wrap" id="rpt-main"></div>`);
 
@@ -559,9 +613,24 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		});
 	}
 
+	// Sticky header rows use fixed `top` offsets in CSS (33px / 60px); a
+	// header cell that wraps makes its row taller and the next row then
+	// overlaps it with body rows showing through. Re-set each row's top to
+	// the real height of the rows above it.
+	function fixStickyHeads($wrap) {
+		$wrap.find('table thead').each(function () {
+			var top = 0;
+			$(this).children('tr').each(function () {
+				$(this).children('th').css('top', top + 'px');
+				top += $(this).outerHeight();
+			});
+		});
+	}
+
 	// ── Route to correct report ───────────────────────────────────────────
 	function loadReport(key) {
 		if (key === 'pipeline') { frappe.set_route('field-over-all-dashb'); return; }
+		if (!_meta) { withMeta(function () { loadReport(key); }); return; }
 		if (key === 'apps_received') { showAppsReceived(); return; }
 		if (key === 'source') { showSource(); return; }
 		if (key === 'cycle') { showCycleTime(); return; }
@@ -791,15 +860,11 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		var from = $('#ar-from').val() || '';
 		var to = $('#ar-to').val() || '';
 
-		var filters = [];
-		if (from) filters.push(['creation', '>=', from + ' 00:00:00']);
-		if (to) filters.push(['creation', '<=', to + ' 23:59:59']);
-
 		frappe.call({
 			method: 'frappe.client.get_list',
 			args: {
 				doctype: 'Field Registration Form',
-				filters: filters,
+				or_filters: appliedOrFilters(from, to),
 				// Lean field list — only what aggregateArData()/getState()/
 				// getCol() actually need for the summary table and the
 				// state/district dropdowns. The other ~22 detail fields (email,
@@ -821,7 +886,9 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				order_by: 'creation asc'
 			},
 			callback: function (r) {
-				_arAllRecs = (r && r.message) ? r.message : [];
+				_arAllRecs = ((r && r.message) ? r.message : []).filter(function (rec) {
+					return inAppliedRange(rec, from, to);
+				});
 				$('#ar-info').text('Records: ' + _arAllRecs.length + ' | Date: ' + frappe.datetime.now_date());
 				// Populate state/district dropdowns
 				var stSet = {}, diSet = {};
@@ -861,8 +928,8 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		}
 
 		records.forEach(function (r) {
-			if (!r.creation) return;
-			var d = new Date(r.creation);
+			if (!appliedOf(r)) return;
+			var d = new Date(appliedOf(r) + 'T00:00:00');
 			var mi = d.getMonth();
 			var yr = d.getFullYear();
 			var mn = FIN_MONTHS[mi >= 3 ? mi - 3 : mi + 9];
@@ -1016,7 +1083,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 
 			var matched = _arAllRecs.filter(function (r) {
 				// month
-				var d = new Date(r.creation); var mi = d.getMonth(); var yr = d.getFullYear();
+				var d = new Date(appliedOf(r) + 'T00:00:00'); var mi = d.getMonth(); var yr = d.getFullYear();
 				var mn = FIN_MONTHS[mi >= 3 ? mi - 3 : mi + 9];
 				var yr2 = mi >= 3 ? yr : yr + 1;
 				if ((mn + '/' + String(yr2).slice(2)) !== ml) return false;
@@ -1063,21 +1130,21 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 					var full = (r2 && r2.message) ? r2.message : [];
 					showRecordsDialog(title, full,
 						['ID', 'Full Name', 'Status', 'Role', 'Department',
-							'Work State', 'Work Location', 'Native State', 'Native District', 'Source',
+							'Job State', 'Job Location', 'Native State', 'Native District', 'Source',
 							'Email', 'Phone', 'Alt Phone', 'Gender', 'DOB', 'Age',
 							'Education', 'Teaching Degree', 'Teaching Exp(Yr)', 'Teaching Exp(Mo)',
 							'Health Exp(Yr)', 'Health Exp(Mo)', 'Languages', 'Written Subject',
 							'Test Location', 'APF Associated', 'Former Employee',
-							'Shortlist Reason', 'Reject Reason', 'Hold Reason', 'Blocklist Reason', 'Date'],
+							'Shortlist Reason', 'Reject Reason', 'Hold Reason', 'Blocklist Reason', 'Applied On'],
 						function (r) {
 							return [r.name, r.full_name_aadhaar, r.application_status, r.role, r.department,
-							r.location, r.worklocation, r.native_state, r.native_district, r.opportunity,
+							getState(r), r.location, r.native_state, r.native_district, r.opportunity,
 							r.email_address, r.phone_number, r.alternate_no, r.gender, r.dob, r.age,
 							r.highest_education, r.teaching_degrees, r.teaching_year, r.teachingexp_month,
 							r.health_expyear, r.health_expmonth, r.languages_known, r.written_subject,
 							r.test_location, r.apf_associated, r.former_employee,
 							r.reasons_for_shortlist, r.reasons_for_reject, r.hold_reason, r.blocklist_reason,
-							r.creation ? r.creation.split(' ')[0] : ''];
+							appliedOf(r)];
 						});
 				},
 				error: function () {
@@ -1145,29 +1212,27 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		$('#src-tbl-wrap').html('<div class="rpt-loading is-busy">Loading…</div>');
 		var from = $('#src-from').val() || '';
 		var to = $('#src-to').val() || '';
-		var filters = [];
-		if (from) filters.push(['creation', '>=', from + ' 00:00:00']);
-		if (to) filters.push(['creation', '<=', to + ' 23:59:59']);
-
+		// Applied date, not creation — see appliedOf().
 		frappe.call({
 			method: 'frappe.client.get_list',
 			args: {
 				doctype: 'Field Registration Form',
-				filters: filters,
-				fields: ['name', 'role', 'department', 'opportunity',
-					'location', 'worklocation', 'native_state', 'native_district', 'creation'],
+				or_filters: appliedOrFilters(from, to),
+				fields: ['name', 'role', 'department', 'opportunity', 'location', 'job_title',
+					'native_district', 'date_of_applied', 'application_date', 'creation'],
 				// No cap — same reasoning as Applications Received above.
 				limit_page_length: 0,
 				order_by: 'creation asc'
 			},
 			callback: function (r) {
-				_srcAllRecs = (r && r.message) ? r.message : [];
+				_srcAllRecs = ((r && r.message) ? r.message : []).filter(function (rec) {
+					return inAppliedRange(rec, from, to);
+				});
 				$('#src-info').text('Records: ' + _srcAllRecs.length + ' | Date: ' + frappe.datetime.now_date());
 				// Populate state/district dropdowns
 				var stSet = {}, diSet = {};
 				_srcAllRecs.forEach(function (rec) {
-					var st = (rec.location || rec.worklocation || rec.native_state || '').trim();
-					if (st) stSet[st] = true;
+					stSet[getState(rec)] = true;
 					if (rec.native_district) diSet[rec.native_district.trim()] = true;
 				});
 				var $st = $('#src-state').empty().append('<option value="">All States</option>');
@@ -1187,8 +1252,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		var selDist = $('#src-district').val() || '';
 		if (selState || selDist) {
 			records = records.filter(function (r) {
-				var st = (r.location || r.worklocation || r.native_state || '').trim();
-				if (selState && st !== selState) return false;
+				if (selState && getState(r) !== selState) return false;
 				if (selDist && (r.native_district || '').trim() !== selDist) return false;
 				return true;
 			});
@@ -1339,8 +1403,8 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			args: {
 				doctype: 'Field Registration Form',
 				filters: filters,
-				fields: ['name', 'role', 'department', 'location', 'worklocation',
-					'native_state', 'application_status', 'creation'],
+				fields: ['name', 'role', 'department', 'location', 'job_title',
+					'application_status', 'creation'],
 				// Already pre-filtered to offer-related statuses (~1,200 records
 				// currently, confirmed 2026-09-04) so this was never actually
 				// hitting the cap — uncapped anyway for the same future-proofing
@@ -1698,7 +1762,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 					['creation', '<=', fmtDate(thisWk.to) + ' 23:59:59'],
 				],
 				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
-					'location', 'native_state', 'creation', 'modified'],
+					'location', 'job_title', 'creation', 'modified'],
 				// Especially important to uncap here: any 2-week window that
 				// includes 2026-08-25/26 (a confirmed bulk import, ~97k records
 				// in those 2 days alone) blew straight through the old 10000
@@ -1875,7 +1939,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				doctype: 'Field Registration Form',
 				filters: filters,
 				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
-					'location', 'worklocation', 'native_state', 'native_district', 'creation'],
+					'location', 'job_title', 'native_district', 'creation'],
 				limit_page_length: 0,
 				order_by: 'creation asc'
 			},
@@ -2069,22 +2133,22 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		{ label: 'Admit Card Sent', key: 'admit_card_sent', statuses: ['Test Process', 'Admit Card Sent'] },
 		{ label: 'Test Select', key: 'assessment_pass', statuses: ['Test Select', 'Assessment Passed'] },
 		{ label: 'Test Reject', key: 'assessment_fail', statuses: ['Test Reject', 'Assessment Failed'] },
-		{ label: 'Recruiter Round Scheduled', key: 'rr_sched', statuses: ['Recruiter Round', 'Recruiter Round-Interview Scheduled'] },
+		{ label: 'Recruiter Round Scheduled', key: 'rr_sched', statuses: ['Recruiter Round', 'Recruiter Round Scheduled', 'Recruiter Round-Interview Scheduled'] },
 		{ label: 'Recruiter Round Selected', key: 'rr_sel', statuses: ['Recruiter Round Select', 'Recruiter Round-Interview Selected'] },
 		{ label: 'Recruiter Round Rejected', key: 'rr_rej', statuses: ['Recruiter Round Reject', 'Recruiter Reject', 'Recruiter Round-Interview Rejected'] },
-		{ label: 'Subject Round Interview Scheduled', key: 'sr_sched', statuses: ['Functional Round', 'Education Capacity Round', 'Round One', 'Subject Round', 'Subject Round-Interview Scheduled', 'Functional Round-Interview Scheduled', 'Functional Round-Interviewed'] },
+		{ label: 'Subject Round Interview Scheduled', key: 'sr_sched', statuses: ['Functional Round', 'Education Capacity Round', 'Round One', 'Subject Round', 'Functional Round Scheduled', 'Education Capacity Round Scheduled', 'Subject Round Scheduled', 'Subject Round-Interview Scheduled', 'Functional Round-Interview Scheduled', 'Functional Round-Interviewed'] },
 		{ label: 'Subject Round Interview Selected', key: 'sr_sel', statuses: ['Functional Round Select', 'Education Capacity Select', 'Round One Select', 'Subject Round Select', 'Functional Round-Interview Selected'] },
 		{ label: 'Subject Round Interview Rejected', key: 'sr_rej', statuses: ['Functional Round Reject', 'Education Capacity Reject', 'Round 1 Reject', 'Subject Round Reject', 'Subject Round-Interview Rejected', 'Functional Round-Interview Rejected'] },
-		{ label: 'Demo Round Scheduled', key: 'dr_sched', statuses: ['Round Two', 'Demo Round', 'Subject/Classroom Demo Round-Interview Scheduled', 'Principal/Demo Round-Interview Scheduled'] },
+		{ label: 'Demo Round Scheduled', key: 'dr_sched', statuses: ['Round Two', 'Demo Round', 'Demo Round Scheduled', 'Subject/Classroom Demo Round-Interview Scheduled', 'Principal/Demo Round-Interview Scheduled'] },
 		{ label: 'Demo Round Selected', key: 'dr_sel', statuses: ['Round Two Select', 'Demo Round Select', 'Subject/Classroom Demo Round-Interview Selected', 'Principal/Demo Round-Interview Selected'] },
 		{ label: 'Demo Round Rejected', key: 'dr_rej', statuses: ['Round 2 Reject', 'Demo Round Reject', 'Subject/Classroom Demo Round-Interview Rejected', 'Principal/Demo Round-Interview Rejected', 'Demo Round-Interview Rejected', 'Demo & Leader Round-Interview Rejected'] },
-		{ label: 'Leader Round 1 Interview Scheduled', key: 'lr1_sched', statuses: ['Leader Round-1', 'Leader Round 1-Interview Scheduled', 'Leader Round 1-Interviewed'] },
+		{ label: 'Leader Round 1 Interview Scheduled', key: 'lr1_sched', statuses: ['Leader Round-1', 'Leader Round-1 Scheduled', 'Leader Round 1-Interview Scheduled', 'Leader Round 1-Interviewed'] },
 		{ label: 'Leader Round 1 Interview Selected', key: 'lr1_sel', statuses: ['Leader Round-1 Select', 'Leader Round 1-Interview Selected', 'Leader Round-Interview Selected'] },
 		{ label: 'Leader Round 1 Interview Rejected', key: 'lr1_rej', statuses: ['Leader Round-1 Reject', 'Leader Round 1-Interview Rejected'] },
-		{ label: 'Leader Round 2 Interview Scheduled', key: 'lr2_sched', statuses: ['Leader Round-2'] },
+		{ label: 'Leader Round 2 Interview Scheduled', key: 'lr2_sched', statuses: ['Leader Round-2', 'Leader Round-2 Scheduled'] },
 		{ label: 'Leader Round 2 Interview Selected', key: 'lr2_sel', statuses: ['Leader Round-2 Select'] },
 		{ label: 'Leader Round 2 Interview Rejected', key: 'lr2_rej', statuses: ['Leader Round-2 Reject'] },
-		{ label: 'Leader Round 3 Interview Scheduled', key: 'lr3_sched', statuses: ['Round Three', 'Leader Round-3', 'Leader Round 3-Interview Scheduled', 'Leader Round 3-Interviewed'] },
+		{ label: 'Leader Round 3 Interview Scheduled', key: 'lr3_sched', statuses: ['Round Three', 'Leader Round-3', 'Leader Round-3 Scheduled', 'Leader Round 3-Interview Scheduled', 'Leader Round 3-Interviewed'] },
 		{ label: 'Leader Round 3 Interview Selected', key: 'lr3_sel', statuses: ['Round Three Select', 'Leader Round-3 Select', 'Leader Round 3-Interview Selected'] },
 		{ label: 'Leader Round 3 Interview Rejected', key: 'lr3_rej', statuses: ['Round 3 Reject', 'Leader Round-3 Reject', 'Leader Round 3-Interview Rejected'] },
 		{ label: 'Pending with CBT (Offer Released)', key: 'pending_cbt', statuses: ['Pending With CBT', 'CBT Assigned', 'Offer', 'Offer Sent'] },
@@ -2432,21 +2496,19 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 	// laid out like the recruiter's "Cycle Time" sheet: rows Q1–Q4 + Year,
 	// one column per stage transition.
 	//
-	// Each stage's date comes from a Field Registration Form field. Written
-	// test and Offer release have no date field on that doctype yet
-	// (checked 2026-09-28: date_offer is a Data field that is empty on
-	// every record, the Field Application Status Log child table has no
-	// rows, and MeritTrac test results link to Scholarship Recruitment
-	// Form, not this doctype) — their `field` is null, so every column that
-	// needs them renders greyed out instead of showing a made-up number.
-	// Once a date is captured, set `field` here and the columns fill in.
+	// Stage dates come from ms_calendar.api.reports.get_cycle_time_data
+	// (record.d[stage]): the date field on Field Registration Form where
+	// there is one, else the interview date on Field Interview Schedule for
+	// that round, else the day the Application Status first moved into that
+	// stage's results (status history). Written test and Offer release have
+	// no date field, so they come from the status history only.
 	var CT_STAGES = {
-		applied: { label: 'Application', field: 'date_of_applied' },
-		test: { label: 'Written test', field: null },
-		recruiter: { label: 'Recruiter screening', field: 'date_of_recruiter_round' },
-		ec: { label: 'EC/Subject interview', field: 'date_of_functional_round' },
-		final: { label: 'Final interview', field: 'date_of_final_round' },
-		offer: { label: 'Offer release', field: null },
+		applied: { label: 'Application' },
+		test: { label: 'Written test' },
+		recruiter: { label: 'Recruiter screening' },
+		ec: { label: 'EC/Subject interview' },
+		final: { label: 'Final interview' },
+		offer: { label: 'Offer release' },
 	};
 	var CT_COLS = [
 		{ key: 'app_test', label: 'Application to Written test', from: 'applied', to: 'test' },
@@ -2463,18 +2525,9 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 	var _ctViewRecs = [];  // after the State / Role type filters
 	var _ctMsState = null;
 
-	function ctColAvailable(col) {
-		return !!(CT_STAGES[col.from].field && CT_STAGES[col.to].field);
-	}
-
-	// Stage date as 'YYYY-MM-DD', or '' if not captured. Application falls
-	// back to application_date, then creation, when date_of_applied is blank.
+	// Stage date as 'YYYY-MM-DD', or '' if not captured.
 	function ctStageDate(r, stageKey) {
-		var f = CT_STAGES[stageKey].field;
-		if (!f) return '';
-		var v = r[f] || '';
-		if (stageKey === 'applied' && !v) v = r.application_date || r.creation || '';
-		return v ? String(v).slice(0, 10) : '';
+		return (r.d && r.d[stageKey]) || '';
 	}
 
 	function ctDays(fromStr, toStr) {
@@ -2550,34 +2603,9 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		$('#ct-tbl-wrap').html('<div class="rpt-loading is-busy">Loading…</div>');
 		var fy = ctFyBounds(parseInt($('#ct-fy').val(), 10));
 
-		// Only records whose transition END date falls in the selected FY
-		// can contribute to any cell, so fetch just those (OR across each
-		// available column's end-stage field) instead of all 126k+ Field
-		// Registration Forms — a few thousand rows at most.
-		var orFilters = [], seen = {};
-		CT_COLS.filter(ctColAvailable).forEach(function (c) {
-			var f = CT_STAGES[c.to].field;
-			if (seen[f]) return;
-			seen[f] = true;
-			orFilters.push([f, 'between', [fy.from, fy.to]]);
-		});
-
-		var fields = ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
-			'location', 'native_state', 'application_date', 'creation'];
-		Object.keys(CT_STAGES).forEach(function (k) {
-			var f = CT_STAGES[k].field;
-			if (f && fields.indexOf(f) === -1) fields.push(f);
-		});
-
 		frappe.call({
-			method: 'frappe.client.get_list',
-			args: {
-				doctype: 'Field Registration Form',
-				fields: fields,
-				or_filters: orFilters,
-				limit_page_length: 0,
-				order_by: 'creation asc'
-			},
+			method: 'ms_calendar.api.reports.get_cycle_time_data',
+			args: { from_date: fy.from, to_date: fy.to },
 			callback: function (r) {
 				_ctAllRecs = (r && r.message) ? r.message : [];
 				var stSet = {};
@@ -2613,7 +2641,6 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		// Pre-compute every column's transitions once; cells + drill-down reuse them.
 		var colData = {}, badTotal = 0;
 		CT_COLS.forEach(function (c) {
-			if (!ctColAvailable(c)) return;
 			colData[c.key] = ctTransitions(_ctViewRecs, c, fy);
 			badTotal += colData[c.key].bad;
 		});
@@ -2623,11 +2650,6 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			return q ? items.filter(function (it) { return it.q === q; }) : items;
 		}
 		function cellHtml(col, q) {
-			if (!ctColAvailable(col)) {
-				var missing = [col.from, col.to].filter(function (k) { return !CT_STAGES[k].field; })
-					.map(function (k) { return CT_STAGES[k].label; }).join(' & ');
-				return '<td class="ct-na" title="No ' + escHtml(missing) + ' date is captured on Field Registration Form yet">—</td>';
-			}
 			var items = bucket(col.key, q);
 			if (!items.length) return '<td class="ct-cell" data-col="' + col.key + '" data-q="' + (q || '') + '"></td>';
 			var sum = items.reduce(function (s, it) { return s + it.days; }, 0);
@@ -2639,8 +2661,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 
 		var thead = '<thead><tr><th class="ct-stage">Stages</th>';
 		CT_COLS.forEach(function (c) {
-			var style = ctColAvailable(c) ? '' : ' style="background:#94A3B8;"';
-			thead += '<th' + style + '>' + c.label + '</th>';
+			thead += '<th>' + c.label + '</th>';
 		});
 		thead += '</tr></thead>';
 
@@ -2654,16 +2675,13 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		CT_COLS.forEach(function (c) { tbody += cellHtml(c, null); });
 		tbody += '</tr></tbody>';
 
-		var missingStages = Object.keys(CT_STAGES).filter(function (k) { return !CT_STAGES[k].field; })
-			.map(function (k) { return CT_STAGES[k].label; });
 		var note = '<div class="ct-note">'
 			+ 'Each cell is the average number of days between the two stages, for candidates who completed the later stage in that quarter '
 			+ '(FY quarters: Q1 Apr–Jun, Q2 Jul–Sep, Q3 Oct–Dec, Q4 Jan–Mar). Click a cell to see the candidates.<br>'
-			+ 'Stage dates: Recruiter screening = Date of Recruiter Round, EC/Subject interview = Date of Functional Round, '
-			+ 'Final interview = Date of Final Round, Application = Date of Applied.'
-			+ (missingStages.length
-				? '<br><b>Greyed columns:</b> no ' + missingStages.join(' / ') + ' date is recorded on Field Registration Form yet, so those cycle times can\'t be calculated.'
-				: '')
+			+ 'Stage dates: Application = Date of Applied · Written test = first Test Select / Reject / Hold status · '
+			+ 'Recruiter screening, EC/Subject interview, Final (Leader) interview = round date on the form, else the interview date on '
+			+ 'Field Interview Schedule, else the first Select / Reject status for that round · Offer release = first Offer (or later) status. '
+			+ 'Status dates come from the application\'s status history. State = job opening state.'
 			+ '</div>';
 
 		$('#ct-tbl-wrap').html('<table class="rpt-tbl ct-tbl">' + thead + tbody + '</table>' + note);
@@ -2708,51 +2726,16 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		'Offers released',
 	];
 
-	// State columns are built from the data, not a fixed list: every Indian
-	// state / UT that at least one candidate in the selected year maps to
-	// gets its own column automatically (sorted by applications, most
-	// first), so a new state starts showing the moment candidates from it
-	// apply. State text on Field Registration Form is free-form ("Rajasthan,
-	// India", "Itki, Ranchi, Jharkhand, India", "Lucknow, Uttar Pradesh",
-	// "Ranchi, Dhanbad and Jamshedpur", ...), so it's matched against every
-	// state/UT name first, then against district/city names that show up
-	// without their state. Anything left (blank, "All States", unknown
-	// text) goes to CV_OTHER so the state columns always add up to All State.
-	var CV_INDIA_STATES = [
-		'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat',
-		'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh',
-		'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Punjab', 'Rajasthan',
-		'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
-		'Andaman and Nicobar Islands', 'Chandigarh', 'Dadra and Nagar Haveli and Daman and Diu', 'Delhi',
-		'Jammu and Kashmir', 'Ladakh', 'Lakshadweep', 'Puducherry',
-	];
-	// Spelling variants and district/city names seen without a state name.
-	var CV_STATE_ALIASES = {
-		'Chhattisgarh': ['chattisgarh', 'dhamtari', 'raigarh', 'raipur'],
-		'Karnataka': ['bengaluru', 'bangalore', 'kalaburagi', 'yadgir'],
-		'Madhya Pradesh': ['khargone', 'bhopal'],
-		'Rajasthan': ['tonk', 'sirohi', 'barmer', 'udaipur'],
-		'Uttarakhand': ['uttaranchal', 'udham singh', 'uttarkashi', 'dehradun'],
-		'Jharkhand': ['ranchi', 'dhanbad', 'jamshedpur', 'deoghar', 'pakur', 'sahibganj'],
-		'Uttar Pradesh': ['lucknow', 'varanasi'],
-		'Odisha': ['orissa'],
-		'Puducherry': ['pondicherry'],
-		'Maharashtra': ['nagpur', 'mumbai', 'pune'],
-		'Jammu and Kashmir': ['jammu', 'kashmir'],
-	};
+	// State columns are built from the data, not a fixed list: every state
+	// that at least one candidate in the selected year maps to gets its own
+	// column automatically (sorted by applications, most first). State =
+	// the job opening's state (getState). Blank / unrecognisable locations
+	// go to CV_OTHER so the state columns always add up to All State.
 	var CV_OTHER = 'Other / Not specified';
 	var CV_ALL = 'All State';
 
 	function cvStateOf(r) {
-		var s = getState(r).toLowerCase();
-		if (!s) return CV_OTHER;
-		for (var i = 0; i < CV_INDIA_STATES.length; i++) {
-			if (s.indexOf(CV_INDIA_STATES[i].toLowerCase()) !== -1) return CV_INDIA_STATES[i];
-		}
-		for (var st in CV_STATE_ALIASES) {
-			if (CV_STATE_ALIASES[st].some(function (k) { return s.indexOf(k) !== -1; })) return st;
-		}
-		return CV_OTHER;
+		return getState(r);
 	}
 
 	// Furthest stage index (into CV_STAGES) a candidate reached. Built from
@@ -2862,7 +2845,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			args: {
 				doctype: 'Field Registration Form',
 				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
-					'location', 'native_state', 'date_of_applied', 'application_date',
+					'location', 'job_title', 'date_of_applied', 'application_date',
 					'date_of_recruiter_round', 'date_of_functional_round', 'date_of_final_round'],
 				or_filters: [
 					['date_of_applied', 'between', [fy.from, fy.to]],
@@ -3096,7 +3079,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			args: {
 				doctype: 'Field Registration Form',
 				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
-					'location', 'native_state', 'date_of_applied', 'application_date',
+					'location', 'job_title', 'date_of_applied', 'application_date',
 					'date_of_recruiter_round', 'date_of_functional_round', 'date_of_final_round'],
 				or_filters: [
 					['date_of_applied', 'between', [prev.from, cur.to]],
@@ -3300,41 +3283,18 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 	// ── INTERVIEWERS DATA ─────────────────────────────────────────────────
 	// The recruiter's "Interviewers Data" sheet, from Field Interview
 	// Schedule (non-cancelled, interview_date in the selected FY):
-	//  1. One row per state + panel member: interviews done, and how many
-	//     of the candidates they interviewed were later selected in the
-	//     Functional round / Final round.
+	//  1. One row per state + panel member: total interviews, then for each
+	//     workflow round (Recruiter, EC, Subject, Technical, Functional,
+	//     Demo, Leader Round-1/2/3) the interviews they took in that round
+	//     and how many of those candidates got past it.
 	//  2. Per state: number of panel members, number of interview slots per
 	//     quarter + year, and average slots per panel member.
 	// Rows come from ms_calendar.api.reports.get_interviewer_data — one per
-	// (interview, interviewer), see that method for why it's SQL.
-	// State is the candidate's (Field Registration Form, via cvStateOf, so
-	// new states show up automatically); falls back to the schedule's own
-	// location when the candidate's form is missing.
-	var IV_ROUNDS = {
-		ec: 'EC/Subject (Functional) Round',
-		recruiter: 'Recruiter Round',
-		leader: 'Leader / Final Round',
-		'': 'All Rounds',
-	};
-	function ivRoundOf(r) {
-		var s = (r.interview_round || '').trim().toLowerCase();
-		if (/leader|final|round three|round 3/.test(s)) return 'leader';
-		if (/functional|subject|demo|education capacity|round one|round two|round 1|round 2/.test(s)) return 'ec';
-		if (/recruiter/.test(s)) return 'recruiter';
-		return 'other';
-	}
-	// Selected in Functional round = candidate moved past it (reached the
-	// Leader/Final round or later) or has an explicit Functional/Subject/
-	// EC/Demo "Select" status. Selected in Final round = offer and later.
-	function ivSelFunctional(r) {
-		var s = (r.application_status || '').trim().toLowerCase();
-		return cmpStageOf(r) >= 5
-			|| /(functional|subject|education capacity|demo|round one|round two).*select/.test(s);
-	}
-	function ivSelFinal(r) {
-		return CMP_OFFER_RE.test((r.application_status || '').trim().toLowerCase());
-	}
-
+	// (interview, interviewer), already tagged with the workflow `round`,
+	// `selected` (candidate got past THAT round — a panel member is only
+	// credited for rounds they sat on) and `_state` (job opening state).
+	var IV_OTHER_ROUND = 'Other';
+	var _ivRounds = [];     // workflow round names, in order (from the server)
 	var _ivAllRows = [];    // one per (interview, interviewer), tagged
 	var _ivViewRows = [];
 
@@ -3345,9 +3305,10 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		for (var y = curFy; y >= curFy - 3; y--) {
 			fyOpts += '<option value="' + y + '">FY ' + cmpFyLabel(y) + '</option>';
 		}
-		var roundOpts = Object.keys(IV_ROUNDS).map(function (k) {
-			return '<option value="' + k + '">' + IV_ROUNDS[k] + '</option>';
-		}).join('');
+		var roundOpts = '<option value="">All Rounds</option>'
+			+ _meta.rounds.concat([IV_OTHER_ROUND]).map(function (k) {
+				return '<option value="' + escHtml(k) + '">' + escHtml(k) + '</option>';
+			}).join('');
 
 		$('#rpt-main').html(`
 			<div class="rpt-view-toolbar">
@@ -3382,19 +3343,17 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			method: 'ms_calendar.api.reports.get_interviewer_data',
 			args: { from_date: fy.from, to_date: fy.to },
 			callback: function (r) {
-				var rows = (r && r.message) ? r.message : [];
+				var msg = (r && r.message) || {};
+				_ivRounds = msg.rounds || _meta.rounds;
 				var seen = {};
 				_ivAllRows = [];
-				rows.forEach(function (row) {
+				(msg.rows || []).forEach(function (row) {
 					// Same interviewer in both interviewer fields = one row.
 					var key = row.name + '|' + (row.interviewer || '');
 					if (seen[key]) return;
 					seen[key] = true;
-					var hasFrf = !!row.application_status || !!row.role;
-					row._state = cvStateOf(hasFrf ? row
-						: { department: row.fis_department, location: row.fis_location });
 					row._role = row.role || row.fis_role || '';
-					row._round = ivRoundOf(row);
+					row._round = row.round || IV_OTHER_ROUND;
 					row._q = ctQuarterOf(String(row.interview_date).slice(0, 10));
 					row._iv = row.interviewer || '';
 					row._ivName = (row.interviewer_name || '').trim() || row._iv || 'Not assigned';
@@ -3424,7 +3383,7 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 	function renderInterviewersBody() {
 		var fyStart = parseInt($('#iv-fy').val(), 10);
 		var yearLbl = 'Year ' + cmpFyLabel(fyStart);
-		var roundLbl = IV_ROUNDS[$('#iv-round').val() || ''];
+		var roundLbl = $('#iv-round').val() || 'All Rounds';
 		var typeLbl = $('#iv-type option:selected').text();
 
 		function uniq(rows, keyFn) {
@@ -3433,9 +3392,14 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			return Object.keys(s).map(function (k) { return s[k]; });
 		}
 		var byInterview = function (r) { return r.name; };
-		var byCandidate = function (r) { return r.application_id || r.name; };
+		// Rounds shown as columns: workflow order, only those with interviews.
+		var present = {};
+		_ivViewRows.forEach(function (r) { present[r._round] = true; });
+		var rounds = _ivRounds.concat([IV_OTHER_ROUND]).filter(function (rd) { return present[rd]; });
+		function inRound(rows, rd) { return rows.filter(function (r) { return r._round === rd; }); }
+		function selectedOf(rows) { return uniq(rows.filter(function (r) { return r.selected; }), byInterview); }
 
-		// ── Table 1: state × panel member ──
+		// ── Table 1: state × panel member × round ──
 		var groups = {};   // "state||email" -> rows
 		_ivViewRows.forEach(function (r) {
 			var k = r._state + '||' + r._iv;
@@ -3443,36 +3407,42 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		});
 		var t1 = Object.keys(groups).map(function (k) {
 			var rows = groups[k];
-			var cands = uniq(rows, byCandidate);
-			return {
-				key: k, state: rows[0]._state, name: rows[0]._ivName, rows: rows,
-				interviews: uniq(rows, byInterview).length,
-				selF: cands.filter(ivSelFunctional).length,
-				selFinal: cands.filter(ivSelFinal).length,
-			};
+			return { key: k, state: rows[0]._state, name: rows[0]._ivName, rows: rows, interviews: uniq(rows, byInterview).length };
 		}).sort(function (a, b) {
 			var sa = a.state === CV_OTHER ? 1 : 0, sb = b.state === CV_OTHER ? 1 : 0;
 			return sa - sb || a.state.localeCompare(b.state) || b.interviews - a.interviews;
 		});
 
-		var allCands = uniq(_ivViewRows, byCandidate);
-		var tbl1 = '<table class="rpt-tbl iv-tbl"><thead><tr><th>State</th><th>Name of ' + escHtml(roundLbl)
-			+ ' Panel Members</th><th>Total Interviews done</th><th>No of Candidates Selected in Functional Round</th>'
-			+ '<th>No of Candidates Selected in Final Round</th></tr></thead><tbody>';
+		function roundCells(rows, key) {
+			return rounds.map(function (rd) {
+				var rr = inRound(rows, rd);
+				var done = uniq(rr, byInterview).length;
+				var sel = rd === IV_OTHER_ROUND ? '' : selectedOf(rr).length;
+				var attr = key ? ' data-t1="' + escHtml(key) + '" data-rd="' + escHtml(rd) + '"' : '';
+				var cls = 'col-num' + (key ? ' iv-cell' : '');
+				return '<td class="' + cls + ' iv-rd-first"' + attr + ' data-k="int">' + (done || '') + '</td>'
+					+ '<td class="' + cls + '"' + attr + ' data-k="sel">' + (sel || '') + '</td>';
+			}).join('');
+		}
+
+		var tbl1 = '<table class="rpt-tbl iv-tbl"><thead><tr><th rowspan="2">State</th><th rowspan="2">Name of '
+			+ escHtml(roundLbl) + ' Panel Members</th><th rowspan="2">Total Interviews done</th>';
+		rounds.forEach(function (rd) { tbl1 += '<th colspan="2" class="iv-rd-first" style="white-space:nowrap;">' + escHtml(rd) + '</th>'; });
+		tbl1 += '</tr><tr>';
+		rounds.forEach(function () { tbl1 += '<th class="iv-rd-first">Done</th><th>Selected</th>'; });
+		tbl1 += '</tr></thead><tbody>';
 		var lastState = null;
 		t1.forEach(function (g) {
 			var stateCell = g.state !== lastState ? escHtml(g.state) : '';
 			lastState = g.state;
 			tbl1 += '<tr><td class="iv-state">' + stateCell + '</td>'
 				+ '<td class="iv-name" title="' + escHtml(g.rows[0]._iv) + '">' + escHtml(g.name) + '</td>'
-				+ '<td class="col-num iv-cell" data-t1="' + escHtml(g.key) + '" data-k="int">' + (g.interviews || '') + '</td>'
-				+ '<td class="col-num iv-cell" data-t1="' + escHtml(g.key) + '" data-k="selF">' + (g.selF || '') + '</td>'
-				+ '<td class="col-num iv-cell" data-t1="' + escHtml(g.key) + '" data-k="selFinal">' + (g.selFinal || '') + '</td></tr>';
+				+ '<td class="col-num iv-cell" data-t1="' + escHtml(g.key) + '" data-rd="" data-k="int">' + (g.interviews || '') + '</td>'
+				+ roundCells(g.rows, g.key) + '</tr>';
 		});
 		tbl1 += '<tr class="row-grand"><td colspan="2" class="iv-name">Total</td>'
 			+ '<td class="col-num">' + uniq(_ivViewRows, byInterview).length + '</td>'
-			+ '<td class="col-num">' + allCands.filter(ivSelFunctional).length + '</td>'
-			+ '<td class="col-num">' + allCands.filter(ivSelFinal).length + '</td></tr></tbody></table>';
+			+ roundCells(_ivViewRows, null) + '</tr></tbody></table>';
 
 		// ── Table 2: panel members / slots / averages by state ──
 		var TOTAL = 'Total';
@@ -3529,12 +3499,13 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 
 		var note = '<div class="ct-note">'
 			+ 'From Field Interview Schedule (cancelled interviews excluded), interview date in ' + cmpFyLabel(fyStart)
-			+ '. A slot = one scheduled interview; Averages = interviews per panel member in that period '
+			+ '. Rounds follow the workflow (Interview Round on the schedule). Done = interviews the panel member took in that round; '
+			+ 'Selected = of those candidates, how many got past that round (the round\'s Select status, a later round / offer status, '
+			+ 'or an interview in a later round). A panel member is only counted for the rounds they interviewed in.<br>'
+			+ 'A slot = one scheduled interview; Averages = interviews per panel member in that period '
 			+ '(an interview with 2 panel members counts once in slots and once for each member). '
-			+ '"Not assigned" = interviews with no panel member saved on the schedule — not included in Averages.<br>'
-			+ 'Selected in Functional Round = candidate went on to the Leader/Final round or later (or has a Functional/Subject/EC Select status). '
-			+ 'Selected in Final Round = candidate reached Offer or later. Candidate status is read from their Field Registration Form today. '
-			+ 'State = candidate\'s state (new states appear automatically). Click a number to see the list.'
+			+ '"Not assigned" = interviews with no panel member saved on the schedule — not included in Averages. '
+			+ 'State = state of the job opening applied for. Click a number to see the list.'
 			+ '</div>';
 
 		if (!_ivViewRows.length) {
@@ -3545,34 +3516,31 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 				+ '<div class="iv-sec"><div class="iv-title">Slots &amp; Averages by State</div>' + tbl2 + '</div>' + note
 			);
 		}
+		fixStickyHeads($('#iv-wrap'));
 		$('#iv-info').text('Interviews: ' + uniq(_ivViewRows, byInterview).length
 			+ ' | Panel members: ' + members(_ivViewRows) + ' | Date: ' + frappe.datetime.now_date());
 
-		var ivCols = ['ID', 'Candidate', 'Round', 'Interview Date', 'Panel Member', 'Role', 'State', 'Candidate Status'];
+		var ivCols = ['ID', 'Candidate', 'Round', 'Interview Date', 'Panel Member', 'Role', 'State', 'Candidate Status', 'Got past round'];
 		var ivRow = function (r) {
-			return [r.name, r.applicants_name, r.interview_round, r.interview_date, r._ivName, r._role, r._state, r.application_status];
+			return [r.name, r.applicants_name, r.interview_round, r.interview_date, r._ivName, r._role, r._state,
+				r.application_status, r._round === IV_OTHER_ROUND ? '' : (r.selected ? 'Yes' : 'No')];
 		};
 		$('#iv-wrap').off('click.ivCell').on('click.ivCell', '.iv-cell', function () {
 			var $td = $(this);
 			if ($td.is('[data-t1]')) {
 				var g = t1.filter(function (x) { return x.key === $td.data('t1'); })[0];
 				if (!g) return;
-				var k = $td.data('k');
-				if (k === 'int') {
-					showRecordsDialog(g.name + ' | Interviews', uniq(g.rows, byInterview), ivCols, ivRow, 'Field Interview Schedule');
-				} else {
-					var sel = uniq(g.rows, byCandidate).filter(k === 'selF' ? ivSelFunctional : ivSelFinal)
-						.filter(function (r) { return r.application_id; });
-					if (!sel.length) { frappe.msgprint('No records found.'); return; }
-					showRecordsDialog(g.name + ' | Selected in ' + (k === 'selF' ? 'Functional' : 'Final') + ' Round',
-						sel.map(function (r) { return $.extend({}, r, { name: r.application_id }); }),
-						['ID', 'Candidate', 'Candidate Status', 'Role', 'State', 'Interview Date'],
-						function (r) { return [r.name, r.applicants_name, r.application_status, r._role, r._state, r.interview_date]; });
-				}
+				var rd = $td.data('rd') || '';
+				var rows = rd ? inRound(g.rows, rd) : g.rows;
+				var sel = $td.data('k') === 'sel';
+				rows = sel ? selectedOf(rows) : uniq(rows, byInterview);
+				if (!rows.length) { frappe.msgprint('No records found.'); return; }
+				showRecordsDialog(g.name + ' | ' + (rd || 'All Rounds') + ' | ' + (sel ? 'Selected' : 'Interviews'),
+					rows, ivCols, ivRow, 'Field Interview Schedule');
 			} else {
 				var st = $td.data('st'), p = $td.data('p');
-				var rows = uniq(rowsFor(st, p), byInterview);
-				showRecordsDialog(st + ' | ' + (p === 'Year' ? yearLbl : p) + ' | Slots', rows, ivCols, ivRow, 'Field Interview Schedule');
+				showRecordsDialog(st + ' | ' + (p === 'Year' ? yearLbl : p) + ' | Slots',
+					uniq(rowsFor(st, p), byInterview), ivCols, ivRow, 'Field Interview Schedule');
 			}
 		});
 	}
