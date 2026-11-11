@@ -173,6 +173,11 @@ def submitted_feedback(doctype, link_id, panel):
             return empty
         user = (frappe.session.user or "").strip().lower()
         me = user if user in emails else ""
+        if not me:
+            # Back from the automatic Microsoft sign-in without a site
+            # account (see login_via_office365 below).
+            ident = _feedback_identity()
+            me = ident if ident in emails else ""
         empty["me"] = me
 
         from ms_calendar.api.ms_field import _field_panelist_names
@@ -232,3 +237,111 @@ def microsoft_login_url(redirect_to):
     except Exception:
         frappe.log_error(title="Feedback Microsoft Login URL Error", message=frappe.get_traceback()[:2000])
         return ""
+
+
+# ── Microsoft sign-in from a feedback form ──────────────────────────────────
+# The feedback form (public/js/feedback_form_draft.js) sends a panel member
+# to Microsoft sign-in by itself. Most interviewers have NO account on the
+# site (and website sign-up is off), so Frappe's own Office 365 login would
+# stop them on "Signup is Disabled". For a sign-in that started on a feedback
+# form, Microsoft only tells us who they are: their email goes into a signed,
+# httpOnly cookie (12 hours) and they go straight back to the form, which
+# picks them (submitted_feedback → "me"). No site session is created or
+# changed. Every other Microsoft sign-in (desk / website login) is handed to
+# Frappe's own login_via_office365 untouched.
+# hooks.py: override_whitelisted_methods →
+#   frappe.integrations.oauth2_logins.login_via_office365
+
+FEEDBACK_ID_COOKIE = "apf_feedback_me"
+FEEDBACK_ID_HOURS = 12
+
+
+def _identity_signature(payload):
+    import hashlib
+    import hmac
+
+    from frappe.utils.password import get_encryption_key
+
+    key = f"apf-feedback-identity::{get_encryption_key()}".encode()
+    return hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
+
+
+def _set_feedback_identity(email):
+    import base64
+    from datetime import timedelta
+
+    expires = frappe.utils.now_datetime() + timedelta(hours=FEEDBACK_ID_HOURS)
+    payload = base64.urlsafe_b64encode(f"{email}|{int(expires.timestamp())}".encode()).decode()
+    frappe.local.cookie_manager.set_cookie(
+        FEEDBACK_ID_COOKIE,
+        f"{payload}.{_identity_signature(payload)}",
+        expires=expires,
+        secure=frappe.utils.get_url().startswith("https"),
+        httponly=True,
+    )
+
+
+def _feedback_identity():
+    """Email from a valid, unexpired identity cookie, else ""."""
+    import base64
+    import hmac
+    import time
+
+    try:
+        raw = (frappe.request.cookies.get(FEEDBACK_ID_COOKIE) or "") if frappe.request else ""
+        payload, _, sig = raw.partition(".")
+        if not (payload and sig) or not hmac.compare_digest(sig, _identity_signature(payload)):
+            return ""
+        email, _, exp = base64.urlsafe_b64decode(payload.encode()).decode().rpartition("|")
+        if int(exp) < time.time():
+            return ""
+        return email.strip().lower()
+    except Exception:
+        return ""
+
+
+def _oauth_state_redirect(state):
+    import base64
+
+    try:
+        data = json.loads(base64.b64decode(state).decode("utf-8"))
+        return str(data.get("redirect_to") or "")
+    except Exception:
+        return ""
+
+
+def _is_feedback_form_path(path):
+    """A path on this site that opens one of the interview feedback web forms."""
+    if not path.startswith("/") or path.startswith("//") or "\\" in path:
+        return False
+    route = path.split("?", 1)[0].strip("/").split("/", 1)[0]
+    if not route:
+        return False
+    doc_type = frappe.db.get_value("Web Form", {"route": route}, "doc_type")
+    return bool(doc_type and _module(doc_type))
+
+
+@frappe.whitelist(allow_guest=True)
+def login_via_office365(code: str, state: str):
+    from frappe.integrations import oauth2_logins
+
+    redirect_to = _oauth_state_redirect(state)
+    if not _is_feedback_form_path(redirect_to):
+        return oauth2_logins.login_via_office365(code, state)
+
+    from frappe.utils.oauth import get_info_via_oauth
+
+    try:
+        info = get_info_via_oauth(
+            "office_365", code, getattr(oauth2_logins, "decoder_compat", None), id_token=True
+        )
+        email = (
+            info.get("email") or info.get("upn") or info.get("unique_name") or info.get("preferred_username") or ""
+        ).strip().lower()
+        if "@" in email:
+            _set_feedback_identity(email)
+    except Exception:
+        # Sign-in failed / cancelled → back to the form, which asks the email.
+        frappe.log_error(title="Feedback Microsoft Sign-in Error", message=frappe.get_traceback()[:2000])
+    frappe.local.response["type"] = "redirect"
+    frappe.local.response["location"] = frappe.utils.get_url(redirect_to)

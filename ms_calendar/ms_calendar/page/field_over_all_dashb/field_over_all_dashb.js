@@ -6,102 +6,15 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 	});
 
 	// ── Stage / row definitions ───────────────────────────────────────────
-	const STAGES = [
-		{
-			stage: 'Applications', bg: '#ffffff', fg: '#1F497D',
-			rows: [
-				{ label: 'Carried forward Application from last year Before April', key: 'carried_forward' },
-				{ label: 'Received from April this Year', key: 'received_this_year' },
-				{ label: 'Total Applications', key: 'total', isTotal: true },
-			]
-		},
-		{
-			stage: 'CV screening', bg: '#ffffff', fg: '#1F497D',
-			rows: [
-				{ label: 'Shortlist', key: 'cv_shortlist' },
-				{ label: 'Regret', key: 'cv_regret' },
-				{ label: 'Pending', key: 'cv_pending' },
-			]
-		},
-		{
-			stage: 'Written test', bg: '#ffffff', fg: '#1F497D',
-			rows: [
-				{ label: 'Select', key: 'written_select' },
-				{ label: 'Regret', key: 'written_regret' },
-			]
-		},
-		{
-			stage: 'Recruiter screening', bg: '#ffffff', fg: '#1F497D',
-			rows: [
-				{ label: 'Select', key: 'recruiter_select' },
-				{ label: 'Regret', key: 'recruiter_regret' },
-				{ label: 'Pending', key: 'recruiter_pending' },
-			]
-		},
-		{
-			stage: 'Functional round', bg: '#ffffff', fg: '#1F497D',
-			rows: [
-				{ label: 'Select', key: 'functional_select' },
-				{ label: 'Regret', key: 'functional_regret' },
-				{ label: 'Scheduled', key: 'functional_scheduled' },
-				{ label: 'Feedback Pending', key: 'functional_feedback_pending' },
-				{ label: 'Pending', key: 'functional_pending' },
-			]
-		},
-		{
-			stage: 'Final round', bg: '#ffffff', fg: '#1F497D',
-			rows: [
-				{ label: 'Select', key: 'final_select' },
-				{ label: 'Regret', key: 'final_regret' },
-				{ label: 'Scheduled', key: 'final_scheduled' },
-				{ label: 'Feedback Pending', key: 'final_feedback_pending' },
-				{ label: 'Pending', key: 'final_pending' },
-			]
-		},
-		{
-			stage: 'Offers', bg: '#ffffff', fg: '#1F497D',
-			rows: [
-				{ label: 'Offer in process', key: 'offer_in_process' },
-				{ label: 'Offer Made', key: 'offer_made' },
-				{ label: 'Offer Accepted', key: 'offer_accepted' },
-				{ label: 'Joined', key: 'joined' },
-				{ label: 'Offer declined', key: 'offer_declined' },
-				{ label: 'Offer Revoked', key: 'offer_revoked' },
-				{ label: 'Joined in 2025-26, Offered in 2025-26', key: 'joined_offered_current' },
-				{ label: 'Joined in 2025-26, Offered in 2024-25', key: 'joined_offered_prev' },
-			]
-		},
-	];
-
-	const STATUS_TO_KEY = {
-		'New Applicant': 'cv_pending',
-		'CV Shortlist': 'cv_shortlist',
-		'CV Reject': 'cv_regret',
-		'Test Process': 'written_select',
-		'Test Select': 'written_select',
-		'Test Reject': 'written_regret',
-		'Recruiter Round': 'recruiter_select',
-		'Recruiter Reject': 'recruiter_regret',
-		'Round One': 'functional_select',
-		'Round 1 Reject': 'functional_regret',
-		'Round Two': 'final_select',
-		'Round 2 Reject': 'final_regret',
-		'Round Three': 'final_select',
-		'Round 3 Reject': 'final_regret',
-		'Document Collection': 'offer_in_process',
-		'Offer': 'offer_made',
-		'Offer Accepted': 'offer_accepted',
-		'Joined': 'joined',
-		'Offer Declined': 'offer_declined',
-		'Offer Revoked': 'offer_revoked',
-		'Applied': 'cv_pending',
-		'Shortlisted': 'cv_shortlist',
-		'Rejected': 'cv_regret',
-		'Interview Scheduled': 'functional_scheduled',
-		'Selected': 'joined',
-		'On Hold': 'offer_in_process',
-		'Blocklisted': null,
-	};
+	// Stages, rows and the status → row mapping follow the Field
+	// Registration Form workflow and come from the server
+	// (ms_calendar.api.reports.get_report_meta, with_pipeline=1) — the same
+	// definitions the Excel download uses, so screen and file always match.
+	// Each interview round has Select / Reject, plus Scheduled / Feedback
+	// Pending / Pending for candidates still in it, decided from their
+	// interview date on Field Interview Schedule (see pipelineKey).
+	let _meta = null;
+	let STAGES = [];
 
 	const DATA_COLS = ['RP', 'ST', 'HL', 'LH'];
 	const SUB_COLS = ['RP', 'ST', 'HL', 'LH', 'Total'];
@@ -131,8 +44,66 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 		return null;
 	}
 
+	// State of the JOB applied for (job location on the application, else
+	// the linked Job Opening's location) — never the candidate's own
+	// native_state. Same matching as job_state() in api/reports.py.
+	function statesIn(text) {
+		var s = (text || '').toLowerCase();
+		if (!s) return [];
+		var found = _meta.states.filter(function (st) { return s.indexOf(st.toLowerCase()) !== -1; });
+		if (!found.length) {
+			found = Object.keys(_meta.aliases).filter(function (st) {
+				return _meta.aliases[st].some(function (k) { return s.indexOf(k) !== -1; });
+			});
+		}
+		return found;
+	}
 	function getRecState(r) {
-		return (r.location || r.worklocation || r.native_state || '').trim();
+		if (r._state) return r._state;
+		var multi = false;
+		var texts = [r.location, _meta.jo[r.job_title]];
+		for (var i = 0; i < texts.length; i++) {
+			var found = statesIn(texts[i]);
+			if (found.length === 1) return (r._state = found[0]);
+			if (found.length || /all states/i.test(texts[i] || '')) multi = true;
+		}
+		return (r._state = multi ? _meta.multi : _meta.none);
+	}
+
+	// Applied date ('YYYY-MM-DD'): Date of Applied, else Application Date,
+	// else creation. Bulk imports carry a recent creation date for old
+	// applications, so creation can't be used for the date filter.
+	function appliedOf(r) {
+		return String(r.date_of_applied || r.application_date || r.creation || '').slice(0, 10);
+	}
+	function fyStart() {
+		var t = new Date();
+		var y = t.getMonth() >= 3 ? t.getFullYear() : t.getFullYear() - 1;
+		return y + '-04-01';
+	}
+
+	// Pipeline row key for a record — mirrors pipeline_row_key() in
+	// api/reports.py. "In a round" statuses split by the candidate's latest
+	// interview date for that round (or a sibling EC/Subject/Technical/
+	// Functional round): none → Pending, today or later → Scheduled,
+	// earlier → Feedback Pending.
+	function pipelineKey(r) {
+		if (r._pk) return r._pk;
+		var status = (r.application_status || '').trim();
+		var key = _meta.status_to_key[status];
+		var rnd = _meta.in_round[status];
+		if (!key && rnd) {
+			var dates = _meta.fis[r.name] || {};
+			var d = dates[rnd];
+			if (!d) {
+				Object.keys(dates).forEach(function (k) {
+					if (_meta.round_rank[k] === _meta.round_rank[rnd] && (!d || dates[k] > d)) d = dates[k];
+				});
+			}
+			var slug = rnd.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+			key = slug + (!d ? '_pending' : (d >= _meta.today ? '_scheduled' : '_feedback'));
+		}
+		return (r._pk = key || 'other');
 	}
 
 	let _allRecs = [], _states = [], _data = {};
@@ -140,24 +111,24 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 
 	const ALL_HEADERS = [
 		'ID','Full Name','Status','Role','Department',
-		'Work State','Work Location','Native State','Native District','Source',
+		'Job State','Job Location','Native State','Native District','Source',
 		'Email','Phone','Alt Phone','Gender','DOB','Age',
 		'Education','Teaching Degree','Teaching Exp (Yr)','Teaching Exp (Mo)',
 		'Health Exp (Yr)','Health Exp (Mo)','Languages','Written Subject',
 		'Test Location','APF Associated','Former Employee',
-		'Shortlist Reason','Reject Reason','Hold Reason','Blocklist Reason','Date'
+		'Shortlist Reason','Reject Reason','Hold Reason','Blocklist Reason','Applied On'
 	];
 
 	function fullRow(r) {
 		return [
 			r.name, r.full_name_aadhaar, r.application_status, r.role, r.department,
-			r.location, r.worklocation, r.native_state, r.native_district, r.opportunity,
+			getRecState(r), r.location, r.native_state, r.native_district, r.opportunity,
 			r.email_address, r.phone_number, r.alternate_no, r.gender, r.dob, r.age,
 			r.highest_education, r.teaching_degrees, r.teaching_year, r.teachingexp_month,
 			r.health_expyear, r.health_expmonth, r.languages_known, r.written_subject,
 			r.test_location, r.apf_associated, r.former_employee,
 			r.reasons_for_shortlist, r.reasons_for_reject, r.hold_reason, r.blocklist_reason,
-			r.creation ? r.creation.split(' ')[0] : ''
+			appliedOf(r)
 		];
 	}
 
@@ -222,7 +193,12 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 		.ss-card{background:#fff;border:1px solid #e5e7eb;border-radius:7px;padding:12px 14px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,.05);transition:box-shadow .15s,transform .1s;display:flex;flex-direction:column;justify-content:center;min-height:64px}
 		.ss-card:hover{box-shadow:0 3px 10px rgba(0,0,0,.15);transform:translateY(-1px)}
 		.ss-card .n{font-size:26px;font-weight:700;line-height:1.2}.ss-card .l{font-size:11px;color:#6b7280;font-weight:500;line-height:1.3;margin-top:2px}
-		.fod-recs-dialog .modal-dialog{max-width:min(96vw,1400px)!important;width:96vw!important}
+		.fod-recs-dialog{padding:0!important}
+		.fod-recs-dialog .modal-dialog{max-width:95vw!important;width:95vw!important;height:92vh!important;margin:4vh auto!important}
+		.fod-recs-dialog .modal-content{height:92vh!important;border-radius:8px!important;display:flex;flex-direction:column}
+		.fod-recs-dialog .modal-body{flex:1 1 auto;overflow:hidden;display:flex;flex-direction:column}
+		.fod-recs-dialog .msgprint{flex:1 1 auto;display:flex;flex-direction:column;min-height:0}
+		.fod-recs-dialog .fod-rec-scroll{flex:1 1 auto;min-height:0;max-height:none!important}
 	</style>
 	<div class="fod-bar">
 		<div class="fod-filters-row">
@@ -453,13 +429,18 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 		window.location.href = url;
 	});
 
-	function buildFilters() {
-		const f = [['docstatus', '!=', '2']];
+	// get_list or_filters that over-fetch every record whose applied date
+	// could fall in the From..To range; loadData() keeps the exact ones.
+	function buildOrFilters() {
 		const from = $(wrapper).find('#f-from').val();
 		const to = $(wrapper).find('#f-to').val();
-		if (from) f.push(['creation', '>=', from + ' 00:00:00']);
-		if (to) f.push(['creation', '<=', to + ' 23:59:59']);
-		return f;
+		if (!from && !to) return [];
+		function rng(field, isDt) {
+			var a = from ? from + (isDt ? ' 00:00:00' : '') : null, b = to ? to + (isDt ? ' 23:59:59' : '') : null;
+			if (a && b) return [field, 'between', [a, b]];
+			return a ? [field, '>=', a] : [field, '<=', b];
+		}
+		return [rng('date_of_applied', false), rng('application_date', true), rng('creation', true)];
 	}
 
 	function getFilteredRecs() {
@@ -482,6 +463,22 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 
 	// ── Load ──────────────────────────────────────────────────────────────
 	function loadData() {
+		if (!_meta) {
+			$(wrapper).find('#f-wrap').html('<div class="fod-load">Loading dashboard…</div>');
+			frappe.call({
+				method: 'ms_calendar.api.reports.get_report_meta',
+				args: { with_pipeline: 1 },
+				callback: function (r) {
+					_meta = r.message;
+					STAGES = _meta.stages;
+					loadData();
+				},
+				error: function () {
+					$(wrapper).find('#f-wrap').html('<div class="fod-load">Failed to load. Please refresh.</div>');
+				}
+			});
+			return;
+		}
 		$(wrapper).find('#f-wrap').html('<div class="fod-load">Loading dashboard…</div>');
 		$(wrapper).find('#ss-wrap').hide();
 		$(wrapper).find('#f-dt').text('Date of Report: ' + frappe.datetime.now_date());
@@ -490,19 +487,24 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 			args: {
 				doctype: 'Field Registration Form',
 				fields: ['name', 'full_name_aadhaar', 'application_status', 'role', 'department',
-					'location', 'worklocation', 'native_state', 'native_district', 'opportunity',
+					'location', 'job_title', 'worklocation', 'native_state', 'native_district', 'opportunity',
 					'email_address', 'phone_number', 'alternate_no', 'gender', 'dob', 'age',
 					'highest_education', 'teaching_degrees', 'teaching_year', 'teachingexp_month',
 					'health_expyear', 'health_expmonth', 'languages_known', 'written_subject',
 					'test_location', 'apf_associated', 'former_employee',
 					'reasons_for_shortlist', 'reasons_for_reject', 'hold_reason', 'blocklist_reason',
-					'creation'],
-				filters: buildFilters(),
+					'date_of_applied', 'application_date', 'creation'],
+				filters: [['docstatus', '!=', '2']],
+				or_filters: buildOrFilters(),
 				limit_page_length: 0,
 				order_by: 'creation asc'
 			},
 			callback: function (r) {
-				_allRecs = r.message || [];
+				var from = $(wrapper).find('#f-from').val(), to = $(wrapper).find('#f-to').val();
+				_allRecs = (r.message || []).filter(function (rec) {
+					var d = appliedOf(rec);
+					return (!from || d >= from) && (!to || d <= to);
+				});
 				// Populate dropdowns
 				var stSet = {}, diSet = {}, srcSet = {}, roleSet = {}, deptSet = {}, locSet = {};
 				_allRecs.forEach(function (rec) {
@@ -534,7 +536,7 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 
 	// ── Aggregate ─────────────────────────────────────────────────────────
 	function aggregate(records) {
-		const april1 = new Date(new Date().getFullYear(), 3, 1);
+		const april1 = fyStart();
 		const stSet = new Set();
 		const data = {}, summ = {};
 
@@ -550,14 +552,14 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 			if (!col) return;
 			stSet.add(state);
 
-			const cr = new Date(r.creation);
-			const sk = STATUS_TO_KEY[r.application_status] || null;
+			const applied = appliedOf(r);
+			const sk = pipelineKey(r);
 			summ[r.application_status || 'Unknown'] = (summ[r.application_status || 'Unknown'] || 0) + 1;
 
 			[state, 'Grand Total'].forEach(function (e) {
 				inc(e, col, 'total');
-				cr < april1 ? inc(e, col, 'carried_forward') : inc(e, col, 'received_this_year');
-				if (sk) inc(e, col, sk);
+				applied < april1 ? inc(e, col, 'carried_forward') : inc(e, col, 'received_this_year');
+				inc(e, col, sk);
 			});
 		});
 
@@ -594,7 +596,7 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 
 		STAGES.forEach(function (st) {
 			st.rows.forEach(function (row, ri) {
-				const isTot = row.isTotal;
+				const isTot = row.total;
 				const rbg = isTot ? '#BDD7EE' : '#ffffff';
 				const rfg = '#1F497D';
 				h += `<tr${isTot ? ' class="r-total"' : ''}>`;
@@ -623,6 +625,10 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 
 		h += '</tbody></table>';
 		$(wrapper).find('#f-wrap').html(h);
+		// Second header row sits right under the first — its real height,
+		// not a fixed 32px (the gap let body rows show through when scrolled).
+		var $hr = $(wrapper).find('#f-wrap thead tr');
+		$hr.eq(1).children('th').css('top', $hr.eq(0).outerHeight() + 'px');
 
 		// Click handler on number cells
 		$(wrapper).find('#f-wrap').off('click.fodCell').on('click.fodCell', '.fod-cell', function () {
@@ -632,7 +638,7 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 			if (!$(this).text().trim()) return;
 
 			var base = getFilteredRecs();
-			var april1 = new Date(new Date().getFullYear(), 3, 1);
+			var april1 = fyStart();
 
 			var matched = base.filter(function (r) {
 				// state filter
@@ -645,9 +651,9 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 				}
 				// rowkey filter
 				if (rowkey === 'total') return true;
-				if (rowkey === 'carried_forward') return new Date(r.creation) < april1;
-				if (rowkey === 'received_this_year') return new Date(r.creation) >= april1;
-				return STATUS_TO_KEY[r.application_status] === rowkey;
+				if (rowkey === 'carried_forward') return appliedOf(r) < april1;
+				if (rowkey === 'received_this_year') return appliedOf(r) >= april1;
+				return pipelineKey(r) === rowkey;
 			});
 
 			if (!matched.length) { frappe.msgprint('No records found.'); return; }
@@ -729,13 +735,19 @@ frappe.pages['field-over-all-dashb'].on_page_load = function (wrapper) {
 			+ '<button id="rec-print-btn" style="padding:5px 14px;background:#1e40af;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;">🖨 Print / PDF</button>'
 			+ '<span style="font-size:11px;color:#6b7280;">Click the ID to open record in Frappe</span>'
 			+ '</div>'
-			+ '<div style="overflow:auto;max-height:65vh;">'
+			+ '<div class="fod-rec-scroll" style="overflow:auto;max-height:65vh;">'
 			+ '<table id="rec-dlg-tbl" style="width:100%;border-collapse:collapse;font-size:12px;">'
 			+ '<thead><tr>' + thCells + '</tr></thead>'
 			+ '<tbody>' + rows + '</tbody></table></div>';
 
-		frappe.msgprint({ title: title + ' (' + records.length + ')', wide: true, message: html });
-		$('.modal.msgprint-dialog:visible').last().addClass('fod-recs-dialog');
+		// Full-screen popup. Use the dialog msgprint returns: a ':visible'
+		// lookup runs before the fade-in ends, so the class was never added.
+		var dlg = frappe.msgprint({ title: title + ' (' + records.length + ')', wide: true, message: html });
+		var $modal = (dlg && dlg.$wrapper) ? dlg.$wrapper : $('.modal.msgprint-dialog').last();
+		$modal.addClass('fod-recs-dialog');
+		// msgprint reuses one dialog: drop the full-screen class when it closes
+		// so later normal messages on this page are not full screen.
+		$modal.one('hidden.bs.modal', function () { $modal.removeClass('fod-recs-dialog'); });
 
 		setTimeout(function () {
 			$('#rec-csv-btn').off('click').on('click', csvDownload);

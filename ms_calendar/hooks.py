@@ -766,7 +766,7 @@ app_include_js = [
 # feedback web forms are custom records on the site.
 # Manual "?v=" cache-buster like frf_list.js: bump it when the file changes.
 web_include_js = [
-    "/assets/ms_calendar/js/feedback_form_draft.js?v=16",
+    "/assets/ms_calendar/js/feedback_form_draft.js?v=17",
 ]
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -1032,3 +1032,11 @@ extend_doctype_class = {
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
 ## testing
+
+# Microsoft sign-in that starts on an interview feedback form only tells the
+# form who is filling it (signed cookie, no site login) — most interviewers
+# have no account here. Every other Office 365 login goes to Frappe's own
+# handler unchanged. See ms_calendar.api.feedback_status.login_via_office365.
+override_whitelisted_methods = {
+    "frappe.integrations.oauth2_logins.login_via_office365": "ms_calendar.api.feedback_status.login_via_office365",
+}

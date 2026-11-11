@@ -473,14 +473,58 @@
 	// "Sign in with Microsoft": Office 365 sign-in that returns to this same
 	// link; the signed-in user is then picked automatically (status.me).
 	// Falls back to the site's login page when there's no direct link.
-	function microsoft_sign_in() {
+	// on_fail: what to do when there is no Microsoft link (default: the
+	// site's login page).
+	function microsoft_sign_in(on_fail) {
 		const back = window.location.pathname + window.location.search;
-		const to_login = () => (window.location.href = `/login?redirect-to=${encodeURIComponent(back)}`);
+		const to_login = on_fail || (() => (window.location.href = `/login?redirect-to=${encodeURIComponent(back)}`));
 		frappe.call({
 			method: "ms_calendar.api.feedback_status.microsoft_login_url",
 			args: { redirect_to: back },
 			callback: (r) => (r && r.message ? (window.location.href = r.message) : to_login()),
 			error: to_login,
+		});
+	}
+
+	// ── Automatic Microsoft sign-in (one invite button for the whole panel) ─
+	// Opening the shared link goes straight to Microsoft sign-in, comes back
+	// here signed in, and the member is picked by themselves (status.me).
+	// Tried once per link per browser tab: back here and still not a panel
+	// member (other account, sign-in cancelled / failed) → the email question.
+	const MS_TRIED_PREFIX = "apf_feedback_ms_tried::";
+
+	function ms_tried_key() {
+		return MS_TRIED_PREFIX + me_key();
+	}
+
+	function ms_already_tried() {
+		try {
+			return !!window.sessionStorage.getItem(ms_tried_key());
+		} catch (e) {
+			return true; // no sessionStorage → never risk a redirect loop
+		}
+	}
+
+	function auto_microsoft_sign_in(panel, status) {
+		try {
+			window.sessionStorage.setItem(ms_tried_key(), "1");
+		} catch (e) {
+			show_email_ask(panel, status);
+			return;
+		}
+		hide_form(true);
+		const $wait = $(`
+			<div class="apf-panel-pick apf-ms-wait" style="border:1px solid var(--border-color,#d1d5db);border-left:4px solid #1d4ed8;
+				border-radius:6px;padding:12px 14px;margin-bottom:16px;">
+				<div style="font-weight:600;">${__("Signing you in with Microsoft…")}</div>
+				<div class="text-muted small" style="margin-top:4px;">${__("You will come back to this form with your name filled in.")}</div>
+			</div>`);
+		$(".web-form-wrapper").first().before($wait);
+		microsoft_sign_in(() => {
+			// No Microsoft sign-in on this site → ask the email instead.
+			$wait.remove();
+			hide_form(false);
+			show_email_ask(panel, status);
 		});
 	}
 
@@ -855,14 +899,20 @@
 				return;
 			}
 			if (panel.length > 1) {
-				// One invite button for the whole panel: ask who they are (or use
-				// the email remembered on this device), then offer only them +
-				// Consolidated.
-				// Signed in (server-side session) → that person; else the email
-				// remembered on this device; else ask.
-				show_email_ask(panel, status);
+				// One invite button for the whole panel: find out who they are,
+				// then offer only them + Consolidated.
+				// Signed in as a panel member → that person; else the email
+				// remembered on this device; else Microsoft sign-in by itself
+				// (once); else ask the email.
 				const known = panel_member(panel, status.me) || panel_member(panel, storage_get(me_key()));
-				if (known) me_continue(known.email);
+				if (known) {
+					ask_ctx = { panel, status };
+					me_continue(known.email);
+				} else if (!ms_already_tried()) {
+					auto_microsoft_sign_in(panel, status);
+				} else {
+					show_email_ask(panel, status);
+				}
 				return;
 			}
 			// The forms' own scripts fill the applicant at 500 ms — keep the
