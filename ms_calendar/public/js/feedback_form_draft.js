@@ -356,7 +356,7 @@
 	// Resolves to {submitted: Set of lower-case emails, consolidated: bool};
 	// any failure → nobody counts as submitted and the form opens as before.
 	function check_submitted(people) {
-		const none = { submitted: new Set(), consolidated: false, me: "" };
+		const none = { submitted: new Set(), consolidated: false, me: "", ms_signin: false };
 		if (!people.length || !link_id()) return Promise.resolve(none);
 		return new Promise((resolve) => {
 			let settled = false;
@@ -382,6 +382,9 @@
 						// The signed-in user, when they are on this panel.
 						me: String(m.me || "").toLowerCase(),
 						schedule: m.schedule || {},
+						// Microsoft sign-in works on this site (its return address is
+						// registered on the Azure app) — feedback_status._microsoft_signin_works.
+						ms_signin: !!m.ms_signin,
 					});
 				},
 				error: () => finish(none),
@@ -541,7 +544,10 @@
 		// login) — Microsoft sign-in switches to their work account, which is
 		// then picked automatically.
 		const other = signed_in_user();
-		const ms = `<div style="margin-bottom:10px;">
+		// No Microsoft sign-in on this site → just the email.
+		const ms = !status.ms_signin
+			? `<div class="text-muted small" style="margin-bottom:6px;">${__("Enter your email:")}</div>`
+			: `<div style="margin-bottom:10px;">
 					<button type="button" class="btn btn-sm btn-primary apf-ms-login">${
 						other ? __("Sign in with Microsoft as yourself") : __("Sign in with Microsoft")
 					}</button>
@@ -908,7 +914,7 @@
 				if (known) {
 					ask_ctx = { panel, status };
 					me_continue(known.email);
-				} else if (!ms_already_tried()) {
+				} else if (status.ms_signin && !ms_already_tried()) {
 					auto_microsoft_sign_in(panel, status);
 				} else {
 					show_email_ask(panel, status);

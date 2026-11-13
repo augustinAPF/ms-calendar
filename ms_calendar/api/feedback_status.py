@@ -156,7 +156,14 @@ def submitted_feedback(doctype, link_id, panel):
     Outlook meeting with the same link for everyone, so the link can't say
     who clicked it, but a signed-in session (e.g. after "Sign in with
     Microsoft") can."""
-    empty = {"submitted": [], "consolidated": False, "me": "", "schedule": {}}
+    empty = {
+        "submitted": [],
+        "consolidated": False,
+        "me": "",
+        "schedule": {},
+        # Whether the form may send people to Microsoft sign-in here.
+        "ms_signin": _microsoft_signin_works(),
+    }
     try:
         module = _module(doctype)
         link_id = (link_id or "").strip()
@@ -211,6 +218,7 @@ def submitted_feedback(doctype, link_id, panel):
             "submitted": sorted(done),
             "consolidated": consolidated,
             "me": me,
+            "ms_signin": empty["ms_signin"],
             # Interview date + mode for the form to fill in.
             "schedule": _schedule_info(schedule),
         }
@@ -222,18 +230,23 @@ def submitted_feedback(doctype, link_id, panel):
 @frappe.whitelist(allow_guest=True)
 def microsoft_login_url(redirect_to):
     """Microsoft (Office 365) sign-in that comes straight back to this
-    feedback form, so the form knows who is filling it. "" when the site has
-    no enabled Office 365 Social Login Key (the form then only asks for the
-    email). Only a path on this site is accepted as redirect_to."""
+    feedback form, so the form knows who is filling it. "" when Microsoft
+    sign-in can't work on this site (the form then only asks for the email).
+    Only a path on this site is accepted as redirect_to.
+
+    A site whose own return address is not registered on the Azure app (UAT)
+    borrows production's registered one — see _ms_relay_* below."""
     redirect_to = (redirect_to or "").strip()
     if not redirect_to.startswith("/") or redirect_to.startswith("//") or "\\" in redirect_to:
         return ""
     try:
-        if not frappe.db.get_value("Social Login Key", "office_365", "enable_social_login"):
+        if not _microsoft_signin_works():
             return ""
-        from frappe.utils.oauth import get_oauth2_authorize_url
+        if not _ms_uses_relay():
+            from frappe.utils.oauth import get_oauth2_authorize_url
 
-        return get_oauth2_authorize_url("office_365", redirect_to)
+            return get_oauth2_authorize_url("office_365", redirect_to)
+        return _ms_relay_authorize_url(redirect_to)
     except Exception:
         frappe.log_error(title="Feedback Microsoft Login URL Error", message=frappe.get_traceback()[:2000])
         return ""
@@ -254,6 +267,140 @@ def microsoft_login_url(redirect_to):
 
 FEEDBACK_ID_COOKIE = "apf_feedback_me"
 FEEDBACK_ID_HOURS = 12
+
+
+# Microsoft only accepts a sign-in whose return address is registered on the
+# Azure app (client 77d78928-…, Office 365 Social Login Key) — otherwise it
+# shows AADSTS50011 "redirect URI does not match". Only production's address
+# is registered. UAT therefore borrows it: Microsoft returns to production,
+# production's login_via_office365 (below) passes the one-time code straight
+# on to UAT's microsoft_return, and UAT reads the email and goes back to its
+# form. Production never signs anyone in for this.
+OAUTH_RETURN_PATH = "/api/method/frappe.integrations.oauth2_logins.login_via_office365"
+# The site whose return address IS registered on the Azure app
+# (careers.frappe.cloud redirects to it). site_config "feedback_microsoft_relay"
+# overrides.
+MS_REGISTERED_SITE = "https://pathways.azimpremjifoundation.org"
+# Sites allowed to borrow it. Production only hands a code to one of these.
+# site_config "feedback_microsoft_relay_sites" (list) adds more.
+MS_RELAY_SITES = ("https://uat-careers.m.frappe.cloud",)
+MS_STATE_CACHE = "apf_feedback_ms_state:"
+MS_STATE_SECONDS = 15 * 60
+
+
+def _host(url):
+    from urllib.parse import urlparse
+
+    return urlparse(str(url or "")).netloc.lower()
+
+
+def _registered_site():
+    return (frappe.conf.get("feedback_microsoft_relay") or MS_REGISTERED_SITE).rstrip("/")
+
+
+def _relay_sites():
+    extra = frappe.conf.get("feedback_microsoft_relay_sites") or []
+    if isinstance(extra, str):
+        extra = [extra]
+    return {_host(u) for u in (*MS_RELAY_SITES, *extra) if _host(u)}
+
+
+def _ms_uses_relay():
+    """This site signs in through the registered site's return address."""
+    own = _host(frappe.utils.get_url())
+    if own == _host(_registered_site()):
+        return False
+    from ms_calendar.api.ms_field import _FEEDBACK_FORM_HOSTS
+
+    if own in {_host(h) for h in _FEEDBACK_FORM_HOSTS}:
+        return False
+    return own in _relay_sites()
+
+
+def _microsoft_signin_works():
+    """On for production (registered) and for relay sites (UAT); off elsewhere
+    (ms.local), unless site_config "feedback_microsoft_signin" says 1 / 0.
+    Off → the form never sends anyone to Microsoft; it asks the email."""
+    from ms_calendar.api.ms_field import _FEEDBACK_FORM_HOSTS
+
+    try:
+        if not frappe.db.get_value("Social Login Key", "office_365", "enable_social_login"):
+            return False
+        setting = frappe.conf.get("feedback_microsoft_signin")
+        if setting is not None:
+            return bool(frappe.utils.cint(setting))
+        own = _host(frappe.utils.get_url())
+        return own in {_host(h) for h in _FEEDBACK_FORM_HOSTS} or _ms_uses_relay()
+    except Exception:
+        return False
+
+
+def _ms_relay_redirect_uri():
+    return _registered_site() + OAUTH_RETURN_PATH
+
+
+def _ms_relay_authorize_url(redirect_to):
+    """Authorize URL whose return address is the registered site's. The state
+    names this site (where the code must go) and a one-time token that
+    microsoft_return checks."""
+    import base64
+
+    from frappe.utils.oauth import get_oauth2_flow, get_oauth2_providers
+
+    token = frappe.generate_hash()
+    frappe.cache.set_value(MS_STATE_CACHE + token, 1, expires_in_sec=MS_STATE_SECONDS)
+    state = {
+        "site": frappe.utils.get_url(),
+        "token": token,
+        "redirect_to": redirect_to,
+        "apf_relay": 1,
+    }
+    data = {
+        "redirect_uri": _ms_relay_redirect_uri(),
+        "state": base64.b64encode(json.dumps(state).encode("utf-8")).decode(),
+    }
+    data.update(get_oauth2_providers()["office_365"].get("auth_url_data", {}))
+    return get_oauth2_flow("office_365").get_authorize_url(**data)
+
+
+def _ms_email_from_code(code, redirect_uri):
+    """Exchange Microsoft's one-time code (issued for redirect_uri) → email.
+    Same steps as frappe.utils.oauth.get_info_via_oauth(id_token=True), but
+    with the return address the code was really issued for."""
+    import jwt
+
+    from frappe.integrations.oauth2_logins import decoder_compat
+    from frappe.utils.oauth import get_oauth2_flow
+
+    flow = get_oauth2_flow("office_365")
+    session = flow.get_auth_session(
+        data={"code": code, "redirect_uri": redirect_uri, "grant_type": "authorization_code"},
+        decoder=decoder_compat,
+    )
+    token = json.loads(session.access_token_response.text)["id_token"]
+    info = jwt.decode(token, flow.client_secret, options={"verify_signature": False})
+    return _email_from_info(info)
+
+
+def _email_from_info(info):
+    return (
+        info.get("email") or info.get("upn") or info.get("unique_name") or info.get("preferred_username") or ""
+    ).strip().lower()
+
+
+def _oauth_state(state):
+    import base64
+
+    try:
+        data = json.loads(base64.b64decode(state).decode("utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _redirect(location):
+    frappe.local.response["type"] = "redirect"
+    frappe.local.response["location"] = location
 
 
 def _identity_signature(payload):
@@ -301,13 +448,7 @@ def _feedback_identity():
 
 
 def _oauth_state_redirect(state):
-    import base64
-
-    try:
-        data = json.loads(base64.b64decode(state).decode("utf-8"))
-        return str(data.get("redirect_to") or "")
-    except Exception:
-        return ""
+    return str(_oauth_state(state).get("redirect_to") or "")
 
 
 def _is_feedback_form_path(path):
@@ -323,9 +464,29 @@ def _is_feedback_form_path(path):
 
 @frappe.whitelist(allow_guest=True)
 def login_via_office365(code: str, state: str):
+    from urllib.parse import urlencode
+
     from frappe.integrations import oauth2_logins
 
-    redirect_to = _oauth_state_redirect(state)
+    data = _oauth_state(state)
+
+    # Relay (runs on production): a feedback sign-in that started on UAT came
+    # back here because only this return address is registered. Pass the
+    # one-time code straight on to that site — only to an allowed relay site.
+    site = str(data.get("site") or "").rstrip("/")
+    if (
+        data.get("apf_relay")
+        and _host(site)
+        and _host(site) != _host(frappe.utils.get_url())
+        and _host(site) in _relay_sites()
+        and site.startswith("https://")
+    ):
+        return _redirect(
+            f"https://{_host(site)}/api/method/ms_calendar.api.feedback_status.microsoft_return?"
+            + urlencode({"code": code, "state": state})
+        )
+
+    redirect_to = str(data.get("redirect_to") or "")
     if not _is_feedback_form_path(redirect_to):
         return oauth2_logins.login_via_office365(code, state)
 
@@ -335,13 +496,32 @@ def login_via_office365(code: str, state: str):
         info = get_info_via_oauth(
             "office_365", code, getattr(oauth2_logins, "decoder_compat", None), id_token=True
         )
-        email = (
-            info.get("email") or info.get("upn") or info.get("unique_name") or info.get("preferred_username") or ""
-        ).strip().lower()
+        email = _email_from_info(info)
         if "@" in email:
             _set_feedback_identity(email)
     except Exception:
         # Sign-in failed / cancelled → back to the form, which asks the email.
         frappe.log_error(title="Feedback Microsoft Sign-in Error", message=frappe.get_traceback()[:2000])
-    frappe.local.response["type"] = "redirect"
-    frappe.local.response["location"] = frappe.utils.get_url(redirect_to)
+    _redirect(frappe.utils.get_url(redirect_to))
+
+
+@frappe.whitelist(allow_guest=True)
+def microsoft_return(code: str, state: str):
+    """Runs on the relay site (UAT): the code production passed on. Checks the
+    state was issued here (one-time token), reads the email with production's
+    return address, sets the identity cookie and goes back to the form."""
+    data = _oauth_state(state)
+    redirect_to = str(data.get("redirect_to") or "")
+    token = str(data.get("token") or "")
+    if not _is_feedback_form_path(redirect_to):
+        return _redirect(frappe.utils.get_url("/"))
+    try:
+        if not token or not frappe.cache.get_value(MS_STATE_CACHE + token):
+            raise frappe.PermissionError("Feedback Microsoft sign-in: unknown or expired state")
+        frappe.cache.delete_value(MS_STATE_CACHE + token)
+        email = _ms_email_from_code(code, _ms_relay_redirect_uri())
+        if "@" in email:
+            _set_feedback_identity(email)
+    except Exception:
+        frappe.log_error(title="Feedback Microsoft Sign-in Error", message=frappe.get_traceback()[:2000])
+    _redirect(frappe.utils.get_url(redirect_to))
