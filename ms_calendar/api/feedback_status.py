@@ -286,6 +286,14 @@ MS_REGISTERED_SITE = "https://pathways.azimpremjifoundation.org"
 MS_RELAY_SITES = ("https://uat-careers.m.frappe.cloud",)
 MS_STATE_CACHE = "apf_feedback_ms_state:"
 MS_STATE_SECONDS = 15 * 60
+# Does the registered site run the relay (this file + the hooks.py override)?
+# If it doesn't, Microsoft's code lands on Frappe's own handler there, which
+# rejects this site's state with "Invalid Request — Your login attempt is
+# invalid or has expired" (seen 2026-11-16: UAT had the relay, production
+# didn't). So a relay site asks first and, if the answer isn't yes, the form
+# just asks for the email. Answer cached: yes 10 min, no 5 min.
+MS_RELAY_READY_CACHE = "apf_feedback_ms_relay_ready"
+MS_RELAY_READY_PATH = "/api/method/ms_calendar.api.feedback_status.relay_ready"
 
 
 def _host(url):
@@ -317,6 +325,35 @@ def _ms_uses_relay():
     return own in _relay_sites()
 
 
+@frappe.whitelist(allow_guest=True)
+def relay_ready(site=None):
+    """Asked by a relay site (UAT) on the registered site (production):
+    1 when this site would pass a Microsoft code on to `site`, else 0."""
+    host = _host(site)
+    return 1 if host and host != _host(frappe.utils.get_url()) and host in _relay_sites() else 0
+
+
+def _relay_site_ready():
+    """The registered site runs the relay and will pass codes on to us."""
+    cached = frappe.cache.get_value(MS_RELAY_READY_CACHE)
+    if cached is not None:
+        return bool(cached)
+    ok = False
+    try:
+        import requests
+
+        r = requests.get(
+            _registered_site() + MS_RELAY_READY_PATH,
+            params={"site": frappe.utils.get_url()},
+            timeout=5,
+        )
+        ok = r.status_code == 200 and r.json().get("message") == 1
+    except Exception:
+        ok = False
+    frappe.cache.set_value(MS_RELAY_READY_CACHE, 1 if ok else 0, expires_in_sec=600 if ok else 300)
+    return ok
+
+
 def _microsoft_signin_works():
     """On for production (registered) and for relay sites (UAT); off elsewhere
     (ms.local), unless site_config "feedback_microsoft_signin" says 1 / 0.
@@ -330,7 +367,10 @@ def _microsoft_signin_works():
         if setting is not None:
             return bool(frappe.utils.cint(setting))
         own = _host(frappe.utils.get_url())
-        return own in {_host(h) for h in _FEEDBACK_FORM_HOSTS} or _ms_uses_relay()
+        if own in {_host(h) for h in _FEEDBACK_FORM_HOSTS}:
+            return True
+        # Relay site (UAT): only when production really passes the code on.
+        return _ms_uses_relay() and _relay_site_ready()
     except Exception:
         return False
 
