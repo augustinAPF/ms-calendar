@@ -2,7 +2,8 @@
 //
 // Filters (Apply button + one-click date presets) → KPI cards → agenda
 // (its own Last 7 days / Today / Next 7 days switch) → running tables
-// (interviews, feedback, interviewer workload, departments).
+// (interviews with their feedback listed under each one, interviewer
+// workload, departments).
 //
 // Every card and table number opens a centred
 // drilldown with sortable columns and a CSV export; clicking an applicant
@@ -152,29 +153,19 @@ class FieldInterviewDashboard {
 				<div class="fid-panel">
 					<div class="fid-panel-head">
 						<div>
-							<div class="fid-panel-title">${__('Interviews')}</div>
-							<div class="fid-panel-sub">${__('Latest first · click a column to sort · click an applicant for full details')}</div>
+							<div class="fid-panel-title">${__('Interviews & feedback')}</div>
+							<div class="fid-panel-sub">${__('Latest first · click a column to sort · "Show answers" opens a feedback\'s answers in its row · click an applicant for full details')}</div>
 						</div>
 						<div class="fid-panel-tools">
-							<input type="text" class="fid-search" id="fid-search" placeholder="${__('Search applicant, ID, role…')}">
+							<input type="text" class="fid-search" id="fid-search" placeholder="${__('Search applicant, ID, role, panelist…')}">
 							<button class="btn btn-default btn-xs" id="fid-export-main">${__('Export CSV')}</button>
 						</div>
 					</div>
 					<div class="fid-table-scroll" id="fid-main-table"></div>
-				</div>
-
-				<div class="fid-panel">
-					<div class="fid-panel-head">
-						<div>
-							<div class="fid-panel-title">${__('Feedback')}</div>
-							<div class="fid-panel-sub">${__('Every feedback submitted for these interviews · click "View feedback" to read it here')}</div>
-						</div>
-						<div class="fid-panel-tools">
-							<input type="text" class="fid-search" id="fid-fb-search" placeholder="${__('Search applicant, form, panelist…')}">
-							<button class="btn btn-default btn-xs" id="fid-export-fb">${__('Export CSV')}</button>
-						</div>
-					</div>
-					<div class="fid-table-scroll" id="fid-fb-table"></div>
+					<details class="fid-fb-other" id="fid-fb-other" hidden>
+						<summary id="fid-fb-other-sum"></summary>
+						<div class="fid-table-scroll fid-short" id="fid-fb-table"></div>
+					</details>
 				</div>
 
 				<div class="fid-panel">
@@ -235,10 +226,8 @@ class FieldInterviewDashboard {
 			this.load(this.current_filters());
 		});
 		$c.find('#fid-from, #fid-to').on('keydown', (e) => { if (e.key === 'Enter') this.load(this.current_filters()); });
-		$c.find('#fid-search').on('input', frappe.utils.debounce(() => this.render_main_table(), 200));
-		$c.find('#fid-fb-search').on('input', frappe.utils.debounce(() => this.render_feedback_table(), 200));
-		$c.find('#fid-export-main').on('click', () => this.export_csv('field-interviews', this.interview_columns(), this.filtered_main_rows()));
-		$c.find('#fid-export-fb').on('click', () => this.export_csv('field-interview-feedback', this.feedback_columns(), this.filtered_feedback_rows()));
+		$c.find('#fid-search').on('input', frappe.utils.debounce(() => { this.render_main_table(); this.render_feedback_table(); }, 200));
+		$c.find('#fid-export-main').on('click', () => this.export_csv('field-interviews-and-feedback', this.interview_columns(), this.filtered_main_rows()));
 		// The agenda's own range switch — a single choice, so it applies at once.
 		this.agenda_range = 'next7';
 		try { this.agenda_range = localStorage.getItem('fid-agenda-range') || 'next7'; } catch (e) { /* ignore */ }
@@ -397,6 +386,15 @@ class FieldInterviewDashboard {
 			callback: (r) => {
 				this.data = r.message || {};
 				this.rows = this.data.rows || [];
+				// Each feedback is listed under the interview it was given for
+				// (server: f.interview); the rest go to "Other feedback".
+				this.fb_by_iv = {};
+				this.fb_other = [];
+				this.fb_answers = {};  // answers cache (refilled for the new data)
+				(this.data.feedback || []).forEach(f => {
+					if (f.interview) (this.fb_by_iv[f.interview] = this.fb_by_iv[f.interview] || []).push(f);
+					else this.fb_other.push(f);
+				});
 				const o = this.data.options || {};
 				this.ms.dept.setOptions(o.departments || []);
 				this.ms.round.setOptions(o.rounds || []);
@@ -579,18 +577,40 @@ class FieldInterviewDashboard {
 			{ key: 'rescheduled', label: __('Modified'), sort: r => r.rescheduled || 0,
 				render: r => r.rescheduled ? `<span class="fid-pill" style="--c:#0F766E;">↻ ${__('Rescheduled')} ×${cint(r.rescheduled)}</span>` : '',
 				csv: r => r.rescheduled ? `Rescheduled x${r.rescheduled}` : '' },
-			{ key: 'feedback', label: __('Feedback'), render: r => this.status_pill(r.feedback) + (r.days_waiting ? `<div class="fid-muted">${cint(r.days_waiting)} ${__('days waiting')}</div>` : '') },
+			// Feedback state + every submission for this interview, listed in
+			// the cell itself (who · when · result); "View" opens the answers
+			// in a popup.
+			{ key: 'feedback', label: __('Feedback'), sort: r => r.feedback,
+				render: r => this.status_pill(r.feedback)
+					+ (r.days_waiting ? `<div class="fid-muted">${cint(r.days_waiting)} ${__('days waiting')}</div>` : '')
+					+ this.feedback_cell_html(this.iv_feedback(r)) },
 			{ key: 'outcome', label: __('Outcome'), render: r => this.status_pill(r.outcome) },
 			{ key: 'turnaround_days', label: __('Days to feedback'), sort: r => r.turnaround_days === null ? 9999 : r.turnaround_days,
 				render: r => r.turnaround_days === null || r.turnaround_days === undefined ? '' : this.esc(r.turnaround_days) },
-			{ key: 'name', label: __('Schedule'), render: r => `<a href="/app/field-interview-schedule/${encodeURIComponent(r.name)}" target="_blank">${this.esc(r.name)}</a>` }
+			{ key: 'name', label: __('Schedule'), render: r => `<a href="/app/field-interview-schedule/${encodeURIComponent(r.name)}" target="_blank">${this.esc(r.name)}</a>` },
+			// CSV only: the submissions listed under the interview.
+			{ key: 'fb_submitted', label: __('Feedback submitted on'), hidden: true, csv: r => this.iv_feedback(r).map(f => f.submitted_on).join('; ') },
+			{ key: 'fb_by', label: __('Feedback submitted by'), hidden: true, csv: r => this.iv_feedback(r).map(f => this.feedback_by_text(f)).join('; ') },
+			{ key: 'fb_results', label: __('Feedback results'), hidden: true, csv: r => this.iv_feedback(r).map(f => f.result || '').join('; ') },
+			{ key: 'fb_forms', label: __('Feedback forms'), hidden: true, csv: r => this.iv_feedback(r).map(f => f.doctype).join('; ') }
 		];
+	}
+
+	// Feedback given for one interview, oldest first.
+	iv_feedback(r) {
+		return ((this.fb_by_iv || {})[r.name] || []).slice().sort((a, b) => String(a.submitted_on).localeCompare(String(b.submitted_on)));
+	}
+
+	feedback_by_text(f) {
+		if (f.by_source === 'panel') return this.people_csv(f.by_panel);
+		return f.by_email && f.by_email !== f.by ? `${f.by} <${f.by_email}>` : (f.by || '');
 	}
 
 	filtered_main_rows() {
 		const q = (this.$root.find('#fid-search').val() || '').toLowerCase().trim();
 		if (!q) return this.rows;
-		return this.rows.filter(r => [r.applicant, r.application_id, r.email, r.phone, r.role, r.round, r.department, r.name]
+		return this.rows.filter(r => [r.applicant, r.application_id, r.email, r.phone, r.role, r.round, r.department, r.name,
+			...this.iv_feedback(r).map(f => [f.doctype, f.by, f.by_email, (f.by_panel || []).join(' '), f.result].join(' '))]
 			.join(' ').toLowerCase().includes(q));
 	}
 
@@ -598,7 +618,179 @@ class FieldInterviewDashboard {
 		this.sortable_table(this.$root.find('#fid-main-table'), this.interview_columns(), this.filtered_main_rows());
 	}
 
-	// ── feedback panel ────────────────────────────────────────────────────
+	// ── feedback inside the Feedback cell ─────────────────────────────────
+	// One block per submission: submitter, date + result, then every answer
+	// of that submission, shown right in the row (no click needed). The
+	// answers come from get_feedback_details (one call for the whole table)
+	// and are cached until the next Apply / reload.
+	feedback_cell_html(fbs) {
+		if (!fbs.length) return '';
+		return `<div class="fid-fb-cell">${fbs.map(f => {
+			const key = `${f.doctype}::${f.name}`;
+			const cached = (this.fb_answers || {})[key];
+			return `
+			<div class="fid-fb-cell-item" data-dt="${this.esc(f.doctype)}" data-name="${this.esc(f.name)}">
+				<div class="fid-fb-cell-by">${f.by ? this.esc(f.by) : `<span class="fid-muted fid-note">${__('Submitter not recorded')}</span>`}${f.by_source === 'panel' ? ` <span class="fid-muted fid-note">${__('(panel)')}</span>` : ''}</div>
+				<div class="fid-fb-cell-meta">
+					<span class="fid-muted">${this.esc(frappe.datetime.str_to_user(f.submitted_on))}</span>
+					${this.status_pill(f.result)}
+					<a class="fid-fb-open fid-fb-dlg" data-dt="${this.esc(f.doctype)}" data-name="${this.esc(f.name)}" title="${__('Open in a popup')}">↗</a>
+				</div>
+				<a class="fid-fb-ans-toggle">${__('Show answers')} ▾</a>
+				<div class="fid-fb-cell-ans" hidden>${cached !== undefined ? this.feedback_answers_html(cached) : `<span class="fid-muted">${__('Loading answers…')}</span>`}</div>
+			</div>`;
+		}).join('')}</div>`;
+	}
+
+	// Compact "question: answer" list of one submission (every value escaped).
+	feedback_answers_html(sections) {
+		if (!sections || !sections.length) return `<span class="fid-muted">${__('No answers filled in.')}</span>`;
+		const esc = (v) => this.esc(v);
+		return sections.map(s => `
+			${s.title ? `<div class="fid-fb-ans-sec">${esc(s.title)}</div>` : ''}
+			${(s.fields || []).map(x => `
+				<div class="fid-fb-ans"><span class="fid-fb-ans-q">${esc(x.label)}:</span>
+				<span class="fid-fb-ans-a">${esc(x.value).replace(/\n/g, '<br>')}</span></div>`).join('')}
+			${(s.tables || []).map(tb => `
+				<div class="fid-fb-ans-q" style="margin-top:3px;">${esc(tb.label)}</div>
+				<table class="fid-table fid-fb-child"><thead><tr>${tb.columns.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+				<tbody>${tb.rows.map(r => `<tr>${r.map(v => `<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>`).join('')}
+		`).join('');
+	}
+
+	// Fetch the answers for every submission shown in $el that isn't cached
+	// yet (one server call), then fill those cells in place.
+	fill_feedback_answers($el) {
+		this.fb_answers = this.fb_answers || {};
+		const want = [];
+		const seen = new Set();
+		$el.find('.fid-fb-cell-item').each((_i, n) => {
+			const dt = String($(n).data('dt')), name = String($(n).data('name'));
+			const key = `${dt}::${name}`;
+			if (this.fb_answers[key] === undefined && !seen.has(key)) { seen.add(key); want.push([dt, name]); }
+		});
+		if (!want.length) return;
+		frappe.call({
+			method: FID_API + 'get_feedback_details',
+			args: { items: JSON.stringify(want) },
+			callback: (r) => {
+				const got = r.message || {};
+				want.forEach(([dt, name]) => { this.fb_answers[`${dt}::${name}`] = got[`${dt}::${name}`] || null; });
+				$el.find('.fid-fb-cell-item').each((_i, n) => {
+					const key = `${$(n).data('dt')}::${$(n).data('name')}`;
+					if (this.fb_answers[key] !== undefined) $(n).children('.fid-fb-cell-ans').html(this.feedback_answers_html(this.fb_answers[key]));
+				});
+			},
+			error: () => $el.find('.fid-fb-cell-ans').each((_i, n) => {
+				if ($(n).text().trim() === __('Loading answers…')) $(n).html(`<span class="fid-muted">${__('Could not load answers.')}</span>`);
+			})
+		});
+	}
+
+	// Full answers of one submission in a popup (keeps the table rows short).
+	open_feedback_dialog(doctype, name) {
+		const d = new frappe.ui.Dialog({ title: __('Feedback'), size: 'extra-large' });
+		d.$wrapper.find('.modal-dialog').addClass('modal-dialog-centered');
+		d.$body.html(`<style>${FID_CSS}</style><div class="fid-root"><div class="fid-fb-dlg-body"><div class="fid-muted">${__('Loading…')}</div></div></div>`);
+		d.show();
+		const $a = $('<a>').attr({ 'data-dt': doctype, 'data-name': name });
+		this.load_feedback_body($a, d.$body.find('.fid-fb-dlg-body'));
+	}
+
+	// ── feedback list (used by older toggles) ─────────────────────────────
+	// The submissions of one interview as a compact list in a row right
+	// under it; each one's full answers open in place ("View answers").
+	feedback_list_html(fbs) {
+		return `<div class="fid-fb-list">${fbs.map(f => `
+			<div class="fid-fb-item">
+				<div class="fid-fb-item-head">
+					<span class="fid-fb-when">${this.esc(frappe.datetime.str_to_user(f.submitted_on))}</span>
+					<span class="fid-fb-form">${this.esc(f.doctype)}</span>
+					<span class="fid-fb-by">${f.by_source === 'panel'
+						? `${this.esc(f.by)} <span class="fid-muted fid-note">${__('(interview panel)')}</span>`
+						: f.by ? this.esc(f.by) : `<span class="fid-muted fid-note">${__('Submitter not recorded')}</span>`}</span>
+					${this.status_pill(f.result)}
+					<a class="fid-fb-open" data-dt="${this.esc(f.doctype)}" data-name="${this.esc(f.name)}">${__('View answers')} ▾</a>
+				</div>
+				<div class="fid-fb-body"></div>
+			</div>`).join('')}</div>`;
+	}
+
+	// Delegated on any table that shows interviews or feedback (main table,
+	// "Other feedback", drilldown dialogs).
+	bind_feedback_links($el) {
+		// Answers inside the Feedback cell: collapsed until clicked.
+		$el.off('click.fidans').on('click.fidans', '.fid-fb-ans-toggle', (e) => {
+			e.preventDefault();
+			const $a = $(e.currentTarget);
+			const $ans = $a.siblings('.fid-fb-cell-ans');
+			const open = $ans.prop('hidden');
+			$ans.prop('hidden', !open);
+			$a.html(open ? `${__('Hide answers')} ▴` : `${__('Show answers')} ▾`);
+		});
+		$el.off('click.fidfbt').on('click.fidfbt', '.fid-fb-toggle', (e) => {
+			e.preventDefault();
+			const $a = $(e.currentTarget);
+			const $tr = $a.closest('tr');
+			const $next = $tr.next('.fid-fb-detail-row');
+			const fbs = this.iv_feedback({ name: String($a.data('iv')) });
+			if ($next.length) { $next.remove(); $a.html(`${__('Show feedback ({0})', [fbs.length])} ▾`); return; }
+			const $row = $(`<tr class="fid-fb-detail-row"><td colspan="${$tr.children('td').length}">${this.feedback_list_html(fbs)}</td></tr>`);
+			$tr.after($row);
+			this.fit_detail($row);
+			$a.html(`${__('Hide feedback')} ▴`);
+		});
+		$el.off('click.fidfb').on('click.fidfb', '.fid-fb-open', (e) => {
+			e.preventDefault();
+			const $a = $(e.currentTarget);
+			// Links inside the Feedback cell open the answers in a popup.
+			if ($a.hasClass('fid-fb-dlg')) {
+				this.open_feedback_dialog(String($a.data('dt')), String($a.data('name')));
+				return;
+			}
+			const label = $a.closest('.fid-fb-item').length ? __('View answers') : __('View feedback');
+			// Inside a feedback list the answers open in that item; in the
+			// "Other feedback" table, in a row under the feedback's row.
+			const $item = $a.closest('.fid-fb-item');
+			if ($item.length) {
+				const $body = $item.children('.fid-fb-body');
+				if ($body.children().length) { $body.empty(); $a.html(`${label} ▾`); return; }
+				$body.html(`<div class="fid-muted">${__('Loading…')}</div>`);
+				$a.html(`${__('Hide')} ▴`);
+				this.load_feedback_body($a, $body);
+				return;
+			}
+			const $tr = $a.closest('tr');
+			const $next = $tr.next('.fid-fb-detail-row');
+			if ($next.length) { $next.remove(); $a.html(`${label} ▾`); return; }
+			const $row = $(`<tr class="fid-fb-detail-row"><td colspan="${$tr.children('td').length}"><div class="fid-fb-fit"><div class="fid-muted">${__('Loading…')}</div></div></td></tr>`);
+			$tr.after($row);
+			this.fit_detail($row);
+			$a.html(`${__('Hide')} ▴`);
+			this.load_feedback_body($a, $row.find('.fid-fb-fit'));
+		});
+	}
+
+	// The tables scroll sideways; keep an opened feedback box pinned to the
+	// visible width (sticky at the left) so it reads without scrolling.
+	fit_detail($row) {
+		const $scroll = $row.closest('.fid-table-scroll, .fid-dd-scroll');
+		const w = $scroll.length ? $scroll[0].clientWidth - 26 : 0;
+		const $box = $row.find('td').children().first();
+		$box.addClass('fid-fb-fit');
+		if (w > 200) $box.css('width', w + 'px');
+	}
+
+	load_feedback_body($a, $target) {
+		frappe.call({
+			method: FID_API + 'get_feedback_detail',
+			args: { doctype: String($a.data('dt')), name: String($a.data('name')) },
+			callback: (r) => $target.html(this.feedback_body_html(r.message)),
+			error: () => $target.html(`<div class="fid-muted">${__('Could not load this feedback.')}</div>`)
+		});
+	}
+
+	// ── other feedback (not matched to an interview shown) ────────────────
 	feedback_columns() {
 		return [
 			{ key: 'submitted_on', label: __('Submitted'), nw: true, render: r => this.esc(frappe.datetime.str_to_user(r.submitted_on)), csv: r => r.submitted_on },
@@ -621,35 +813,24 @@ class FieldInterviewDashboard {
 		];
 	}
 
+	// Feedback for these applicants that isn't matched to an interview shown
+	// above (e.g. its interview was cancelled, is outside the dates, or was
+	// left out by the Interviewer filter) — kept visible, folded away.
 	filtered_feedback_rows() {
-		const all = (this.data && this.data.feedback) || [];
-		const q = (this.$root.find('#fid-fb-search').val() || '').toLowerCase().trim();
+		const all = this.fb_other || [];
+		const q = (this.$root.find('#fid-search').val() || '').toLowerCase().trim();
 		if (!q) return all;
 		return all.filter(r => [r.applicant, r.application_id, r.email, r.phone, r.doctype, r.by, r.by_email, (r.by_panel || []).join(' '), r.result]
 			.join(' ').toLowerCase().includes(q));
 	}
 
 	render_feedback_table() {
-		const $el = this.$root.find('#fid-fb-table');
-		this.sortable_table($el, this.feedback_columns(), this.filtered_feedback_rows(), { empty: __('No feedback submitted for these interviews yet.') });
-		// "View feedback" opens the full feedback right under that row (click again to close).
-		$el.off('click.fidfb').on('click.fidfb', '.fid-fb-open', (e) => {
-			e.preventDefault();
-			const $a = $(e.currentTarget);
-			const $tr = $a.closest('tr');
-			const $next = $tr.next('.fid-fb-detail-row');
-			if ($next.length) { $next.remove(); $a.html(`${__('View feedback')} ▾`); return; }
-			const span = $tr.children('td').length;
-			const $row = $(`<tr class="fid-fb-detail-row"><td colspan="${span}"><div class="fid-muted">${__('Loading…')}</div></td></tr>`);
-			$tr.after($row);
-			$a.html(`${__('Hide')} ▴`);
-			frappe.call({
-				method: FID_API + 'get_feedback_detail',
-				args: { doctype: String($a.data('dt')), name: String($a.data('name')) },
-				callback: (r) => $row.find('td').html(this.feedback_body_html(r.message)),
-				error: () => $row.find('td').html(`<div class="fid-muted">${__('Could not load this feedback.')}</div>`)
-			});
-		});
+		const rows = this.filtered_feedback_rows();
+		const $box = this.$root.find('#fid-fb-other');
+		$box.prop('hidden', !rows.length);
+		this.$root.find('#fid-fb-other-sum').text(
+			__('Other feedback for these applicants, not matched to an interview listed above ({0})', [rows.length]));
+		this.sortable_table(this.$root.find('#fid-fb-table'), this.feedback_columns(), rows, { empty: __('No other feedback.') });
 	}
 
 	// Full content of one feedback submission — every value escaped.
@@ -826,6 +1007,8 @@ class FieldInterviewDashboard {
 				<span class="fid-sort">${c.key === sort_key ? (dir === 1 ? '▲' : '▼') : '↕'}</span></th>`).join('')}
 				</tr></thead><tbody>${data.map(r => `<tr>${cols.map(c =>
 					`<td${c.nw ? ' class="nw"' : ''}>${c.render ? c.render(r) : this.esc(r[c.key])}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+			// Feedback answers shown inside interview rows.
+			this.fill_feedback_answers($el);
 		};
 		$el.off('click.fidsort').on('click.fidsort', 'th', (e) => {
 			const k = $(e.currentTarget).data('key');
@@ -835,6 +1018,7 @@ class FieldInterviewDashboard {
 			draw();
 		});
 		this.bind_candidate_links($el);
+		this.bind_feedback_links($el);
 		draw();
 	}
 
@@ -1056,7 +1240,31 @@ const FID_CSS = `
 .fid-seg button + button { border-left:1px solid var(--border); }
 .fid-seg button.is-on { background:#2a78d6; color:#fff; }
 .fid-agenda-row .fid-pill + .fid-pill { margin-left:4px; }
-.fid-fb-open { cursor:pointer; font-weight:600; color:var(--link); white-space:nowrap; }
+.fid-fb-open, .fid-fb-toggle { cursor:pointer; font-weight:600; color:var(--link); white-space:nowrap; font-size:11.5px; }
+.fid-fb-list { display:flex; flex-direction:column; gap:6px; }
+.fid-fb-cell { display:flex; flex-direction:column; gap:8px; margin-top:6px; min-width:300px; max-width:420px; }
+.fid-fb-cell-item { border-left:2px solid var(--border); padding-left:8px; font-size:11.5px; line-height:1.35; }
+.fid-fb-cell-ans { margin-top:4px; }
+.fid-fb-ans-toggle { display:inline-block; margin-top:2px; cursor:pointer; font-weight:600; color:var(--link); font-size:11.5px; }
+.fid-fb-ans { margin:1px 0; overflow-wrap:anywhere; }
+.fid-fb-ans-q { color:var(--muted); }
+.fid-fb-ans-a { color:var(--text); font-weight:500; }
+.fid-fb-ans-sec { font-size:10.5px; font-weight:700; color:var(--link); text-transform:uppercase; letter-spacing:.04em; margin:5px 0 2px; }
+.fid-fb-cell-ans .fid-fb-child { font-size:11px; }
+.fid-fb-cell-by { color:var(--text); font-weight:600; }
+.fid-fb-cell-meta { display:flex; flex-wrap:wrap; align-items:center; gap:3px 6px; margin-top:1px; }
+.fid-fb-fit { position:sticky; left:12px; max-width:100%; }
+.fid-fb-item { border:1px solid var(--border); border-radius:8px; background:var(--bg); }
+.fid-fb-item-head { display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; padding:7px 12px; font-size:12.5px; }
+.fid-fb-when { font-weight:700; color:var(--text-2); white-space:nowrap; }
+.fid-fb-form { color:var(--text); }
+.fid-fb-by { color:var(--text-2); }
+.fid-fb-item-head .fid-fb-open { margin-left:auto; }
+.fid-fb-body:not(:empty) { padding:0 10px 2px; }
+.fid-fb-body .fid-fb-card { margin-bottom:8px; }
+.fid-fb-other { border-top:1px solid var(--border-soft); }
+.fid-fb-other > summary { cursor:pointer; padding:9px 14px; font-size:12px; font-weight:600; color:var(--muted); }
+.fid-fb-other[open] > summary { border-bottom:1px solid var(--border-soft); }
 .fid-fb-detail-row > td { background:var(--bg-soft) !important; padding:10px 12px !important; }
 .fid-fb-card { border:1px solid var(--border); border-radius:10px; background:var(--bg); padding:10px 14px; margin-bottom:10px; }
 .fid-fb-head { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; align-items:center;

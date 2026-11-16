@@ -203,6 +203,38 @@ def get_feedback_detail(doctype, name):
 
 
 @frappe.whitelist()
+def get_feedback_details(items):
+    """
+    Answers of several feedback submissions in one call, so the dashboard
+    can show them right inside each interview row. items = JSON list of
+    [doctype, name]. Same checks as get_feedback_detail; anything not
+    allowed / not found is just left out. Returns {"doctype::name": sections}.
+    """
+    _check_read()
+    items = frappe.parse_json(items) if isinstance(items, str) else (items or [])
+    allowed = _allowed_feedback_doctypes()
+    out = {}
+    readable_apps = {}
+    for it in (items or [])[:500]:
+        if not isinstance(it, (list, tuple)) or len(it) != 2:
+            continue
+        doctype, name = str(it[0]), str(it[1])
+        if doctype not in allowed or not frappe.db.exists(doctype, name):
+            continue
+        doc = frappe.get_doc(doctype, name)
+        app = doc.get("applicant_id")
+        if not app:
+            continue
+        if app not in readable_apps:
+            readable_apps[app] = bool(frappe.get_list(
+                FIS, filters={"application_id": app}, pluck="name", limit_page_length=1
+            ))
+        if readable_apps[app]:
+            out[f"{doctype}::{name}"] = _render_feedback_doc(doc)
+    return out
+
+
+@frappe.whitelist()
 def get_dashboard_data(from_date=None, to_date=None, departments=None, rounds=None,
                        interviewers=None, modes=None):
     """
@@ -395,6 +427,7 @@ def get_dashboard_data(from_date=None, to_date=None, departments=None, rounds=No
     names_by_app = {}
     for o in out:
         names_by_app.setdefault(o["application_id"], o["applicant"])
+    out_latest_first = sorted(out, key=lambda o: o["date"], reverse=True)
     feedback_list = []
     for f in feedback_rows:
         if f["application_id"] in shown_apps and (not from_date or f["date"] >= str(from_date)):
@@ -402,23 +435,25 @@ def get_dashboard_data(from_date=None, to_date=None, departments=None, rounds=No
             contact = contacts.get(f["application_id"]) or {}
             f["email"] = (contact.get("email_address") or "").strip()
             f["phone"] = (contact.get("phone_number") or "").strip()
-            if not f["by_source"]:
-                # Submitter unknown (Guest web form) — show the panel of the
-                # interview this feedback is for: same applicant, a round this
-                # form serves, held on or before the submission, latest first.
-                panel = next(
-                    (
-                        o for o in sorted(out, key=lambda o: o["date"], reverse=True)
-                        if o["application_id"] == f["application_id"]
-                        and o["status"] != "Cancelled"
-                        and o["date"] and o["date"] <= f["date"]
-                        and f["doctype"] in fb_map.get(_base_round(o["round"]), [])
-                    ),
-                    None,
-                )
-                if panel and panel["interviewers"]:
-                    f["by_panel"] = panel["interviewers"]
-                    f["by_source"] = "panel"
+            # The interview this feedback is for: same applicant, a round
+            # this form serves, held on or before the submission, latest
+            # first. The page lists the feedback under that interview
+            # ("interview" = its schedule name; "" = none shown here).
+            iv = next(
+                (
+                    o for o in out_latest_first
+                    if o["application_id"] == f["application_id"]
+                    and o["status"] != "Cancelled"
+                    and o["date"] and o["date"] <= f["date"]
+                    and f["doctype"] in fb_map.get(_base_round(o["round"]), [])
+                ),
+                None,
+            )
+            f["interview"] = iv["name"] if iv else ""
+            if not f["by_source"] and iv and iv["interviewers"]:
+                # Submitter unknown (Guest web form) — show that interview's panel.
+                f["by_panel"] = iv["interviewers"]
+                f["by_source"] = "panel"
             feedback_list.append(f)
     feedback_list.sort(key=lambda f: f["submitted_on"], reverse=True)
 
