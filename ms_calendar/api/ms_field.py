@@ -5393,7 +5393,7 @@ def send_leader_final_round_feedback_pdf_to_registration_form(doc, method=None):
     )
 
 
-def _render_feedback_submissions_pdf(doctype, applicant_id, pdf_title, current_doc=None):
+def _render_feedback_submissions_pdf(doctype, applicant_id, pdf_title, current_doc=None, names=None):
     """
     Builds ONE PDF of every submission of `doctype` for this applicant (one
     section per submission, oldest first). Returns
@@ -5401,12 +5401,17 @@ def _render_feedback_submissions_pdf(doctype, applicant_id, pdf_title, current_d
     applicant has no submission of this doctype. Saving it is left to the
     caller (_merge_feedback_submissions_to_registration_form), which may
     merge several doctypes' PDFs into the same attach field.
+    `names` (optional) limits it to those submissions only — the Field
+    Interview Dashboard uses it for the feedback of one interview.
     """
     from frappe.utils.pdf import get_pdf
 
+    filters = {"applicant_id": applicant_id}
+    if names:
+        filters["name"] = ["in", list(names)]
     submissions = frappe.get_all(
         doctype,
-        filters={"applicant_id": applicant_id},
+        filters=filters,
         fields=["name", "creation"],
         order_by="creation asc",
     )

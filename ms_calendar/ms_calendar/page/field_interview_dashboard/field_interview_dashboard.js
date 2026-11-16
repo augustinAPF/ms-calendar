@@ -623,9 +623,21 @@ class FieldInterviewDashboard {
 	// of that submission, shown right in the row (no click needed). The
 	// answers come from get_feedback_details (one call for the whole table)
 	// and are cached until the next Apply / reload.
+	// "View PDF" link for a set of feedback submissions: one submission →
+	// that feedback's PDF; two or more → one consolidated PDF of all of
+	// them. Opens inline in a new tab (get_feedback_pdf checks permission).
+	feedback_pdf_link(fbs, all_label) {
+		if (!fbs || !fbs.length) return '';
+		const items = JSON.stringify(fbs.map(f => [f.doctype, f.name]));
+		const href = `/api/method/${FID_API}get_feedback_pdf?items=${encodeURIComponent(items)}`;
+		const label = fbs.length === 1 ? __('View PDF') : (all_label || __('View PDF · all {0} in one', [fbs.length]));
+		return `<a class="fid-fb-pdf" target="_blank" rel="noopener" href="${href}"
+			title="${fbs.length === 1 ? __('This feedback as a PDF') : __('All {0} feedbacks consolidated into one PDF', [fbs.length])}">📄 ${label}</a>`;
+	}
+
 	feedback_cell_html(fbs) {
 		if (!fbs.length) return '';
-		return `<div class="fid-fb-cell">${fbs.map(f => {
+		return `${this.feedback_pdf_link(fbs)}<div class="fid-fb-cell">${fbs.map(f => {
 			const key = `${f.doctype}::${f.name}`;
 			const cached = (this.fb_answers || {})[key];
 			return `
@@ -1086,7 +1098,8 @@ class FieldInterviewDashboard {
 							</div>`).join('') || `<div class="fid-muted">${__('None')}</div>`}
 						</div>
 
-						<div class="fid-sec">${__('Feedback')} (${c.feedback.length})</div>
+						<div class="fid-sec">${__('Feedback')} (${c.feedback.length})
+							${this.feedback_pdf_link(c.feedback, __('View PDF · all {0} feedbacks in one', [c.feedback.length]))}</div>
 						${c.feedback.map(f => this.feedback_body_html(f)).join('')
 							|| `<div class="fid-muted">${__('No feedback yet')}</div>`}
 
@@ -1252,6 +1265,10 @@ const FID_CSS = `
 .fid-fb-ans-sec { font-size:10.5px; font-weight:700; color:var(--link); text-transform:uppercase; letter-spacing:.04em; margin:5px 0 2px; }
 .fid-fb-cell-ans .fid-fb-child { font-size:11px; }
 .fid-fb-cell-by { color:var(--text); font-weight:600; }
+.fid-fb-pdf { display:inline-block; margin:4px 0 2px; padding:2px 8px; border:1px solid var(--border); border-radius:6px;
+	background:var(--bg); color:var(--link); font-size:11.5px; font-weight:600; white-space:nowrap; text-decoration:none; }
+.fid-fb-pdf:hover { border-color:var(--link); text-decoration:none; }
+.fid-sec .fid-fb-pdf { margin:0 0 0 8px; text-transform:none; letter-spacing:0; vertical-align:middle; }
 .fid-fb-cell-meta { display:flex; flex-wrap:wrap; align-items:center; gap:3px 6px; margin-top:1px; }
 .fid-fb-fit { position:sticky; left:12px; max-width:100%; }
 .fid-fb-item { border:1px solid var(--border); border-radius:8px; background:var(--bg); }

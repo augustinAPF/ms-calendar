@@ -235,6 +235,66 @@ def get_feedback_details(items):
 
 
 @frappe.whitelist()
+def get_feedback_pdf(items):
+    """
+    The feedback of one interview as ONE PDF, opened inline in a new tab.
+    items = JSON list of [doctype, name]: one item → that feedback's PDF;
+    two or more → all of them consolidated into a single PDF (oldest first).
+    Same checks as get_feedback_details (Feedback Form doctypes only, and
+    only for an applicant the user can see on a Field Interview Schedule).
+    Uses the same layout as the merged feedback PDFs saved on the FRF.
+    """
+    from ms_calendar.api.ms_field import _merge_pdf_bytes, _render_feedback_submissions_pdf
+
+    _check_read()
+    items = frappe.parse_json(items) if isinstance(items, str) else (items or [])
+    allowed = _allowed_feedback_doctypes()
+    # (applicant, doctype) → names, keeping the order each pair first appears.
+    groups = {}
+    readable_apps = {}
+    for it in (items or [])[:50]:
+        if not isinstance(it, (list, tuple)) or len(it) != 2:
+            continue
+        doctype, name = str(it[0]), str(it[1])
+        if doctype not in allowed:
+            continue
+        app = frappe.db.get_value(doctype, name, "applicant_id")
+        if not app:
+            continue
+        if app not in readable_apps:
+            readable_apps[app] = bool(frappe.get_list(
+                FIS, filters={"application_id": app}, pluck="name", limit_page_length=1
+            ))
+        if readable_apps[app]:
+            groups.setdefault((app, doctype), []).append(name)
+    if not groups:
+        frappe.throw("No feedback found to print", frappe.PermissionError)
+
+    parts = []
+    for (app, doctype), names in groups.items():
+        res = _render_feedback_submissions_pdf(doctype, app, doctype, names=names)
+        if res:
+            parts.append(res)
+    if not parts:
+        frappe.throw("No feedback found to print")
+    # Oldest feedback first across forms (e.g. Recruiter Round, then Round 1).
+    parts.sort(key=lambda p: p[0])
+    pdf = parts[0][2] if len(parts) == 1 else _merge_pdf_bytes([p[2] for p in parts])
+
+    (first_app, first_dt), first_names = next(iter(groups.items()))
+    applicant = (
+        frappe.db.get_value(first_dt, first_names[0], "applicant_name")
+        if frappe.get_meta(first_dt).has_field("applicant_name") else ""
+    )
+    count = sum(len(v) for v in groups.values())
+    label = "Feedback" if count == 1 else f"Feedback ({count} consolidated)"
+    safe = re.sub(r"[^A-Za-z0-9 _.-]+", "", f"{applicant or first_app} - {first_app} - {label}").strip()
+    frappe.local.response.filename = f"{safe or 'Feedback'}.pdf"
+    frappe.local.response.filecontent = pdf
+    frappe.local.response.type = "pdf"
+
+
+@frappe.whitelist()
 def get_dashboard_data(from_date=None, to_date=None, departments=None, rounds=None,
                        interviewers=None, modes=None):
     """
