@@ -165,6 +165,84 @@
         d.show();
     }
 
+    // ── Records popup ──────────────────────────────────────────────────
+    // Every Talent Pool stay of one application (the open one first), with
+    // who moved / resumed it and the email result. Data comes from
+    // get_talent_pool_info, so it works for anyone who can read the form,
+    // even without read access to the Talent Pool Log DocType itself.
+    function userName(u) {
+        if (!u) return '';
+        // user_info, not frappe.user.full_name, which shows "You" for oneself.
+        var info = frappe.user_info ? frappe.user_info(u) : null;
+        return (info && info.fullname) || u;
+    }
+
+    function recordsDialog(frm, logs) {
+        var head = [__('Log'), __('Status'), __('Moved on'), __('Moved by'), __('Status before'),
+            __('Remarks'), __('Email'), __('Resumed on'), __('Resumed by'), __('Resumed to'), __('Days')];
+        var rows = logs.map(function (l) {
+            var open = l.status === 'In Talent Pool';
+            var days = open ? (l.days_so_far || 0) + ' ' + __('(so far)') : (l.days_in_pool || 0);
+            var email = l.email_sent_on ? __('Sent {0}', [fmtDate(l.email_sent_on)])
+                : (l.email_note || __('Not sent'));
+            var pill = '<span class="indicator-pill ' + (open ? 'blue' : 'green') + '">'
+                + esc(open ? __('In Talent Pool') : __('Resumed')) + '</span>';
+            return '<tr>'
+                + '<td><a href="/app/talent-pool-log/' + encodeURIComponent(l.name) + '" class="tp-log-link" data-name="'
+                + esc(l.name) + '">' + esc(l.name) + '</a></td>'
+                + '<td>' + pill + '</td>'
+                + '<td>' + esc(fmtDate(l.moved_on)) + '</td>'
+                + '<td>' + esc(userName(l.moved_by)) + '</td>'
+                + '<td>' + esc(l.status_before || '—') + '</td>'
+                + '<td>' + esc(l.remarks || '') + '</td>'
+                + '<td>' + esc(email) + '</td>'
+                + '<td>' + esc(fmtDate(l.resumed_on) || '—') + '</td>'
+                + '<td>' + esc(userName(l.resumed_by)) + '</td>'
+                + '<td>' + esc(l.resumed_to_status || '—') + '</td>'
+                + '<td style="text-align:right">' + esc(days) + '</td>'
+                + '</tr>';
+        }).join('');
+        var total = logs.reduce(function (s, l) {
+            return s + (l.status === 'In Talent Pool' ? (l.days_so_far || 0) : (l.days_in_pool || 0));
+        }, 0);
+
+        var html = '<p class="text-muted small" style="margin-bottom:8px">'
+            + __('{0} stay(s) in the Talent Pool, {1} day(s) in total. These days are left out of the Cycle Time report.',
+                [logs.length, total]) + '</p>'
+            + '<div style="overflow-x:auto"><table class="table table-bordered table-sm" style="font-size:12px;margin:0">'
+            + '<thead><tr>' + head.map(function (h) { return '<th style="white-space:nowrap">' + esc(h) + '</th>'; }).join('')
+            + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+
+        var canLog = frappe.model.can_read('Talent Pool Log');
+        var d = new frappe.ui.Dialog({
+            title: __('Talent Pool Records – {0}', [frm.doc.name]),
+            size: 'extra-large',
+            fields: [{ fieldtype: 'HTML', fieldname: 'body', options: html }],
+            primary_action_label: canLog ? __('Open in Talent Pool Log list') : __('Close'),
+            primary_action: function () {
+                d.hide();
+                if (canLog) {
+                    frappe.set_route('List', 'Talent Pool Log', {
+                        reference_doctype: frm.doctype,
+                        reference_name: frm.doc.name,
+                    });
+                }
+            },
+        });
+        // Log IDs open in the desk (no full page reload); only when the
+        // user may read the Talent Pool Log, otherwise plain text.
+        d.$wrapper.on('click', '.tp-log-link', function (e) {
+            e.preventDefault();
+            if (!canLog) return;
+            d.hide();
+            frappe.set_route('Form', 'Talent Pool Log', $(this).attr('data-name'));
+        });
+        d.$wrapper.find('.tp-log-link').css(canLog
+            ? { textDecoration: 'underline' }
+            : { color: 'inherit', cursor: 'default' });
+        d.show();
+    }
+
     // ── Form ───────────────────────────────────────────────────────────
     function formSetup(frm) {
         if (frm.is_new() || !frm.fields_dict.application_status) return;
@@ -196,6 +274,20 @@
                 if (!info || frm.doc.name !== docname) return;
                 var o = info.open;
                 if (o) frm._tp_before = o.status_before || null;
+
+                // "Talent Pool Records (N)" button whenever the application
+                // has ever been in the pool (open stay first, then past ones).
+                var logs = (o ? [o] : []).concat(info.history || []);
+                if (logs.length) {
+                    frm.add_custom_button(__('Talent Pool Records ({0})', [logs.length]), function () {
+                        recordsDialog(frm, logs);
+                    });
+                    frm.$wrapper.off('click.tp_records').on('click.tp_records', '.tp-view-records', function (e) {
+                        e.preventDefault();
+                        recordsDialog(frm, logs);
+                    });
+                }
+
                 var html = '';
                 if (o && inPool) {
                     html = __('In Talent Pool since <b>{0}</b> ({1} day(s)), moved by {2}. Status before: <b>{3}</b>.', [
@@ -212,6 +304,7 @@
                     }).join(', ');
                     html += (html ? '<br>' : '') + __('Earlier in Talent Pool: {0} — {1} day(s) in total, left out of cycle time.', [past, info.total_days]);
                 }
+                if (html) html += ' <a href="#" class="tp-view-records" style="font-weight:600">' + __('View records') + '</a>';
                 if (html && frm.dashboard) frm.dashboard.add_comment(html, inPool ? 'blue' : 'gray', false);
             },
         });

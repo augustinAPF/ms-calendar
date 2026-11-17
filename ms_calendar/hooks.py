@@ -762,7 +762,7 @@ app_include_js = [
     "/assets/ms_calendar/js/workspace_layout.js?v=2",
     # Talent Pool: Move / Resume buttons on the 5 unit registration forms and
     # in their list Actions menu. Manual "?v=" cache-buster: bump on change.
-    "/assets/ms_calendar/js/talent_pool.js?v=1",
+    "/assets/ms_calendar/js/talent_pool.js?v=2",
     # "pathways_redirect.js" was never actually added to public/js/ (checked
     # git history — no commit ever created it), so this line 404s on every
     # single desk page load, for every user, since app_include_js is loaded
