@@ -108,9 +108,22 @@ _OTP_SENDER_BY_FORM = {
 }
 _DEFAULT_OTP_SENDER = _OTP_SENDER_BY_FORM["Field Registration Form"]
 
+# Health Registration Form serves both fellowship and job openings. The
+# Sub Unit (department, filled from the job-opening link) decides the
+# mailbox: any fellowship sub unit (Health Equity Fellowship, MBBS
+# Fellowship, ...) -> health.fellowship@, every other sub unit -> health.jobs@.
+_HEALTH_FELLOWSHIP_SENDER = "health.fellowship@azimpremjifoundation.org"
+
+
+def _get_otp_sender(doctype, sub_unit=None):
+    sender, form_label = _OTP_SENDER_BY_FORM.get(doctype, _DEFAULT_OTP_SENDER)
+    if doctype == "Health Registration Form" and "fellowship" in (sub_unit or "").lower():
+        sender = _HEALTH_FELLOWSHIP_SENDER
+    return sender, form_label
+
 
 @frappe.whitelist(allow_guest=True)
-def send_email_otp(email, doctype=None):
+def send_email_otp(email, doctype=None, sub_unit=None):
     email = (email or "").strip().lower()
     if not email or "@" not in email:
         return {"success": False, "message": "Enter a valid email address."}
@@ -122,7 +135,7 @@ def send_email_otp(email, doctype=None):
             "message": "Please wait a moment before requesting another OTP.",
         }
 
-    sender, form_label = _OTP_SENDER_BY_FORM.get(doctype, _DEFAULT_OTP_SENDER)
+    sender, form_label = _get_otp_sender(doctype, sub_unit)
 
     otp = str(random.randint(100000, 999999))
     cache_key = f"field_reg_email_otp_{email}"
