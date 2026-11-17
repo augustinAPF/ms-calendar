@@ -1030,6 +1030,43 @@ def _candidate_panel_html(hybrid, InterviewersName, online_names):
     return _interview_schedule_candidate_panel_html(True, InterviewersName, online_names)
 
 
+def _candidate_invite_subject(interview_date, subline):
+    """Subject of the candidate's "interview scheduled" email (also used by
+    Send Again, so a re-sent copy reads exactly like the first one)."""
+    return f"Discussion – Azim Premji Foundation ({interview_date}){subline}"
+
+
+def _candidate_invite_body(
+    Applicants_name,
+    Applicants_Role,
+    interview_date,
+    start_time,
+    end_time,
+    mode_label,
+    map_html,
+    panel_html,
+    candidate_meeting_html,
+    logo_html,
+):
+    """Body of the candidate's "interview scheduled" email — shared by
+    create_interview_event and send_interview_email_again."""
+    return f"""
+    <p>Hi {Applicants_name},</p>
+    <p>Kindly find the details of the interview scheduled:</p>
+    <div style="border:1px solid #e3e3e3;border-radius:10px;padding:14px;background:#f9fafb;">
+    <p><strong>Role:</strong> {Applicants_Role}</p>
+    <p><strong>Date:</strong> {interview_date}</p>
+    <p><strong>Time:</strong> {start_time} – {end_time}</p>
+    <p><strong>Mode:</strong> {mode_label}</p>
+    {map_html}
+    {panel_html}
+    </div>
+    {candidate_meeting_html}
+    <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
+    {logo_html}
+    """
+
+
 @frappe.whitelist()
 def create_interview_event(
     start_datetime,
@@ -1238,21 +1275,18 @@ def create_interview_event(
     # (the Teams call is for the online panel to join).
     candidate_meeting_html = "" if hybrid else meeting_html
 
-    candidate_body = f"""
-    <p>Hi {Applicants_name},</p>
-    <p>Kindly find the details of the interview scheduled:</p>
-    <div style="border:1px solid #e3e3e3;border-radius:10px;padding:14px;background:#f9fafb;">
-    <p><strong>Role:</strong> {Applicants_Role}</p>
-    <p><strong>Date:</strong> {interview_date}</p>
-    <p><strong>Time:</strong> {start_time} – {end_time}</p>
-    <p><strong>Mode:</strong> {mode_label}</p>
-    {map_html}
-    {_candidate_panel_html(hybrid, InterviewersName, online_names)}
-    </div>
-    {candidate_meeting_html}
-    <p>Regards,<br>People Function<br>Azim Premji Foundation</p>
-    {logo_html}
-    """
+    candidate_body = _candidate_invite_body(
+        Applicants_name,
+        Applicants_Role,
+        interview_date,
+        start_time,
+        end_time,
+        mode_label,
+        map_html,
+        _candidate_panel_html(hybrid, InterviewersName, online_names),
+        candidate_meeting_html,
+        logo_html,
+    )
 
     # Attendees + body in one PATCH — this is what sends the Outlook invite.
     requests.patch(
@@ -1273,7 +1307,7 @@ def create_interview_event(
         enqueue_after_commit=True,
         recipients=[interviewee_email],
         sender=Organizer_email,
-        subject=f"Discussion – Azim Premji Foundation ({interview_date}){_subline}",
+        subject=_candidate_invite_subject(interview_date, _subline),
         message=candidate_body,
         delayed=False,
     )
@@ -1813,6 +1847,299 @@ def cancel_interview_event(name):
     frappe.msgprint("✅ Interview cancelled — candidate and interviewer(s) notified.")
 
     return {"cancelled": True}
+
+
+# ── Send Again ─────────────────────────────────────────────────────────────
+# The form's "Send Again" button lists everyone on the interview (candidate,
+# interviewers, Hybrid online panel, CC) with a tick box each; the ticked ones
+# get the same email they got when it was scheduled:
+#   • panel (interviewers / online panel / CC) — an email from the organizer
+#     with the Outlook invite's own subject + body (Teams link, feedback
+#     button) and its attachments. The calendar entry they already have is
+#     untouched, and nobody else on the invite is notified.
+#   • candidate — the same "Discussion – Azim Premji Foundation" email,
+#     rebuilt from the record's current details.
+# Both are sent from the organizer's own mailbox (Graph sendMail — see
+# _send_from_organizer), not through a Frappe Email Account.
+
+
+def _schedule_interview_mode(doc):
+    # Blank on records made before Interview Mode existed — same fallback as
+    # the form (get_interview_mode in philanthropy_interview_schedule.js).
+    return doc.get("interview_mode") or ("Online" if doc.get("interview_type") else "Offline")
+
+
+def _send_again_groups(doc):
+    """Everyone on this interview, by group, each address once. The
+    candidate is never in a panel group (same rule as the invite)."""
+    candidate = (doc.get("attendees") or "").strip()
+    seen = {candidate.lower()} if candidate else set()
+
+    def emails(rows):
+        out = []
+        for row in rows or []:
+            email = (row.interviewer_email or "").strip()
+            if email and email.lower() not in seen:
+                seen.add(email.lower())
+                out.append(email)
+        return out
+
+    interviewers = emails(doc.get("interviewer_email"))
+    online_panel = (
+        emails(doc.get("hybrid_interview_email"))
+        if _is_hybrid(_schedule_interview_mode(doc))
+        else []
+    )
+    cc = emails(doc.get("interviewers_cc_email"))
+    return {
+        "candidate": candidate,
+        "interviewers": interviewers,
+        "online_panel": online_panel,
+        "cc": cc,
+    }
+
+
+def _scheduled_doc_for_send_again(name):
+    doc = frappe.get_doc("Philanthropy Interview Schedule", name)
+    doc.check_permission("write")
+    if doc.is_cancelled or not doc.event_id:
+        frappe.throw("This interview is not scheduled (or was cancelled) — there is no email to send again.")
+    if not (doc.organizer_email or "").strip():
+        frappe.throw("Organizer Email is empty on this record.")
+    return doc
+
+
+@frappe.whitelist()
+def get_send_again_recipients(name):
+    """Groups for the Send Again popup, with each person's name."""
+    doc = _scheduled_doc_for_send_again(name)
+    groups = _send_again_groups(doc)
+    names = _field_panelist_names(
+        groups["interviewers"] + groups["online_panel"] + groups["cc"]
+    )
+
+    def rows(emails):
+        return [{"email": e, "name": names.get(e.lower()) or ""} for e in emails]
+
+    return {
+        "candidate": (
+            {"email": groups["candidate"], "name": doc.get("applicants_name") or ""}
+            if groups["candidate"]
+            else None
+        ),
+        "interviewers": rows(groups["interviewers"]),
+        "online_panel": rows(groups["online_panel"]),
+        "cc": rows(groups["cc"]),
+    }
+
+
+def _candidate_body_from_doc(doc, groups, event_json, headers, event_url):
+    """The candidate's scheduled-interview email, built from the record the
+    same way create_interview_event builds it from the form."""
+    mode = _schedule_interview_mode(doc)
+    is_online, show_venue, mode_label = _resolve_interview_mode(mode, doc.get("interview_type"))
+    hybrid = _is_hybrid(mode)
+
+    start_dt = get_datetime(f"{doc.interview_date} {doc.start_time}")
+    end_dt = get_datetime(f"{doc.interview_date} {doc.end_time}")
+    interview_date = start_dt.strftime("%d %B %Y")
+
+    _location, address, map_location = _resolve_venue(
+        doc.name, doc.get("google_map"), doc.get("location_address"), doc.get("google_map_link")
+    )
+    map_html = _venue_html(address, map_location) if show_venue else ""
+
+    # Hybrid: the candidate attends in person — no Teams link for them.
+    candidate_meeting_html = ""
+    if is_online == 1 and not hybrid:
+        join_web_url, join_meeting_id, join_passcode = _fetch_teams_join_details(
+            headers, doc.organizer_email.strip(), event_url, event_json=event_json, poll=False
+        )
+        candidate_meeting_html = _teams_meeting_html(join_web_url, join_meeting_id, join_passcode)
+
+    # Panel names as the form sends them at scheduling time: every row of
+    # Interviewer's Email (the candidate filter is only for who gets the
+    # panel invite), and the online panel minus anyone already in person.
+    in_person = list(dict.fromkeys(
+        (row.interviewer_email or "").strip()
+        for row in doc.get("interviewer_email") or []
+        if (row.interviewer_email or "").strip()
+    ))
+    online = [e for e in groups["online_panel"] if e not in in_person]
+    names = _field_panelist_names(in_person + online)
+    interviewers_name = ", ".join(names.get(e.lower()) or e for e in in_person)
+    online_names = ", ".join(names.get(e.lower()) or e for e in online)
+
+    body = _candidate_invite_body(
+        doc.get("applicants_name") or "",
+        doc.get("role") or "",
+        interview_date,
+        start_dt.strftime("%I:%M %p"),
+        end_dt.strftime("%I:%M %p"),
+        mode_label,
+        map_html,
+        _candidate_panel_html(hybrid, interviewers_name, online_names),
+        candidate_meeting_html,
+        _logo_html(),
+    )
+    subject = _candidate_invite_subject(
+        interview_date, _theme_geo_subline(doc.get("theme"), doc.get("geo"))
+    )
+    return subject, body
+
+
+def _event_attachments_for_email(headers, event_url):
+    """The Outlook invite's file attachments (CV, feedback PDF, assignment)
+    as [(file name, base64 content)]. A failure only logs — the email still
+    goes out with the invite text."""
+    try:
+        res = requests.get(f"{event_url}/attachments", headers=headers)
+        res.raise_for_status()
+        return [
+            (a["name"], a["contentBytes"])
+            for a in res.json().get("value", [])
+            if a.get("@odata.type") == "#microsoft.graph.fileAttachment" and a.get("contentBytes")
+        ]
+    except Exception:
+        frappe.log_error(
+            title="PHILANTHROPY_INTERVIEW_SEND_AGAIN_ATTACHMENTS",
+            message=frappe.get_traceback(),
+        )
+        return []
+
+
+def _send_from_organizer(headers, organizer, recipients, subject, html, attachments=None):
+    """Sends the email From the organizer's address (e.g.
+    grants.recruitment@…), never from some other account:
+      1. the organizer has an outgoing Email Account on this site (production
+         has "Grants || Azim Premji Foundation") → frappe.sendmail through it;
+      2. otherwise Microsoft Graph sendMail from the organizer's mailbox —
+         needs the Azure app's Mail.Send permission (403 without it);
+      3. if that fails too, frappe.sendmail through the default account
+         (whose address then shows as From) and the reason is logged."""
+    attachments = attachments or []
+    has_account = frappe.db.exists(
+        "Email Account", {"email_id": organizer, "enable_outgoing": 1}
+    )
+    if has_account:
+        _queue_organizer_mail(organizer, recipients, subject, html, attachments)
+        return
+    try:
+        res = requests.post(
+            f"https://graph.microsoft.com/v1.0/users/{organizer}/sendMail",
+            headers=headers,
+            json={
+                "message": {
+                    "subject": subject,
+                    "body": {"contentType": "HTML", "content": html},
+                    "toRecipients": [{"emailAddress": {"address": r}} for r in recipients],
+                    "attachments": [
+                        {
+                            "@odata.type": "#microsoft.graph.fileAttachment",
+                            "name": fname,
+                            "contentBytes": b64,
+                        }
+                        for fname, b64 in attachments
+                    ],
+                },
+                "saveToSentItems": True,
+            },
+            timeout=60,
+        )
+        res.raise_for_status()
+        return
+    except Exception:
+        frappe.log_error(
+            title="PHILANTHROPY_INTERVIEW_SEND_AGAIN_GRAPH_MAIL",
+            message=(
+                f"Graph sendMail from {organizer} to {recipients} failed (no Email Account "
+                f"for {organizer} on this site either), sent with frappe.sendmail through "
+                f"the default account instead:\n{frappe.get_traceback()}"
+            ),
+        )
+    _queue_organizer_mail(organizer, recipients, subject, html, attachments)
+
+
+def _queue_organizer_mail(organizer, recipients, subject, html, attachments):
+    """frappe.sendmail with sender=organizer — Frappe picks the Email
+    Account whose address matches the sender, if there is one."""
+    frappe.enqueue(
+        "frappe.sendmail",
+        queue="short",
+        enqueue_after_commit=True,
+        recipients=recipients,
+        sender=organizer,
+        subject=subject,
+        message=html,
+        attachments=[
+            {"fname": fname, "fcontent": base64.b64decode(b64)} for fname, b64 in attachments
+        ],
+        delayed=False,
+    )
+
+
+@frappe.whitelist()
+def send_interview_email_again(name, emails=None, include_candidate=0):
+    """Re-sends the interview email to the ticked people only — see the
+    Send Again note above. `emails` are panel addresses; anything not on
+    this record is ignored."""
+    doc = _scheduled_doc_for_send_again(name)
+    groups = _send_again_groups(doc)
+
+    if isinstance(emails, str):
+        emails = frappe.parse_json(emails) if emails.strip().startswith("[") else emails.split(",")
+    on_record = {
+        e.lower(): e for e in groups["interviewers"] + groups["online_panel"] + groups["cc"]
+    }
+    panel = []
+    for email in emails or []:
+        email = on_record.get((email or "").strip().lower())
+        if email and email not in panel:
+            panel.append(email)
+    include_candidate = bool(frappe.utils.cint(include_candidate) and groups["candidate"])
+
+    if not panel and not include_candidate:
+        frappe.throw("Tick at least one email to send the interview email again.")
+
+    organizer = doc.organizer_email.strip()
+    headers = _graph_headers()
+    event_url = f"https://graph.microsoft.com/v1.0/users/{organizer}/events/{doc.event_id}"
+
+    res = requests.get(
+        event_url,
+        headers=headers,
+        params={"$select": "id,subject,isOnlineMeeting,onlineMeeting,body"},
+    )
+    if res.status_code == 404:
+        frappe.throw(
+            "The Outlook invite for this interview no longer exists (it was probably deleted "
+            "in Outlook). Use Modify The Schedule and Save to send a fresh invite."
+        )
+    res.raise_for_status()
+    event_json = res.json()
+
+    if panel:
+        # Not Graph's event /forward: Exchange accepts it (202) but sends
+        # nothing to someone who is already on the invite — and everyone in
+        # this list is. So the invite's own subject + body (Teams link,
+        # feedback button) and its attachments go out as a normal email from
+        # the organizer's mailbox.
+        _send_from_organizer(
+            headers,
+            organizer,
+            panel,
+            event_json.get("subject") or f"Discussion with {doc.get('applicants_name') or ''}",
+            (event_json.get("body") or {}).get("content") or "",
+            _event_attachments_for_email(headers, event_url),
+        )
+
+    if include_candidate:
+        subject, body = _candidate_body_from_doc(doc, groups, event_json, headers, event_url)
+        _send_from_organizer(headers, organizer, [groups["candidate"]], subject, body)
+
+    sent = panel + ([groups["candidate"]] if include_candidate else [])
+    doc.add_comment("Info", "Interview email sent again to: " + ", ".join(sent))
+    return {"sent": sent}
 
 
 _FEEDBACK_REMINDER_FIELDS = [
