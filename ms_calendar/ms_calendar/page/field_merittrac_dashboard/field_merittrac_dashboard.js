@@ -103,8 +103,8 @@ class FieldMeritTracDashboard {
 						<span class="fmd-muted fmd-presets-note">${__('Dates = day the test was taken (or window start if not taken)')}</span>
 					</div>
 					<div class="fmd-filter-row">
-						<div class="fmd-f"><label>${__('From')}</label><input type="date" id="fmd-from"></div>
-						<div class="fmd-f"><label>${__('To')}</label><input type="date" id="fmd-to"></div>
+						<div class="fmd-f"><label>${__('Test date from')}</label><input type="date" id="fmd-from"></div>
+						<div class="fmd-f"><label>${__('Test date to')}</label><input type="date" id="fmd-to"></div>
 						<div class="fmd-f"><label>${__('Department')}</label><div class="fmd-ms" id="fmd-ms-dept" data-placeholder="${__('All departments')}"></div></div>
 						<div class="fmd-f"><label>${__('Role')}</label><div class="fmd-ms" id="fmd-ms-role" data-placeholder="${__('All roles')}"></div></div>
 						<div class="fmd-f"><label>${__('Subject')}</label><div class="fmd-ms" id="fmd-ms-subject" data-placeholder="${__('All subjects')}"></div></div>
@@ -168,6 +168,15 @@ class FieldMeritTracDashboard {
 							<button data-t="results">${__('Field MeritTrac Test Result')} <span class="fmd-badge" id="fmd-raw-n-results">0</span></button>
 						</div>
 						<input type="text" class="fmd-search" id="fmd-raw-search" placeholder="${__('Search any field…')}">
+					</div>
+					<div class="fmd-raw-filters">
+						<div class="fmd-f"><label>${__('Test date from')}</label><input type="date" id="fmd-raw-tfrom"></div>
+						<div class="fmd-f"><label>${__('Test date to')}</label><input type="date" id="fmd-raw-tto"></div>
+						<div class="fmd-f" title="${__('Day the record was created')}"><label>${__('Created from')}</label><input type="date" id="fmd-raw-cfrom"></div>
+						<div class="fmd-f" title="${__('Day the record was created')}"><label>${__('Created to')}</label><input type="date" id="fmd-raw-cto"></div>
+						<div class="fmd-f"><label>${__('Created by')}</label><div class="fmd-ms" id="fmd-raw-owner" data-placeholder="${__('Anyone')}"></div></div>
+						<div class="fmd-f fmd-f-btns"><button class="btn btn-default btn-sm" id="fmd-raw-clear">${__('Clear')}</button></div>
+						<span class="fmd-muted fmd-raw-count" id="fmd-raw-count"></span>
 					</div>
 					<div class="fmd-table-scroll fmd-raw" id="fmd-raw-table"></div>
 				</div>
@@ -253,6 +262,15 @@ class FieldMeritTracDashboard {
 			this.render_raw();
 		});
 		$c.find('#fmd-raw-search').on('input', frappe.utils.debounce(() => this.render_raw(), 250));
+		// Full data filters: applied on the page straight away (no reload);
+		// the CSV / Excel of this section follow them.
+		this.raw_owner = this.make_multiselect($c.find('#fmd-raw-owner'), () => this.render_raw());
+		$c.find('#fmd-raw-tfrom, #fmd-raw-tto, #fmd-raw-cfrom, #fmd-raw-cto').on('change', () => this.render_raw());
+		$c.find('#fmd-raw-clear').on('click', () => {
+			$c.find('#fmd-raw-tfrom, #fmd-raw-tto, #fmd-raw-cfrom, #fmd-raw-cto, #fmd-raw-search').val('');
+			this.raw_owner.clear();
+			this.render_raw();
+		});
 		$c.find('#fmd-raw-csv').on('click', () => {
 			const t = this.raw_tab;
 			this.export_csv(`field-merittrac-${t === 'links' ? 'test-url' : 'test-result'}-${this.range_slug()}`,
@@ -300,10 +318,14 @@ class FieldMeritTracDashboard {
 	// Same chip multiselect as the Field Interview Dashboard / Reports page
 	// (search, Select all / Clear, checkbox list), so filters look and
 	// behave alike across dashboards.
-	make_multiselect($el) {
+	make_multiselect($el, on_change) {
+		const changed = () => { if (on_change) on_change(); };
 		const esc = (v) => this.esc(v);
 		const placeholder = $el.data('placeholder') || __('All');
 		let options = [];
+		// value → shown text (e.g. user id → full name); plain strings show as-is.
+		let labels = {};
+		const lab = (v) => labels[v] || v;
 		let selected = [];
 		$el.html(`
 			<div class="fmd-ms-box"></div>
@@ -320,15 +342,15 @@ class FieldMeritTracDashboard {
 			$box.empty();
 			if (!selected.length) { $box.append(`<span class="fmd-ms-ph">${esc(placeholder)}</span>`); return; }
 			selected.slice(0, 2).forEach(v => $box.append(
-				`<span class="fmd-ms-chip" title="${esc(v)}"><span class="txt">${esc(v)}</span><span class="x" data-v="${esc(v)}">&times;</span></span>`));
+				`<span class="fmd-ms-chip" title="${esc(v)}"><span class="txt">${esc(lab(v))}</span><span class="x" data-v="${esc(v)}">&times;</span></span>`));
 			if (selected.length > 2) $box.append(`<span class="fmd-ms-more">+${selected.length - 2}</span>`);
 		};
 		const render_list = () => {
 			const q = ($search.val() || '').toLowerCase();
-			const matches = options.filter(v => v.toLowerCase().includes(q));
+			const matches = options.filter(v => v.toLowerCase().includes(q) || lab(v).toLowerCase().includes(q));
 			$list.html(matches.length ? matches.map(v => `
 				<label class="fmd-ms-opt"><input type="checkbox" data-v="${esc(v)}" ${selected.includes(v) ? 'checked' : ''}>
-				<span>${esc(v)}</span></label>`).join('') : `<div class="fmd-ms-empty">${__('No matches')}</div>`);
+				<span>${esc(lab(v))}</span></label>`).join('') : `<div class="fmd-ms-empty">${__('No matches')}</div>`);
 		};
 		$box.on('click', (e) => {
 			if ($(e.target).hasClass('x')) return;
@@ -340,24 +362,30 @@ class FieldMeritTracDashboard {
 			e.stopPropagation();
 			const v = String($(e.currentTarget).data('v'));
 			selected = selected.filter(s => s !== v);
-			render_box(); render_list();
+			render_box(); render_list(); changed();
 		});
 		$search.on('input', render_list);
 		$list.on('change', 'input', (e) => {
 			const v = String($(e.currentTarget).data('v'));
 			selected = e.currentTarget.checked ? [...new Set([...selected, v])] : selected.filter(s => s !== v);
-			render_box();
+			render_box(); changed();
 		});
 		$el.find('.fmd-ms-all').on('click', (e) => {
 			e.stopPropagation();
 			const q = ($search.val() || '').toLowerCase();
-			selected = [...new Set([...selected, ...options.filter(v => v.toLowerCase().includes(q))])];
-			render_box(); render_list();
+			selected = [...new Set([...selected, ...options.filter(v => v.toLowerCase().includes(q) || lab(v).toLowerCase().includes(q))])];
+			render_box(); render_list(); changed();
 		});
-		$el.find('.fmd-ms-none').on('click', (e) => { e.stopPropagation(); selected = []; render_box(); render_list(); });
+		$el.find('.fmd-ms-none').on('click', (e) => { e.stopPropagation(); selected = []; render_box(); render_list(); changed(); });
 		render_box();
 		return {
-			setOptions(opts) { options = opts.slice(); selected = selected.filter(s => options.includes(s)); render_box(); },
+			setOptions(opts) {
+				labels = {};
+				options = (opts || []).map(o => {
+					if (o && typeof o === 'object') { labels[o.value] = o.label || o.value; return o.value; }
+					return o;
+				});
+				selected = selected.filter(s => options.includes(s)); render_box(); },
 			setVal(vals) { selected = (vals || []).filter(s => options.includes(s)); render_box(); },
 			val() { return selected.slice(); },
 			clear() { selected = []; render_box(); }
@@ -390,6 +418,7 @@ class FieldMeritTracDashboard {
 				this.ms.role.setOptions(o.roles || []);
 				this.ms.subject.setOptions(o.subjects || []);
 				this.ms.status.setOptions(o.statuses || []);
+				this.raw_owner.setOptions(o.creators || []);
 				if (filters) {
 					this.ms.dept.setVal(f.departments); this.ms.role.setVal(f.roles);
 					this.ms.subject.setVal(f.subjects); this.ms.status.setVal(f.statuses);
@@ -772,12 +801,32 @@ class FieldMeritTracDashboard {
 		return (t === 'links' ? this.data.link_records : this.data.result_records) || [];
 	}
 
-	filtered_raw_rows(t) {
-		const all = this.raw_records(t);
-		const q = (this.$root.find('#fmd-raw-search').val() || '').toLowerCase().trim();
-		if (!q) return all;
+	// The Full data filters (Test date / Created date / Created by), as sent
+	// to the Excel download too.
+	raw_filters() {
+		const $c = this.$root;
+		return {
+			test_from: $c.find('#fmd-raw-tfrom').val() || '',
+			test_to: $c.find('#fmd-raw-tto').val() || '',
+			created_from: $c.find('#fmd-raw-cfrom').val() || '',
+			created_to: $c.find('#fmd-raw-cto').val() || '',
+			created_by: this.raw_owner ? this.raw_owner.val() : []
+		};
+	}
+
+	filtered_raw_rows(t, skip_search) {
+		const f = this.raw_filters();
+		const between = (d, from, to) => !((from && (!d || d < from)) || (to && (!d || d > to)));
+		let rows = this.raw_records(t).filter(r => {
+			const created = String(r.creation || '').slice(0, 10);
+			return between(String(r._test_date || ''), f.test_from, f.test_to)
+				&& between(created, f.created_from, f.created_to)
+				&& (!f.created_by.length || f.created_by.includes(r.owner));
+		});
+		const q = skip_search ? '' : (this.$root.find('#fmd-raw-search').val() || '').toLowerCase().trim();
+		if (!q) return rows;
 		const keys = ((t === 'links' ? this.data.link_columns : this.data.result_columns) || []).map(c => c.fieldname);
-		return all.filter(r => keys.some(k => r[k] !== null && r[k] !== undefined && String(r[k]).toLowerCase().includes(q)));
+		return rows.filter(r => keys.some(k => r[k] !== null && r[k] !== undefined && String(r[k]).toLowerCase().includes(q)));
 	}
 
 	render_raw() {
@@ -785,8 +834,11 @@ class FieldMeritTracDashboard {
 		const $c = this.$root;
 		const t = this.raw_tab;
 		$c.find('#fmd-raw-tabs button').each((i, b) => $(b).toggleClass('is-on', $(b).data('t') === t));
-		$c.find('#fmd-raw-n-links').text((this.data.link_records || []).length);
-		$c.find('#fmd-raw-n-results').text((this.data.result_records || []).length);
+		// Badges = records left after the Full data filters (search excluded).
+		$c.find('#fmd-raw-n-links').text(this.filtered_raw_rows('links', true).length);
+		$c.find('#fmd-raw-n-results').text(this.filtered_raw_rows('results', true).length);
+		const shown = this.filtered_raw_rows(t).length, total = this.raw_records(t).length;
+		$c.find('#fmd-raw-count').text(shown === total ? '' : __('{0} of {1} records', [shown, total]));
 		const cols = this.raw_columns(t);
 		const $el = $c.find('#fmd-raw-table');
 		if (!cols.length) {
@@ -806,6 +858,13 @@ class FieldMeritTracDashboard {
 		Object.entries(this.applied || {}).forEach(([k, v]) => {
 			if (v !== null && v !== undefined && v !== '' && v !== '[]') params[k] = v;
 		});
+		// + the Full data section's own filters (records only).
+		const rf = this.raw_filters();
+		if (rf.test_from) params.rec_test_from = rf.test_from;
+		if (rf.test_to) params.rec_test_to = rf.test_to;
+		if (rf.created_from) params.rec_created_from = rf.created_from;
+		if (rf.created_to) params.rec_created_to = rf.created_to;
+		if (rf.created_by.length) params.rec_created_by = JSON.stringify(rf.created_by);
 		open_url_post('/api/method/' + FMD_API + 'download_data', params);
 		frappe.show_alert({ message: __('Preparing Excel…'), indicator: 'blue' }, 3);
 	}
@@ -1138,6 +1197,9 @@ const FMD_CSS = `
 .fmd-score-track { height:5px; background:var(--track); border-radius:99px; overflow:hidden; margin-top:3px; }
 .fmd-score-track > div { height:100%; border-radius:99px; }
 /* full data tabs */
+.fmd-raw-filters { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; padding:8px 14px 10px; border-bottom:1px solid var(--border); }
+.fmd-raw-filters .fmd-ms { min-width:180px; }
+.fmd-raw-count { font-size:12px; align-self:center; margin-left:auto; }
 .fmd-tabs-bar { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;
 	padding:10px 14px; border-bottom:1px solid var(--border-soft); background:var(--bg-soft); }
 .fmd-tabs { display:inline-flex; gap:4px; background:var(--track); padding:3px; border-radius:10px; flex-wrap:wrap; }

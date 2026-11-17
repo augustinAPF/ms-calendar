@@ -212,7 +212,7 @@ def _clean_text(value):
 
 @frappe.whitelist()
 def get_dashboard_data(from_date=None, to_date=None, departments=None, roles=None,
-                       subjects=None, statuses=None):
+                       subjects=None, statuses=None, created_from=None, created_to=None, created_by=None):
     """
     One row per applicant who was sent a MeritTrac link and/or has a result,
     restricted to what the user can read, plus the full records of both
@@ -220,12 +220,15 @@ def get_dashboard_data(from_date=None, to_date=None, departments=None, roles=Non
     user's rows; cards / tables / drilldowns are derived on the page.
     """
     _check_read()
-    return _build(from_date, to_date, departments, roles, subjects, statuses)
+    return _build(from_date, to_date, departments, roles, subjects, statuses,
+                  created_from, created_to, created_by)
 
 
 @frappe.whitelist(methods=["POST"])
 def download_data(kind="both", from_date=None, to_date=None, departments=None, roles=None,
-                  subjects=None, statuses=None):
+                  subjects=None, statuses=None, created_from=None, created_to=None, created_by=None,
+                  rec_test_from=None, rec_test_to=None, rec_created_from=None, rec_created_to=None,
+                  rec_created_by=None):
     """
     Excel download of the "Full data" tables for the applied filters — the
     same permission-scoped _build the page uses, so the file can never hold
@@ -234,7 +237,25 @@ def download_data(kind="both", from_date=None, to_date=None, departments=None, r
     _check_read()
     if kind not in ("links", "results", "both"):
         frappe.throw("Unknown download")
-    data = _build(from_date, to_date, departments, roles, subjects, statuses)
+    data = _build(from_date, to_date, departments, roles, subjects, statuses,
+                  created_from, created_to, created_by)
+
+    # The "Full data" section's own filters (Test date / Created date /
+    # Created by), applied to each record the same way the page does.
+    owners = set(_str_list(rec_created_by))
+
+    def rec_ok(rec):
+        test_d = str(rec.get("_test_date") or "")
+        created_d = str(rec.get("creation") or "")[:10]
+        for d, lo, hi in ((test_d, rec_test_from, rec_test_to), (created_d, rec_created_from, rec_created_to)):
+            if lo and (not d or d < str(getdate(lo))):
+                return False
+            if hi and (not d or d > str(getdate(hi))):
+                return False
+        return not owners or rec.get("owner") in owners
+
+    data["link_records"] = [r for r in data["link_records"] if rec_ok(r)]
+    data["result_records"] = [r for r in data["result_records"] if rec_ok(r)]
 
     def sheet(columns, records):
         return [[c["label"] for c in columns]] + [[r.get(c["fieldname"]) for c in columns] for r in records]
@@ -289,12 +310,20 @@ def _xlsx(sheets):
     return buf.getvalue()
 
 
-def _build(from_date=None, to_date=None, departments=None, roles=None, subjects=None, statuses=None):
+def _build(from_date=None, to_date=None, departments=None, roles=None, subjects=None, statuses=None,
+           created_from=None, created_to=None, created_by=None):
     now = now_datetime()
     from_date = getdate(from_date) if from_date else None
     to_date = getdate(to_date) if to_date else None
     if from_date and to_date and from_date > to_date:
         from_date, to_date = to_date, from_date
+    # Created date / Created by = when / by whom the Test URL or Test Result
+    # record itself was made (its creation / owner), not the test date.
+    created_from = getdate(created_from) if created_from else None
+    created_to = getdate(created_to) if created_to else None
+    if created_from and created_to and created_from > created_to:
+        created_from, created_to = created_to, created_from
+    created_by = set(_str_list(created_by))
 
     departments = _str_list(departments)
     roles = _str_list(roles)
@@ -460,11 +489,17 @@ def _build(from_date=None, to_date=None, departments=None, roles=None, subjects=
     def distinct(key):
         return sorted({r[key] for r in rows if r[key]})
 
+    owners = sorted({x.owner for x in links + results if x.owner})
     options = {
         "departments": distinct("department"),
         "roles": distinct("role"),
         "subjects": distinct("subject"),
         "statuses": distinct("app_status"),
+        # [{value: user id, label: full name}] for the "Created by" filter.
+        "creators": sorted(
+            ({"value": u, "label": frappe.utils.get_fullname(u) or u} for u in owners),
+            key=lambda o: o["label"].lower(),
+        ),
     }
     all_time = {
         "applicants": len(rows),
@@ -479,7 +514,27 @@ def _build(from_date=None, to_date=None, departments=None, roles=None, subjects=
             return False
         return True
 
+    def created_ok(rec):
+        """One Test URL / Test Result record against the Created filters."""
+        d = str(getdate(rec.creation)) if rec.creation else ""
+        if created_from and (not d or d < str(created_from)):
+            return False
+        if created_to and (not d or d > str(created_to)):
+            return False
+        if created_by and rec.owner not in created_by:
+            return False
+        return True
+
+    created_filtered = bool(created_from or created_to or created_by)
+    # Applicants with at least one link / result inside the Created filters.
+    created_apps = (
+        {x.applicant_id for x in links + results if x.applicant_id and created_ok(x)}
+        if created_filtered else None
+    )
+
     def keep(r):
+        if created_apps is not None and r["application_id"] not in created_apps:
+            return False
         return in_range(r["test_date"]) and keep_attrs(r)
 
     def keep_attrs(r):
@@ -515,7 +570,7 @@ def _build(from_date=None, to_date=None, departments=None, roles=None, subjects=
     for l in reversed(links):
         start = _parse_window(l.start_time)
         d = getdate(start or l.creation)
-        if record_ok(l.applicant_id, d):
+        if record_ok(l.applicant_id, d) and (not created_filtered or created_ok(l)):
             rec = dict(l)
             rec["_test_date"] = str(d)
             link_records.append(rec)
@@ -523,7 +578,7 @@ def _build(from_date=None, to_date=None, departments=None, roles=None, subjects=
     result_records = []
     for r in reversed(results):
         d = getdate(r.created_at or r.creation)
-        if record_ok(r.applicant_id, d):
+        if record_ok(r.applicant_id, d) and (not created_filtered or created_ok(r)):
             rec = dict(r)
             rec["_test_date"] = str(d)
             result_records.append(rec)
@@ -600,6 +655,9 @@ def _build(from_date=None, to_date=None, departments=None, roles=None, subjects=
         "truncated": len(links) >= MAX_ROWS or len(results) >= MAX_ROWS,
         "from_date": str(from_date) if from_date else "",
         "to_date": str(to_date) if to_date else "",
+        "created_from": str(created_from) if created_from else "",
+        "created_to": str(created_to) if created_to else "",
+        "created_by": sorted(created_by),
         "now": now.strftime("%Y-%m-%d %H:%M"),
         "options": options,
         # All-time cards: ignore every filter, still permission-scoped.
