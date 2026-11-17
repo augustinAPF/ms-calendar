@@ -21,8 +21,20 @@ once, and the browser evaluating both threw
 """
 
 import os
+import re
 
 import frappe
+
+# Top-level names a script declares. Frappe joins all of a doctype's Form
+# Client Scripts into one function, so two scripts declaring the same
+# const / let / class break the whole form ("Identifier ... has already
+# been declared"); a shared function name marks a copy of the same script.
+_DECLARED_RE = re.compile(r"^(?:const|let|class)\s+([A-Za-z_$][\w$]*)", re.M)
+_TOP_LEVEL_RE = re.compile(r"^(?:const|let|class|function)\s+([A-Za-z_$][\w$]*)", re.M)
+
+
+def _names(pattern, script):
+    return set(pattern.findall(script or ""))
 
 # doctype name -> its form JS file, relative to this app's root folder
 # (frappe.get_app_path("ms_calendar") - the ms_calendar/ms_calendar module
@@ -68,11 +80,59 @@ CUSTOM_DOCTYPE_NAMED_CLIENT_SCRIPTS = [
 
 
 # Form JS that production keeps in its own, newer Client Scripts
-# ("Interview Schedule Meeting", "Health Interview Schedule", edited live):
-# the files here are older copies, so they only sync on a developer_mode site
-# (ms.local). On production a migrate would otherwise overwrite those live
-# scripts — or, for Field, whichever of its many Form scripts came first.
-DEV_ONLY_FORM_DOCTYPES = {"Field Interview Schedule", "Health Interview Schedule"}
+# ("Interview Schedule Meeting", "Health Interview Schedule",
+# "Philanthropy Interview Schedule", edited live on the site): the files
+# here can be older copies, so they only sync on a developer_mode site
+# (ms.local). On a cloud site a migrate would otherwise overwrite those live
+# scripts — on UAT (2026-11-05) it put an old copy of the Philanthropy form
+# JS into "Time Picker for Interview Schedule" next to the real one, and the
+# form broke with "Identifier 'SCHEDULE_LOCK_FIELDS' has already been
+# declared".
+DEV_ONLY_FORM_DOCTYPES = {
+    "Field Interview Schedule",
+    "Health Interview Schedule",
+    "Philanthropy Interview Schedule",
+}
+
+
+def _form_script_for(doctype, script, named):
+    """The existing Form Client Script that holds this doctype's synced form
+    JS: the one named after the doctype, else one declaring the same
+    top-level names (a copy under another name). Never an unrelated add-on
+    script (e.g. "Time Picker for Interview Schedule")."""
+    if frappe.db.exists("Client Script", {"name": doctype, "dt": doctype, "view": "Form"}):
+        return doctype
+    mine = _names(_TOP_LEVEL_RE, script)
+    for row in frappe.get_all(
+        "Client Script",
+        filters={"dt": doctype, "view": "Form", "name": ["not in", named]},
+        fields=["name", "script"],
+        order_by="modified desc",
+    ):
+        if mine & _names(_TOP_LEVEL_RE, row.script):
+            return row.name
+    return None
+
+
+def _disable_clashing_copies(doctype, keep, script, named):
+    """Other enabled Form scripts that declare the same const / let / class
+    would break the form — switch them off (logged, so it can be undone)."""
+    mine = _names(_DECLARED_RE, script)
+    if not mine:
+        return
+    for row in frappe.get_all(
+        "Client Script",
+        filters={"dt": doctype, "view": "Form", "enabled": 1, "name": ["not in", named + [keep]]},
+        fields=["name", "script"],
+    ):
+        clash = mine & _names(_DECLARED_RE, row.script)
+        if clash:
+            frappe.db.set_value("Client Script", row.name, "enabled", 0)
+            frappe.log_error(
+                title="sync_custom_doctype_client_scripts",
+                message=f"Disabled Client Script {row.name!r}: it declares {sorted(clash)} like {keep!r}, "
+                "and both enabled break the form.",
+            )
 
 
 def sync_custom_doctype_client_scripts():
@@ -95,21 +155,20 @@ def sync_custom_doctype_client_scripts():
         with open(file_path) as f:
             script = f.read()
 
+        # Never one of the named scripts above (e.g. "… Theme").
+        named = [name for _, _, name, _ in CUSTOM_DOCTYPE_NAMED_CLIENT_SCRIPTS] or [""]
         if script_name:
             existing = frappe.db.exists("Client Script", script_name)
         else:
-            # Never one of the named scripts above (e.g. "… Theme").
-            named = [name for _, _, name, _ in CUSTOM_DOCTYPE_NAMED_CLIENT_SCRIPTS] or [""]
-            existing = frappe.db.get_value(
-                "Client Script", {"dt": doctype, "view": "Form", "name": ["not in", named]}, "name"
-            )
+            existing = _form_script_for(doctype, script, named)
         if existing:
             client_script = frappe.get_doc("Client Script", existing)
-            if client_script.script == script and client_script.enabled:
-                continue
-            client_script.script = script
-            client_script.enabled = 1
-            client_script.save(ignore_permissions=True)
+            if not (client_script.script == script and client_script.enabled):
+                client_script.script = script
+                client_script.enabled = 1
+                client_script.save(ignore_permissions=True)
+            if not script_name:
+                _disable_clashing_copies(doctype, existing, script, named)
         else:
             # Client Script's autoname is "Prompt" — the name has to be
             # set explicitly or insert() raises "Please set the document
@@ -125,5 +184,7 @@ def sync_custom_doctype_client_scripts():
                     "script": script,
                 }
             ).insert(ignore_permissions=True)
+            if not script_name:
+                _disable_clashing_copies(doctype, doctype, script, named)
 
     frappe.db.commit()
