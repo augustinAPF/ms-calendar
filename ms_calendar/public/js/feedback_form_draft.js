@@ -927,9 +927,130 @@
 		});
 	}
 
+	// ── "Update feedback" link (api/feedback_update.py) ────────────────────
+	// ?update_feedback=<name>&ue&ur&uk: show that submission with every
+	// answer read-only and ONE "Updated feedback" box at the bottom. The box
+	// exists only here — a normal feedback link never shows it. No draft,
+	// panel picker or Submit in this view.
+	const UPDATE_API = "ms_calendar.api.feedback_update.";
+
+	function update_args() {
+		return {
+			doctype: wf.doc_type,
+			name: params.get("update_feedback"),
+			ue: params.get("ue") || "",
+			ur: params.get("ur") || "",
+			uk: params.get("uk") || "",
+		};
+	}
+
+	function update_card(html, color) {
+		$(".apf-update-card").remove();
+		const $card = $(`<div class="apf-update-card" style="border:1px solid var(--border-color,#d1d5db);
+			border-left:4px solid ${color || "#1f2937"};border-radius:6px;padding:16px 18px;margin:16px 0;">${html}</div>`);
+		$(".web-form-wrapper").first().after($card);
+		return $card;
+	}
+
+	function lock_form() {
+		Object.keys(wf.fields_dict || {}).forEach((fn) => {
+			try {
+				wf.set_df_property(fn, "read_only", 1);
+			} catch (e) {
+				// a field the form's own script removed — nothing to lock
+			}
+		});
+		$(".web-form-footer, .submit-btn, .indicator-pill").hide();
+		wf.save = () => false;
+		frappe.form_dirty = false;
+	}
+
+	function update_mode() {
+		wf = frappe.web_form;
+		const esc = (v) => frappe.utils.escape_html(v == null ? "" : String(v));
+		hide_form(true);
+		$(".web-form-footer, .submit-btn").hide();
+		frappe.call({
+			method: UPDATE_API + "get_feedback_for_update",
+			args: update_args(),
+			callback: (r) => {
+				const data = r.message;
+				if (!data) return;
+				// The forms' own scripts fill fields at ~500 ms; fill after them.
+				setTimeout(() => {
+					const values = data.values || {};
+					// Empty answers too, so form defaults (e.g. Date / Time = now)
+					// don't show as if the interviewer had filled them in.
+					const jobs = Object.keys(values)
+						.filter((fn) => wf.fields_dict[fn])
+						.map((fn) => Promise.resolve(wf.set_value(fn, is_empty(values[fn]) ? (Array.isArray(values[fn]) ? [] : "") : values[fn]))
+							.catch(() => null));
+					Promise.all(jobs).then(() => {
+						lock_form();
+						hide_form(false);
+						$(".apf-update-head").remove();
+						$(".web-form-wrapper").first().before(`<div class="apf-update-head" style="border:1px solid var(--border-color,#d1d5db);
+							border-left:4px solid #2563eb;border-radius:6px;padding:12px 16px;margin:8px 0 16px;font-size:13px;">
+							<b>${__("Update your feedback")}</b>${data.applicant ? " – " + esc(data.applicant) : ""}<br>
+							<span class="text-muted">${__("Your answers submitted on {0} are shown below (read-only). Add your update in the box at the bottom.",
+								[esc(data.submitted_on)])}</span></div>`);
+						show_update_box(data);
+					});
+				}, RESTORE_DELAY_MS + 100);
+			},
+		}).fail(() => {
+			// Bad / altered link or deleted feedback: no form at all.
+			hide_form(false);
+			$(".web-form-wrapper, .web-form-footer").hide();
+			update_card(`<b>${__("This update link can't be opened.")}</b><div class="text-muted" style="font-size:13px;margin-top:4px;">
+				${__("Please ask the recruitment team to send a new link.")}</div>`, "#b91c1c");
+		});
+	}
+
+	function show_update_box(data) {
+		const esc = (v) => frappe.utils.escape_html(v == null ? "" : String(v));
+		const previous = data.previous
+			? `<div style="margin-bottom:10px;"><div style="font-weight:600;font-size:13px;margin-bottom:4px;">${__("Earlier updates")}</div>
+				<div style="white-space:pre-wrap;font-size:13px;background:var(--control-bg,#f3f4f6);border-radius:6px;padding:8px 10px;">${esc(data.previous)}</div></div>`
+			: "";
+		const $card = update_card(`
+			${previous}
+			<label style="font-weight:600;font-size:14px;margin-bottom:6px;display:block;">${__("Updated feedback")} <span style="color:#b91c1c">*</span></label>
+			<textarea class="form-control apf-update-text" rows="6" maxlength="10000"
+				placeholder="${__("Type your updated feedback here")}" style="font-size:14px;"></textarea>
+			<div style="margin-top:12px;display:flex;align-items:center;gap:12px;">
+				<button class="btn btn-primary btn-sm apf-update-submit">${__("Submit update")}</button>
+				<span class="text-muted apf-update-msg" style="font-size:12px;"></span>
+			</div>`);
+		$card.find(".apf-update-submit").on("click", function () {
+			const text = ($card.find(".apf-update-text").val() || "").trim();
+			if (!text) {
+				$card.find(".apf-update-msg").text(__("Please type your update first."));
+				$card.find(".apf-update-text").trigger("focus");
+				return;
+			}
+			const $btn = $(this).prop("disabled", true).text(__("Submitting…"));
+			frappe.call({
+				method: UPDATE_API + "submit_feedback_update",
+				type: "POST",
+				args: Object.assign(update_args(), { text }),
+				callback: (r) => {
+					if (!(r.message && r.message.ok)) return;
+					update_card(`<b>${__("Thank you — your update has been saved.")}</b>
+						<div class="text-muted" style="font-size:13px;margin-top:4px;">${__("Saved on {0}. You can close this page.", [esc(r.message.saved_on)])}</div>
+						<div style="white-space:pre-wrap;font-size:13px;margin-top:8px;">${esc(text)}</div>`, "#15803d");
+				},
+			}).fail(() => $btn.prop("disabled", false).text(__("Submit update")));
+		});
+	}
+
 	function wait_for_form(tries) {
 		const f = frappe.web_form;
 		if (f && f.fields_dict && f.doc_type) {
+			if (FEEDBACK_DOCTYPES.includes(f.doc_type) && params.get("update_feedback")) {
+				update_mode();
+				return;
+			}
 			// Only a new response on one of the feedback forms — not list/view pages.
 			if (FEEDBACK_DOCTYPES.includes(f.doc_type) && f.is_new) init();
 			return;

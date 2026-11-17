@@ -777,7 +777,7 @@ app_include_js = [
 # feedback web forms are custom records on the site.
 # Manual "?v=" cache-buster like frf_list.js: bump it when the file changes.
 web_include_js = [
-    "/assets/ms_calendar/js/feedback_form_draft.js?v=18",
+    "/assets/ms_calendar/js/feedback_form_draft.js?v=19",
 ]
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -840,6 +840,9 @@ after_migrate = [
     # "Talent Pool" status on every unit's registration form + the candidate
     # Email Template "Talent Pool - Candidate" — idempotent.
     "ms_calendar.api.talent_pool.ensure_talent_pool_schema",
+    # Read-only "Updated Feedback" field on every Field feedback form (filled
+    # through the dashboard's "Update feedback" link) — idempotent.
+    "ms_calendar.api.feedback_update.ensure_feedback_update_fields",
 ]
 
 # before_install = "ms_calendar.install.before_install"

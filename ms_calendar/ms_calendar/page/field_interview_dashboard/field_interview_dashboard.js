@@ -649,9 +649,60 @@ class FieldInterviewDashboard {
 					<a class="fid-fb-open fid-fb-dlg" data-dt="${this.esc(f.doctype)}" data-name="${this.esc(f.name)}" title="${__('Open in a popup')}">↗</a>
 				</div>
 				<a class="fid-fb-ans-toggle">${__('Show answers')} ▾</a>
+				<a class="fid-fb-upd" data-dt="${this.esc(f.doctype)}" data-name="${this.esc(f.name)}"
+					data-emails="${this.esc(this.feedback_emails(f).join(','))}" data-applicant="${this.esc(f.applicant || '')}"
+					title="${__('Email the interviewer a link to add an update to this feedback')}">${__('Update feedback')}</a>
 				<div class="fid-fb-cell-ans" hidden>${cached !== undefined ? this.feedback_answers_html(cached) : `<span class="fid-muted">${__('Loading answers…')}</span>`}</div>
 			</div>`;
 		}).join('')}</div>`;
+	}
+
+	// Who the "Update feedback" link can go to: the submitter, or (Guest web
+	// form submissions) that interview's panel.
+	feedback_emails(f) {
+		const list = f.by_email ? [f.by_email] : (f.by_panel || []);
+		return [...new Set(list.map(e => String(e || '').trim().toLowerCase()).filter(e => e.includes('@')))];
+	}
+
+	// "Update feedback": pick the interviewer, optional note → they get an
+	// email with a link to this submission, all answers read-only plus one
+	// "Updated feedback" box (api/feedback_update.py).
+	open_update_dialog(doctype, name, emails, applicant) {
+		const fields = [
+			{
+				fieldtype: 'HTML',
+				options: `<p class="text-muted small" style="margin-bottom:6px">${__(
+					'The interviewer gets an email with a link to this feedback ({0}). Their earlier answers are shown read-only, with one box at the bottom for the update. The update is saved in "Updated Feedback" on this submission and you get an email when it comes in.',
+					[frappe.utils.escape_html(doctype)])}</p>`,
+			},
+		];
+		if (emails.length > 1) {
+			fields.push({ fieldname: 'email', fieldtype: 'Select', label: __('Send to'), reqd: 1,
+				options: emails.join('\n'), default: emails[0] });
+		} else {
+			fields.push({ fieldname: 'email', fieldtype: 'Data', options: 'Email', label: __('Send to (interviewer email)'),
+				reqd: 1, default: emails[0] || '' });
+		}
+		fields.push({ fieldname: 'message', fieldtype: 'Small Text', label: __('Note to the interviewer (optional)') });
+		const d = new frappe.ui.Dialog({
+			title: applicant ? __('Update feedback – {0}', [applicant]) : __('Update feedback'),
+			fields,
+			primary_action_label: __('Send link'),
+			primary_action: (v) => {
+				frappe.call({
+					method: 'ms_calendar.api.feedback_update.request_feedback_update',
+					args: { doctype, name, email: v.email, message: v.message || '' },
+					freeze: true,
+					freeze_message: __('Sending…'),
+					callback: (r) => {
+						if (!r.message) return;
+						d.hide();
+						frappe.show_alert({ message: __('Update link sent to {0}', [r.message.sent_to]), indicator: 'green' });
+					},
+				});
+			},
+		});
+		d.show();
 	}
 
 	// Compact "question: answer" list of one submission (every value escaped).
@@ -739,6 +790,12 @@ class FieldInterviewDashboard {
 			const open = $ans.prop('hidden');
 			$ans.prop('hidden', !open);
 			$a.html(open ? `${__('Hide answers')} ▴` : `${__('Show answers')} ▾`);
+		});
+		$el.off('click.fidupd').on('click.fidupd', '.fid-fb-upd', (e) => {
+			e.preventDefault();
+			const $a = $(e.currentTarget);
+			const emails = String($a.attr('data-emails') || '').split(',').filter(Boolean);
+			this.open_update_dialog(String($a.data('dt')), String($a.data('name')), emails, String($a.attr('data-applicant') || ''));
 		});
 		$el.off('click.fidfbt').on('click.fidfbt', '.fid-fb-toggle', (e) => {
 			e.preventDefault();
@@ -1259,6 +1316,8 @@ const FID_CSS = `
 .fid-fb-cell-item { border-left:2px solid var(--border); padding-left:8px; font-size:11.5px; line-height:1.35; }
 .fid-fb-cell-ans { margin-top:4px; }
 .fid-fb-ans-toggle { display:inline-block; margin-top:2px; cursor:pointer; font-weight:600; color:var(--link); font-size:11.5px; }
+.fid-fb-upd { display:inline-block; margin:2px 0 0 10px; cursor:pointer; font-weight:600; color:var(--link); font-size:11.5px; }
+.fid-fb-upd:hover, .fid-fb-ans-toggle:hover { text-decoration:underline; }
 .fid-fb-ans { margin:1px 0; overflow-wrap:anywhere; }
 .fid-fb-ans-q { color:var(--muted); }
 .fid-fb-ans-a { color:var(--text); font-weight:500; }
