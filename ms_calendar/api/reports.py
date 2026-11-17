@@ -545,6 +545,7 @@ _STATUS_ROW = {
 	"Duplicated": "duplicated", "Pending for Correction": "correction_pending",
 	"Correction Pending": "correction_pending", "PI Edited": "pi_edited",
 	"Selected": "o_joined",
+	"Talent Pool": "talent_pool",
 }
 _OFFER_ROWS = [
 	"Document Collection", "Document Verification Pass", "Document Verification Fail",
@@ -604,6 +605,7 @@ def pipeline_stages():
 			{"label": "Duplicated", "key": "duplicated"},
 			{"label": "Correction Pending", "key": "correction_pending"},
 			{"label": "PI Edited", "key": "pi_edited"},
+			{"label": "Talent Pool", "key": "talent_pool"},
 			{"label": "Other / Blank status", "key": "other"},
 		]},
 	]
@@ -836,7 +838,8 @@ def _status_change_dates(since, until):
 def get_cycle_time_data(from_date, to_date):
 	"""Candidates with at least one stage date in from_date..to_date (a
 	financial year), each with `d` = {applied, test, recruiter, ec, final,
-	offer} as 'YYYY-MM-DD' (missing stages left out) and `_state`."""
+	offer} as 'YYYY-MM-DD' (missing stages left out), `_state` and `p` =
+	Talent Pool stays [[moved, resumed-or-today], …] to leave out."""
 	frappe.has_permission("Field Registration Form", "read", throw=True)
 	fy_from, fy_to = str(getdate(from_date)), str(getdate(to_date))
 	# Look back a year so a stage that started before the FY (e.g. the
@@ -874,6 +877,12 @@ def get_cycle_time_data(from_date, to_date):
 	))
 
 	jo = _job_opening_locations()
+	# Talent Pool stays ([moved, resumed-or-today] per candidate): reports.js
+	# takes the days inside them out of every stage-to-stage gap, so after a
+	# resume the clock restarts from the resumed date.
+	from ms_calendar.api.talent_pool import pool_periods
+
+	pools = pool_periods("Field Registration Form")
 	out = []
 	names = list(names)
 	for i in range(0, len(names), 5000):
@@ -901,5 +910,6 @@ def get_cycle_time_data(from_date, to_date):
 				"application_status": r.application_status, "role": r.role,
 				"department": r.department, "location": r.location, "job_title": r.job_title,
 				"_state": job_state(r.location, jo.get(r.job_title)), "d": d,
+				"p": pools.get(r.name) or [],
 			})
 	return out

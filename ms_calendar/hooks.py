@@ -441,6 +441,8 @@ doc_events = {
             "ms_calendar.api.resume_rename.on_field_registration",
             "ms_calendar.ms_calendar.sms_utils.send_registration_form_on_update",
             "ms_calendar.api.applicant_master_sync.sync_field_registration_to_applicant_master",
+            # Talent Pool Log + candidate email (common to every unit).
+            "ms_calendar.api.talent_pool.on_status_change",
         ],
         "validate": [
             # "ms_calendar.api.ms_field.check_registration_duplicate_on_save",
@@ -460,6 +462,7 @@ doc_events = {
         "on_update": [
             "ms_calendar.api.resume_rename.on_phil_registration",
             "ms_calendar.api.applicant_master_sync.sync_phil_registration_to_applicant_master",
+            "ms_calendar.api.talent_pool.on_status_change",
         ],
     },
     # NOTE: this site's live doctype is "Field Registration Form" (no "1") —
@@ -480,6 +483,7 @@ doc_events = {
         "on_update": [
             "ms_calendar.api.resume_rename.on_health_registration",
             "ms_calendar.api.applicant_master_sync.sync_health_registration_to_applicant_master",
+            "ms_calendar.api.talent_pool.on_status_change",
         ],
     },
     "Health Document Collection": {
@@ -492,7 +496,10 @@ doc_events = {
     "Enablers Registration Form": {
         "validate": "ms_calendar.api.ms_enablers.validate_registration",
         "after_insert": "ms_calendar.api.ms_enablers.after_registration_insert",
-        "on_update": "ms_calendar.api.ms_enablers.on_registration_update",
+        "on_update": [
+            "ms_calendar.api.ms_enablers.on_registration_update",
+            "ms_calendar.api.talent_pool.on_status_change",
+        ],
     },
     "Philanthrophy Document Collection": {
         "on_update": "ms_calendar.api.resume_rename.on_philanthropy_document_collection"
@@ -539,6 +546,7 @@ doc_events = {
         "on_update": [
             "ms_calendar.api.resume_rename.on_scholarship_registration",
             "ms_calendar.api.applicant_master_sync.sync_scholarship_registration_to_applicant_master",
+            "ms_calendar.api.talent_pool.on_status_change",
         ],
     },
     "Leader Final Round Feedback Form": {
@@ -752,6 +760,9 @@ app_include_js = [
     # Workspace pages: full width, sidebar hidden until "Show sidebar" / ☰.
     # Manual "?v=" cache-buster: bump it when the file changes.
     "/assets/ms_calendar/js/workspace_layout.js?v=2",
+    # Talent Pool: Move / Resume buttons on the 5 unit registration forms and
+    # in their list Actions menu. Manual "?v=" cache-buster: bump on change.
+    "/assets/ms_calendar/js/talent_pool.js?v=1",
     # "pathways_redirect.js" was never actually added to public/js/ (checked
     # git history — no commit ever created it), so this line 404s on every
     # single desk page load, for every user, since app_include_js is loaded
@@ -826,6 +837,9 @@ after_migrate = [
     # Saved Enablers / Finance Fellowship invite templates get the attached
     # documents list + Hybrid panel lines (only where the old text is unchanged).
     "ms_calendar.api.enablers_panel.upgrade_invite_templates",
+    # "Talent Pool" status on every unit's registration form + the candidate
+    # Email Template "Talent Pool - Candidate" — idempotent.
+    "ms_calendar.api.talent_pool.ensure_talent_pool_schema",
 ]
 
 # before_install = "ms_calendar.install.before_install"

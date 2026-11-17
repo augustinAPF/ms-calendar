@@ -1,0 +1,244 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "TPL-.#####",
+ "creation": "2026-11-17 10:00:00.000000",
+ "description": "One row per stay of an application in the Talent Pool (any unit). Written automatically when the Application Status moves into / out of \"Talent Pool\".",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "application_section",
+  "status",
+  "unit",
+  "reference_doctype",
+  "reference_name",
+  "column_break_app",
+  "candidate_name",
+  "email",
+  "job_title",
+  "moved_section",
+  "moved_on",
+  "moved_by",
+  "status_before",
+  "column_break_moved",
+  "remarks",
+  "email_sent_on",
+  "email_note",
+  "resumed_section",
+  "resumed_on",
+  "resumed_by",
+  "resumed_to_status",
+  "column_break_resumed",
+  "days_in_pool",
+  "resume_remarks"
+ ],
+ "fields": [
+  {
+   "fieldname": "application_section",
+   "fieldtype": "Section Break",
+   "label": "Application"
+  },
+  {
+   "default": "In Talent Pool",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "In Talent Pool\nResumed",
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "unit",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Unit",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "label": "Application Form",
+   "options": "DocType",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Application ID",
+   "options": "reference_doctype",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "column_break_app",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "candidate_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Candidate Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "email",
+   "fieldtype": "Data",
+   "label": "Email",
+   "options": "Email",
+   "read_only": 1
+  },
+  {
+   "fieldname": "job_title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Job Title",
+   "read_only": 1
+  },
+  {
+   "fieldname": "moved_section",
+   "fieldtype": "Section Break",
+   "label": "Moved to Talent Pool"
+  },
+  {
+   "fieldname": "moved_on",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Moved On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "moved_by",
+   "fieldtype": "Link",
+   "label": "Moved By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "status_before",
+   "fieldtype": "Data",
+   "label": "Status Before Talent Pool",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_moved",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Remarks",
+   "read_only": 1
+  },
+  {
+   "fieldname": "email_sent_on",
+   "fieldtype": "Datetime",
+   "label": "Candidate Email Sent On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "email_note",
+   "fieldtype": "Small Text",
+   "label": "Email Note",
+   "read_only": 1
+  },
+  {
+   "fieldname": "resumed_section",
+   "fieldtype": "Section Break",
+   "label": "Resumed"
+  },
+  {
+   "fieldname": "resumed_on",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Resumed On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "resumed_by",
+   "fieldtype": "Link",
+   "label": "Resumed By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "resumed_to_status",
+   "fieldtype": "Data",
+   "label": "Resumed To Status",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_resumed",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Calendar days between Moved On and Resumed On. Left out of the Cycle Time report.",
+   "fieldname": "days_in_pool",
+   "fieldtype": "Int",
+   "label": "Days in Talent Pool",
+   "read_only": 1
+  },
+  {
+   "fieldname": "resume_remarks",
+   "fieldtype": "Small Text",
+   "label": "Resume Remarks",
+   "read_only": 1
+  }
+ ],
+ "in_create": 1,
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-11-17 10:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Ms Calendar",
+ "name": "Talent Pool Log",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Recruiter"
+  },
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Field Recruiter"
+  },
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Enablers Recruiter"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "candidate_name",
+ "track_changes": 1
+}

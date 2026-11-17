@@ -2535,6 +2535,20 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 		return Math.round((Date.UTC(b[0], b[1] - 1, b[2]) - Date.UTC(a[0], a[1] - 1, a[2])) / 86400000);
 	}
 
+	// Days of the candidate's Talent Pool stays (r.p = [[moved, resumed or
+	// today], …]) that fall between two stage dates. They are taken out of
+	// that gap, so the time an application waited in the Talent Pool is not
+	// counted and the clock restarts from the resumed date.
+	function ctPoolDays(r, fromStr, toStr) {
+		var total = 0;
+		(r.p || []).forEach(function (p) {
+			var s = p[0] > fromStr ? p[0] : fromStr;
+			var e = p[1] < toStr ? p[1] : toStr;
+			if (e > s) total += ctDays(s, e);
+		});
+		return total;
+	}
+
 	// Financial year starting April of `startYear`: Q1 Apr–Jun … Q4 Jan–Mar.
 	function ctFyBounds(startYear) {
 		return { from: startYear + '-04-01', to: (startYear + 1) + '-03-31' };
@@ -2560,7 +2574,8 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			if (!f || !t || t < fy.from || t > fy.to) return;
 			var d = ctDays(f, t);
 			if (d < 0) { bad++; return; }
-			out.push({ rec: r, from: f, to: t, days: d, q: ctQuarterOf(t) });
+			var pool = ctPoolDays(r, f, t);
+			out.push({ rec: r, from: f, to: t, days: Math.max(d - pool, 0), pool: pool, q: ctQuarterOf(t) });
 		});
 		return { items: out, bad: bad };
 	}
@@ -2681,7 +2696,9 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			+ 'Stage dates: Application = Date of Applied · Written test = first Test Select / Reject / Hold status · '
 			+ 'Recruiter screening, EC/Subject interview, Final (Leader) interview = round date on the form, else the interview date on '
 			+ 'Field Interview Schedule, else the first Select / Reject status for that round · Offer release = first Offer (or later) status. '
-			+ 'Status dates come from the application\'s status history. State = job opening state.'
+			+ 'Status dates come from the application\'s status history. State = job opening state.<br>'
+			+ 'Talent Pool: days between the date an application was moved to the Talent Pool and the date it was resumed '
+			+ 'are left out of every gap (the resumed date is the new start), so only active processing time is counted.'
 			+ '</div>';
 
 		$('#ct-tbl-wrap').html('<table class="rpt-tbl ct-tbl">' + thead + tbody + '</table>' + note);
@@ -2699,11 +2716,11 @@ frappe.pages['reports'].on_page_load = function (wrapper) {
 			if (!items.length) { frappe.msgprint('No records found.'); return; }
 			var title = col.label + ' | ' + (q || yearLabel);
 			showRecordsDialog(title, items.map(function (it) {
-				return $.extend({}, it.rec, { _from: it.from, _to: it.to, _days: it.days });
+				return $.extend({}, it.rec, { _from: it.from, _to: it.to, _days: it.days, _pool: it.pool });
 			}),
-				['ID', 'Full Name', 'Role', 'State', CT_STAGES[col.from].label + ' Date', CT_STAGES[col.to].label + ' Date', 'Days', 'Status'],
+				['ID', 'Full Name', 'Role', 'State', CT_STAGES[col.from].label + ' Date', CT_STAGES[col.to].label + ' Date', 'Days', 'Talent Pool days (left out)', 'Status'],
 				function (r) {
-					return [r.name, r.full_name_aadhaar, r.role, getState(r), r._from, r._to, r._days, r.application_status];
+					return [r.name, r.full_name_aadhaar, r.role, getState(r), r._from, r._to, r._days, r._pool || '', r.application_status];
 				});
 		});
 	}
