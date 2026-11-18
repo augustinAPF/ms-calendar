@@ -11,10 +11,12 @@
 // - The interview invite (ms_field._field_panel_feedback_block) is one
 //   Outlook meeting with the same body for everyone, so it has ONE button.
 //   With several panel members it carries ?panel= (the whole panel) and the
-//   form first asks "Who is filling this feedback?" — the member types their
-//   email (remembered on this device for this form + applicant); it must be
-//   on the panel. Then only that member and "Consolidated (whole panel)" are
-//   offered; a click fills the name(s)/email(s) and loads that draft.
+//   form first finds out who is filling it: Microsoft sign-in by itself
+//   where that works (production); else (UAT) the panel's names as buttons
+//   — one click, no typing. The member is remembered on this device for
+//   every later link (ME_ANY_KEY), so the next invite picks them by itself.
+//   Then only that member and "Consolidated (whole panel)" are offered; a
+//   click fills the name(s)/email(s) and loads that draft.
 //   A personal ?panelist_email= link that also has ?panel= skips the email
 //   question. With one member, or a personal link without ?panel= (the
 //   reminder emails), the panelist fields are filled straight away.
@@ -447,6 +449,7 @@
 						}</button>`).join("")}
 				</div>
 				<div class="text-muted small" style="margin-top:8px;">
+					${people.length > 1 ? __("Click your name — this device remembers you for your next feedback links.") : ""}
 					${__("Your name and email are filled in, and your saved draft (if any) is loaded.")}
 					${type_field() ? __("Consolidated is one feedback for the whole panel.") : ""}
 					${anyone_done ? __("Names marked Submitted have already sent their feedback.") : ""}</div>
@@ -461,7 +464,18 @@
 	// The email is remembered on this device for this form + applicant, so
 	// reopening the link (e.g. to finish a draft) skips the question.
 	const ME_PREFIX = "apf_feedback_me::";
+	// The panel member last picked on this device, for EVERY feedback link:
+	// on the next invite they are picked by themselves (no typing, no click
+	// on their name) when they are on that panel too.
+	const ME_ANY_KEY = "apf_feedback_me_any";
 	let ask_ctx = null; // {panel, status} while the email question is shown
+
+	function remember_me(email) {
+		const e = (email || "").trim().toLowerCase();
+		if (!e) return;
+		storage_set(me_key(), e);
+		storage_set(ME_ANY_KEY, e);
+	}
 
 	function me_key() {
 		const route = wf.route || window.location.pathname.split("/")[1] || "";
@@ -598,7 +612,7 @@
 			return;
 		}
 		ask_ctx = null;
-		storage_set(me_key(), me.email.toLowerCase());
+		remember_me(me.email);
 		$(".apf-me-ask").remove();
 		if (status.consolidated || is_done(me, status)) {
 			const applicant = params.get("applicant_name") || "";
@@ -627,6 +641,8 @@
 			return;
 		}
 		$(".apf-panel-pick").remove();
+		// Picked their own name → remembered for this and every later link.
+		if (!chosen.consolidated && !params.get("panelist_email")) remember_me(chosen.email);
 		start_filling();
 		const who = chosen.consolidated ? `${chosen.label} — ${chosen.name}` : chosen.name || chosen.email;
 		const $who = $(`<div class="apf-panel-who text-muted small" style="margin-bottom:12px;">
@@ -635,8 +651,9 @@
 		// Your answers so far are kept as your draft; the page reopens the choice.
 		$who.find(".apf-not-me").on("click", (ev) => {
 			ev.preventDefault();
-			// Ask the email again (someone else on this device).
+			// Ask again (someone else on this device).
 			storage_remove(me_key());
+			storage_remove(ME_ANY_KEY);
 			window.location.reload();
 		});
 		$(".web-form-wrapper").first().before($who);
@@ -907,17 +924,24 @@
 			if (panel.length > 1) {
 				// One invite button for the whole panel: find out who they are,
 				// then offer only them + Consolidated.
-				// Signed in as a panel member → that person; else the email
-				// remembered on this device; else Microsoft sign-in by itself
-				// (once); else ask the email.
-				const known = panel_member(panel, status.me) || panel_member(panel, storage_get(me_key()));
+				// Signed in as a panel member → that person; else the member
+				// remembered on this device (this link, or any earlier link);
+				// else Microsoft sign-in by itself (once). No Microsoft
+				// sign-in on this site (UAT) → their names as buttons: one
+				// click, no typing, remembered for the next links.
+				const known =
+					panel_member(panel, status.me) ||
+					panel_member(panel, storage_get(me_key())) ||
+					panel_member(panel, storage_get(ME_ANY_KEY));
 				if (known) {
 					ask_ctx = { panel, status };
 					me_continue(known.email);
 				} else if (status.ms_signin && !ms_already_tried()) {
 					auto_microsoft_sign_in(panel, status);
-				} else {
+				} else if (status.ms_signin) {
 					show_email_ask(panel, status);
+				} else {
+					show_panel_picker(panel, status, panel);
 				}
 				return;
 			}
