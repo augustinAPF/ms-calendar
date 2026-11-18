@@ -15,7 +15,9 @@ REGISTRATION_DOCTYPE = "Enablers Registration Form"
 # Public pages (web forms / www pages shipped with the app).
 REGISTRATION_ROUTE = "/finance-fellowship-registration-form/new"
 STATUS_ROUTE = "/finance-fellowship-application-status"
-UPLOAD_ROUTE = "/finance-fellowship-document-upload/new"
+# One upload page for Enablers + Finance Fellowship (the ?stage= in the link
+# switches it to the Fellowship fields).
+UPLOAD_ROUTE = "/enablers-document-upload/new"
 FEEDBACK_ROUTE = "/finance-fellowship-feedback-form/new"
 OFFER_ROUTE = "/finance-fellowship-offer"
 

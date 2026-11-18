@@ -129,7 +129,7 @@ CONNECTIONS = [
 	(DOCUMENTS_DOCTYPE, "Documents"),
 	(REFERENCE_DOCTYPE, "Documents"),
 	("Finance Fellowship Feedback Form", "Fellowship"),
-	("Finance Fellowship Document Collection", "Fellowship"),
+	# Finance Fellowship uploads use the same Document Collection (above) since 2026-11-18.
 ]
 # Finance Fellowship applicants see only Details + the two Fellowship tabs:
 # these Enablers-only tabs / sections are hidden for them. The few shared

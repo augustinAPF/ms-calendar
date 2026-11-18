@@ -506,7 +506,7 @@ def _invite_attachments(schedule, registration):
 		files.append((
 			"Application form",
 			frappe.db.get_value(
-				"Finance Fellowship Document Collection",
+				"Enablers Document Collection",
 				{"application_id": registration.name, "stage": STAGE_APPLICATION_FORM},
 				"application_form",
 				order_by="creation desc",

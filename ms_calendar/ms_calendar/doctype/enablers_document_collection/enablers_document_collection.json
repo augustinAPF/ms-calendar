@@ -12,8 +12,11 @@
   "role",
   "sub_unit",
   "column_break_applicant",
+  "stage",
   "access_key",
   "is_fresher",
+  "application_form_section",
+  "application_form",
   "identity_section",
   "pan_card",
   "column_break_identity",
@@ -25,6 +28,8 @@
   "column_break_education",
   "post_graduation",
   "phd",
+  "fellowship_education_section",
+  "education_certificates",
   "employment_section",
   "experience_letters",
   "offer_or_revision_letter",
@@ -81,6 +86,15 @@
    "fieldtype": "Column Break"
   },
   {
+   "fieldname": "stage",
+   "fieldtype": "Select",
+   "label": "Stage (Finance Fellowship)",
+   "options": "\nApplication Form (after Round 1)\nDocuments (after Round 2)",
+   "depends_on": "eval:doc.sub_unit==\"Finance Fellowship\" || doc.stage",
+   "description": "Finance Fellowship only: which upload this is. Empty for Enablers.",
+   "length": 40
+  },
+  {
    "fieldname": "access_key",
    "fieldtype": "Data",
    "hidden": 1,
@@ -91,18 +105,30 @@
    "description": "Freshers don't need to upload experience letters, offer letter or payslips.",
    "fieldname": "is_fresher",
    "fieldtype": "Check",
-   "label": "I am a fresher (no previous employment)"
+   "label": "I am a fresher (no previous employment)",
+   "depends_on": "eval:!doc.stage"
+  },
+  {
+   "fieldname": "application_form_section",
+   "fieldtype": "Section Break",
+   "label": "Application Form",
+   "depends_on": "eval:doc.stage==\"Application Form (after Round 1)\""
+  },
+  {
+   "fieldname": "application_form",
+   "fieldtype": "Attach",
+   "label": "Filled Application Form"
   },
   {
    "fieldname": "identity_section",
    "fieldtype": "Section Break",
-   "label": "Identity (PDF only)"
+   "label": "Identity (PDF only)",
+   "depends_on": "eval:!doc.stage || doc.stage==\"Documents (after Round 2)\""
   },
   {
    "fieldname": "pan_card",
    "fieldtype": "Attach",
-   "label": "PAN Card",
-   "reqd": 1
+   "label": "PAN Card"
   },
   {
    "fieldname": "column_break_identity",
@@ -111,32 +137,29 @@
   {
    "fieldname": "aadhaar_card",
    "fieldtype": "Attach",
-   "label": "Aadhaar Card (both sides)",
-   "reqd": 1
+   "label": "Aadhaar Card (both sides)"
   },
   {
    "description": "Mark sheets and completion certificates (not provisional) for every course.",
    "fieldname": "education_section",
    "fieldtype": "Section Break",
-   "label": "Education certificates (PDF only)"
+   "label": "Education certificates (PDF only)",
+   "depends_on": "eval:!doc.stage"
   },
   {
    "fieldname": "class_x",
    "fieldtype": "Attach",
-   "label": "Class X — mark sheet and completion certificate",
-   "reqd": 1
+   "label": "Class X — mark sheet and completion certificate"
   },
   {
    "fieldname": "class_xii",
    "fieldtype": "Attach",
-   "label": "Class XII — mark sheet and completion certificate",
-   "reqd": 1
+   "label": "Class XII — mark sheet and completion certificate"
   },
   {
    "fieldname": "degree",
    "fieldtype": "Attach",
-   "label": "Degree — mark sheets and completion certificate",
-   "reqd": 1
+   "label": "Degree — mark sheets and completion certificate"
   },
   {
    "fieldname": "column_break_education",
@@ -155,7 +178,18 @@
    "label": "PhD — completion certificate"
   },
   {
-   "depends_on": "eval:!doc.is_fresher",
+   "fieldname": "fellowship_education_section",
+   "fieldtype": "Section Break",
+   "label": "Education (PDF only)",
+   "depends_on": "eval:doc.stage==\"Documents (after Round 2)\""
+  },
+  {
+   "fieldname": "education_certificates",
+   "fieldtype": "Attach",
+   "label": "Education completion certificates"
+  },
+  {
+   "depends_on": "eval:doc.stage==\"Documents (after Round 2)\" || (!doc.stage && !doc.is_fresher)",
    "fieldname": "employment_section",
    "fieldtype": "Section Break",
    "label": "Employment (PDF only)"
@@ -164,13 +198,14 @@
    "fieldname": "experience_letters",
    "fieldtype": "Attach",
    "label": "Experience letters from previous organisations",
-   "mandatory_depends_on": "eval:!doc.is_fresher"
+   "mandatory_depends_on": "eval:!doc.stage && !doc.is_fresher"
   },
   {
    "fieldname": "offer_or_revision_letter",
    "fieldtype": "Attach",
    "label": "Latest offer or salary revision letter",
-   "mandatory_depends_on": "eval:!doc.is_fresher"
+   "mandatory_depends_on": "eval:!doc.stage && !doc.is_fresher",
+   "depends_on": "eval:!doc.stage"
   },
   {
    "fieldname": "column_break_employment",
@@ -181,7 +216,7 @@
    "fieldname": "payslips",
    "fieldtype": "Attach",
    "label": "Payslips of the last three months worked",
-   "mandatory_depends_on": "eval:!doc.is_fresher"
+   "mandatory_depends_on": "eval:!doc.stage && !doc.is_fresher"
   },
   {
    "fieldname": "verification_section",
@@ -225,7 +260,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-10-29 12:00:00.000000",
+ "modified": "2026-11-18 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "Ms Calendar",
  "name": "Enablers Document Collection",
@@ -253,6 +288,18 @@
    "read": 1,
    "report": 1,
    "role": "Enablers Recruiter",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Finance Fellowship Recruiter",
    "share": 1,
    "write": 1
   }
