@@ -1715,8 +1715,18 @@ def process_field_result(params):
                 "candidate_response": row.get("candidateResponse") or "",
             })
 
-    result_doc.insert(ignore_permissions=True)
-    frappe.db.commit()
+    # MeritTrac calls this webhook as Guest. Guest has no print permission, so
+    # the result-PDF server script failed, the whole request rolled back after
+    # the SMS hook's commit, and the FRF lost its activity-feed entry (Version)
+    # and the Test Select / Test Reject email. Insert as Administrator (the
+    # after_insert scripts save the FRF + make the PDF), then go back to Guest
+    # so the rest of this request isn't treated as a logged-in session.
+    frappe.set_user("Administrator")
+    try:
+        result_doc.insert(ignore_permissions=True)
+        frappe.db.commit()
+    finally:
+        frappe.set_user("Guest")
 
     frappe.local.response.http_status_code = 200
     return {"status": "success", "http_status": 200,

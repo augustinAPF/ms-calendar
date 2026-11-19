@@ -307,6 +307,12 @@ def _log_sms(
 			"api_response": api_response,
 			"error_message": error_message,
 		}).insert(ignore_permissions=True)
-		frappe.db.commit()
+		# No frappe.db.commit() here. This runs inside the registration
+		# form's after_insert hook; committing here saved the form before
+		# the rest of the insert (user creation, CV attach + rename,
+		# Applicant Master sync) had run. When a later step failed, the
+		# applicant saw an error and resubmitted, and the half-saved form was
+		# left with a CV link that no File row points to (403 Forbidden).
+		# The log row is now committed together with the request.
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Field SMS Log creation failed")

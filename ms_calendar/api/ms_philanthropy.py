@@ -2207,12 +2207,16 @@ def _typed_people(interviewer_name):
 def _panelist_words(email, names):
     """Name words for one panel member: their Interviewer Email List name
     plus the words of their email ID (rajita.kurup@ -> rajita, kurup), so a
-    list name of just 'Rajita' still matches 'Rajita Kurup'. First word =
-    first name."""
+    list name of just 'Rajita' still matches 'Rajita Kurup'.
+
+    Returns (first_names, all_words). first_names holds the first word of
+    the list name AND of the email ID, because the list name is often a
+    nickname: list 'Jim' + jimreeves.samuel@ must match a typed
+    'Jimreeves Samuel' as well as 'Jim'."""
     listed = _name_words(names.get(email) or "")
     from_email = _name_words(email.split("@")[0].replace(".", " ").replace("_", " "))
-    first = (listed or from_email or [""])[0]
-    return first, set(listed) | set(from_email)
+    firsts = {w[0] for w in (listed, from_email) if w}
+    return firsts, set(listed) | set(from_email)
 
 
 def _feedback_panel_emails(fb, panel_emails, names):
@@ -2241,14 +2245,17 @@ def _feedback_panel_emails(fb, panel_emails, names):
     panel = {e: _panelist_words(e, names) for e in panel_emails}
     matched = set()
     for typed in _typed_people(fb.get("interviewer_name")):
-        same_first = [e for e, (first, _) in panel.items() if first and first == typed[0]]
+        same_first = [e for e, (firsts, _) in panel.items() if typed[0] in firsts]
         if not same_first and len(typed[0]) >= 4:
             # Spelling slip in the first name ("Abhishek" for "Abhisek").
             same_first = [
                 e
-                for e, (first, _) in panel.items()
-                if len(first) >= 4
-                and difflib.SequenceMatcher(None, first, typed[0]).ratio() >= 0.85
+                for e, (firsts, _) in panel.items()
+                if any(
+                    len(first) >= 4
+                    and difflib.SequenceMatcher(None, first, typed[0]).ratio() >= 0.85
+                    for first in firsts
+                )
             ]
         if len(same_first) > 1 and len(typed) > 1:
             # e.g. two "Rajesh"es on one panel - use the surname/initial.

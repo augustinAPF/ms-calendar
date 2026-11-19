@@ -5562,7 +5562,12 @@ def _render_feedback_submissions_pdf(doctype, applicant_id, pdf_title, current_d
     def _round_for(fb_doc):
         for s in schedules:
             base = re.sub(r"\s+(Select|Reject)$", "", (s.interview_round or "").strip())
-            if base in candidate_rounds and s.creation <= fb_doc.creation:
+            # get_datetime on both sides: on Frappe v15 a doc that was just
+            # inserted (after_insert) still has `creation` as a string, while
+            # rows from get_all have datetimes — comparing them raised
+            # "'<=' not supported between datetime and str" and the PDF
+            # was never made (179 failures on live, Nov 2026).
+            if base in candidate_rounds and get_datetime(s.creation) <= get_datetime(fb_doc.creation):
                 return base
         return fallback_round
 
@@ -6204,7 +6209,9 @@ def _send_field_feedback_submitted_email(feedback_doc):
             feedbacks.append(feedback_doc if (dt, n) == (feedback_doc.doctype, feedback_doc.name) else frappe.get_doc(dt, n))
     if not any(f.name == feedback_doc.name for f in feedbacks):
         feedbacks.append(feedback_doc)
-    feedbacks.sort(key=lambda f: f.creation)
+    # get_datetime: the just-inserted feedback_doc has `creation` as a string
+    # on Frappe v15, the others (get_doc) have datetimes — mixed sort fails.
+    feedbacks.sort(key=lambda f: get_datetime(f.creation))
 
     applicant_name = schedule.applicants_name or feedback_doc.get("applicant_name") or feedback_doc.applicant_id
     subject = f"Interview Feedback – {applicant_name}" + (

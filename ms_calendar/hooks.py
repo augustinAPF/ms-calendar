@@ -637,21 +637,22 @@ fixtures = [
                 "name",
                 "in",
                 [
-                    "Field Registration Form Duplicate Check",
+                    # Fixtures are imported with force=True on EVERY migrate,
+                    # so each record here overwrites the live Client Script.
+                    # Only list scripts whose fixture copy is the same as
+                    # production. Removed 2026-11-19 before the live push:
+                    # - "Philanthropy Interview Schedule": the fixture held the
+                    #   old August script and would have replaced the newer
+                    #   themed one on live (UAT was already overwritten).
+                    # - "Field Registration Form Duplicate Check": not on live;
+                    #   it ran the full-table duplicate check on every form open.
+                    # - "Health Interview Schedule", "Field Document Collection":
+                    #   live keeps its own newer scripts for these.
                     "Field Registration Form1 Duplicate Check",
                     "Health Registration Form Duplicate Check",
                     "Phil Registration Form Duplicate Check",
-                    # Form JS for Custom DocTypes (see the doctype_js note
-                    # above and ms_calendar.api.sync_client_scripts) — these
-                    # get their `script` content refreshed automatically on
-                    # migrate, but that only reaches sites that already
-                    # have this fixture; a brand-new site needs the record
-                    # itself to exist first.
-                    "Philanthropy Interview Schedule",
-                    "Health Interview Schedule",
                     "Health Document Collection",
                     "Philanthrophy Document Collection",
-                    "Field Document Collection",
                 ],
             ]
         ],
@@ -753,7 +754,7 @@ app_include_js = [
     # Applicant profile popup — shared by the Pathways Overall Dashboard and
     # the four registration lists (click a name) / forms ("View profile").
     # Manual "?v=" cache-buster like frf_list.js: bump it when the file changes.
-    "/assets/ms_calendar/js/applicant_profile.js?v=19",
+    "/assets/ms_calendar/js/applicant_profile.js?v=20",
     # Form Activity timeline shows the exact date/time instead of "2 days ago".
     # Manual "?v=" cache-buster: bump it when the file changes.
     "/assets/ms_calendar/js/activity_exact_time.js?v=2",

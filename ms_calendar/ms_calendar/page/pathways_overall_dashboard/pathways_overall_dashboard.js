@@ -202,6 +202,7 @@ class PathwaysOverallDashboard {
 					<button class="pod-tab is-on" data-tab="dash" role="tab" aria-selected="true">${__('Dashboard')}</button>
 					<button class="pod-tab" data-tab="timeline" role="tab" aria-selected="false">${__('Timeline')}</button>
 					<button class="pod-tab" data-tab="funnel" role="tab" aria-selected="false">${__('Hiring Funnel')}</button>
+					<button class="pod-tab" data-tab="analytics" role="tab" aria-selected="false">${__('Analytics')}</button>
 				</div>
 				<div class="pod-filters">
 					<div class="pod-topbar">
@@ -338,6 +339,10 @@ class PathwaysOverallDashboard {
 							<div class="pod-panel-body" id="pod-trend"></div>
 						</div>
 					</div>
+				</div>
+
+				<div class="pod-pane" data-pane="analytics" hidden>
+					<div class="pod-an" id="pod-an"></div>
 				</div>
 
 				<div class="pod-pane" data-pane="dash">
@@ -499,6 +504,8 @@ class PathwaysOverallDashboard {
 			method: POD_API + 'get_dashboard_data',
 			args: this.args(filters, { refresh: refresh ? 1 : 0 }),
 			callback: (r) => {
+				// Refresh also bypasses the Analytics tab's 10-minute cache (now, or when it is next opened).
+				if (refresh) this.an_refresh = true;
 				this.data = r.message || {};
 				this.filters = Object.assign({}, filters, this.data.filters || {});
 				this.save_filters(this.filters);
@@ -551,6 +558,8 @@ class PathwaysOverallDashboard {
 		if (this.tab === 'funnel') this.render_funnel_tab();
 		this.tl_dirty = true;
 		if (this.tab === 'timeline') this.render_tl_list();
+		this.an_dirty = true;
+		if (this.tab === 'analytics') this.render_analytics();
 	}
 
 	render_funnel_tab() {
@@ -1215,6 +1224,8 @@ class PathwaysOverallDashboard {
 		if (extra.status !== undefined) base.status = extra.status;
 		if (extra.card) base.card = extra.card;
 		['pipe', 'days_min', 'days_max'].forEach(k => { if (extra[k] !== undefined && extra[k] !== '') base[k] = extra[k]; });
+		// One Analytics value (source / gender / age group …) — the server filters on the same expression it grouped by.
+		if (extra.dim) { base.dim = extra.dim; base.dim_value = extra.dim_value === undefined ? '' : extra.dim_value; }
 		if (extra.own_dates) {
 			base.own_dates = 1;
 			base.from_date = null;
@@ -1254,6 +1265,7 @@ class PathwaysOverallDashboard {
 				</span>
 			</div>`);
 		const $body = $el.find('.pod-st-body');
+		$el.find('.pod-st-search').val(st.search);
 		let last_page = 1;
 
 		const draw = (m) => {
@@ -1363,9 +1375,10 @@ class PathwaysOverallDashboard {
 		const unit_on = extra.unit_on || '';
 		const base = Object.assign({}, extra);
 		const sort = extra.sort_by ? { sort_by: extra.sort_by, sort_dir: extra.sort_dir } : {};
+		if (extra.search) sort.search = extra.search;
 		if (extra.show_days) cols = cols.concat([{ key: 'days', label: __('In pipeline'), nw: true,
 			render: (r) => r.days === '' ? '' : `<b class="pod-days">${this.esc(__('{0} days', [this.n(r.days)]))}</b>` }]);
-		['units', 'unit_on', 'show_days', 'sort_by', 'sort_dir'].forEach(k => delete base[k]);
+		['units', 'unit_on', 'show_days', 'sort_by', 'sort_dir', 'search'].forEach(k => delete base[k]);
 		const total = units.reduce((a, u) => a + (u.value || 0), 0);
 		const d = new frappe.ui.Dialog({ title: this.esc(title), size: 'extra-large' });
 		d.$wrapper.find('.modal-dialog').addClass('modal-dialog-centered pod-modal-wide');
@@ -1496,6 +1509,7 @@ class PathwaysOverallDashboard {
 		$c.find('.pod-pane').each((_, p) => { p.hidden = $(p).data('pane') !== tab; });
 		if (tab === 'timeline' && this.tl_dirty && this.data) this.render_tl_list();
 		if (tab === 'funnel' && this.fun_dirty && this.data) this.render_funnel_tab();
+		if (tab === 'analytics' && this.an_dirty && this.data) this.render_analytics();
 	}
 
 	// Every applicant in scope (same filters, paged / searched on the
@@ -1715,7 +1729,7 @@ class PathwaysOverallDashboard {
 	// DataMeet), shaded on one blue ramp by number of offers, count on each
 	// state that has any. Non-state buckets (not given / all states / other)
 	// are listed underneath.
-	india_map($el, states, tipon, $tip) {
+	india_map($el, states, tipon, $tip, noun = __('offers')) {
 		const esc = (v) => this.esc(v);
 		const key = (v) => String(v || '').toLowerCase().replace(/&/g, 'and').replace(/\s+islands?$/, '').replace(/\s+/g, ' ').trim();
 		if (!POD_INDIA_MAP) {
@@ -1735,7 +1749,7 @@ class PathwaysOverallDashboard {
 				const v = n[key(sh.name)] || 0;
 				const st = step(v);
 				return `<path d="${sh.d}" fill="${st < 0 ? 'var(--border)' : ramp[st]}" class="pod-state"
-					data-tip-html="${esc(`<b>${esc(sh.name)}</b>: ${esc(this.n(v))} ${__('offers')}`)}"></path>`;
+					data-tip-html="${esc(`<b>${esc(sh.name)}</b>: ${esc(this.n(v))} ${esc(noun)}`)}"></path>`;
 			}).join('');
 			const labels = shapes.filter(sh => n[key(sh.name)]).map(sh => {
 				const v = n[key(sh.name)];
@@ -1743,7 +1757,7 @@ class PathwaysOverallDashboard {
 			}).join('');
 			const known = new Set(shapes.map(sh => key(sh.name)));
 			const extra = states.filter(x => !known.has(key(x.state)));
-			$el.html(`<svg viewBox="0 0 ${geo.w} ${geo.h}" class="pod-india-svg" role="img" aria-label="${esc(__('Offers by state, map of India'))}">${paths}${labels}</svg>
+			$el.html(`<svg viewBox="0 0 ${geo.w} ${geo.h}" class="pod-india-svg" role="img" aria-label="${esc(__('{0} by state, map of India', [noun]))}">${paths}${labels}</svg>
 				<div class="pod-tile-legend"><span class="pod-muted">${__('Fewer')}</span>${ramp.map(c => `<i style="background:${c}"></i>`).join('')}<span class="pod-muted">${__('More')}</span></div>
 				${extra.length ? `<div class="pod-tl-note pod-muted">${extra.map(x => `${esc(__(x.state))}: ${esc(this.n(x.n))}`).join(' · ')}</div>` : ''}
 				<div class="pod-map-credit">${__('Map')}: <a href="https://github.com/datameet/maps" target="_blank" rel="noopener">DataMeet India community</a>
@@ -1990,6 +2004,449 @@ class PathwaysOverallDashboard {
 			set({ days: String($g.data('range')), pipe: p ? String(p) : '' },
 				`${__(b.label)} ${__('in pipeline')}${p ? ' · ' + (p === 'open' ? __('Still in pipeline') : __('Ended')) : ''}`);
 		});
+	}
+
+	// ── Analytics tab ──────────────────────────────────────────────────────
+	// The next level after the counts: the same filtered, permission-scoped
+	// registrations sliced by unit, job description, source, referrer,
+	// gender, education, age and home state; time per step and who it waits
+	// on; feedback turnaround; interviewer outcomes; recorded reasons; and
+	// how complete the underlying data is. One server call (cached 10 min,
+	// Refresh bypasses it), made only while this tab is open. Every number
+	// with a list behind it opens that list (same drilldown as everywhere).
+	render_analytics() {
+		this.an_dirty = false;
+		const refresh = !!this.an_refresh;
+		this.an_refresh = false;
+		const $a = this.$root.find('#pod-an');
+		if (!$a.children().length) $a.html(`<div class="pod-empty">${__('Loading analytics…')}</div>`);
+		$a.addClass('pod-st-loading');
+		const my = this.an_seq = (this.an_seq || 0) + 1;
+		frappe.call({
+			method: POD_API + 'get_analytics',
+			args: this.args(this.filters || this.current_filters(), { refresh: refresh ? 1 : 0 }),
+			callback: (r) => { if (my === this.an_seq && r.message) this.draw_analytics($a, r.message); },
+			always: () => { if (my === this.an_seq) $a.removeClass('pod-st-loading'); }
+		});
+	}
+
+	draw_analytics($a, s) {
+		const esc = (v) => this.esc(v);
+		const n = (v) => this.n(v);
+		const ms = s.milestones || [];
+		const steps = [{ key: 'reg', label: __('Registered') }].concat(ms.map(m => ({ key: m.key, label: __(m.label) })));
+		const label_of = (k) => (steps.find(x => x.key === k) || {}).label || k;
+		const units = s.units || [];
+		const pc =(a, b) => (b ? `${this.pct(a, b)}%` : '—');
+		const days = (v) => (v === null || v === undefined ? '—' : __('{0} d', [n(Math.round(v * 10) / 10)]));
+		const OWN = { hr: 'var(--an-hr)', unit: 'var(--an-unit)', approver: 'var(--an-appr)', candidate: 'var(--an-cand)' };
+		const GEN = { Female: 'var(--an-f)', Male: 'var(--an-m)', Other: 'var(--an-o)' };
+		// light → dark blue ramp; dark text on the light steps, white on the dark ones
+		const RAMP = ['#E3EEFC', '#CDE2FB', '#9EC5F4', '#6DA7EC', '#3987E5', '#1C5CAB'];
+		const heat = (t) => {
+			const i = Math.max(0, Math.min(RAMP.length - 1, Math.floor(t * RAMP.length - 1e-9)));
+			return `background:${RAMP[i]};color:${i >= 4 ? '#fff' : '#1A2B3C'}`;
+		};
+		// a drillable element: data-drill = {kind, title, extra} → this.drill()
+		const dd = (kind, title, extra = {}) =>
+			`data-drill="${esc(JSON.stringify({ kind, title, extra }))}" role="button" tabindex="0"`;
+		const ms_drill = (k, title, extra = {}) => (k === 'reg' ? dd('registrations', title, extra)
+			: dd('card', title, Object.assign({ card: k }, extra)));
+		const box = (title, sub, body, tip = '', tools = '', cls = '') => `
+			<div class="pod-tl-chart ${cls}">
+				<div class="pod-tl-chart-head">
+					<div><div class="pod-tl-chart-title">${esc(title)} ${this.info_html(tip)}</div>
+						${sub ? `<div class="pod-panel-sub">${esc(sub)}</div>` : ''}</div>
+					${tools}
+				</div>${body}</div>`;
+		const group = (title, lead) => `<div class="pod-group-title">${esc(title)}</div>
+			${lead ? `<div class="pod-an-lead">${esc(lead)}</div>` : ''}`;
+		const empty = (t) => `<div class="pod-empty">${esc(t || __('No data for these filters.'))}</div>`;
+		const legend = (items) => `<div class="pod-legend">${items.map(x =>
+			`<span><i style="background:${x.color}"></i>${esc(x.label)}</span>`).join('')}</div>`;
+		// horizontal bars: label | bar | value (+ muted note); optional drill on the row
+		const hbars = (items, opts = {}) => {
+			if (!items.length) return empty(opts.empty);
+			const max = Math.max(1, ...items.map(x => x.v || 0));
+			return `<div class="pod-an-bars">${items.map(x => `
+				<div class="pod-bar-row ${x.drill ? 'is-click' : ''}" ${x.drill || ''}>
+					<div class="pod-bar-label" title="${esc(x.label)}">${x.dot ? `<span class="pod-dot" style="--c:${x.dot}"></span>` : ''}${esc(x.label)}</div>
+					<div class="pod-bar-track">${x.v ? `<div class="pod-bar" style="width:${Math.max(1.5, (x.v / max) * 100)}%;--c:${x.color || 'var(--pipe-open)'}"></div>` : ''}</div>
+					<div class="pod-bar-val"><b>${esc(x.vtext === undefined ? n(x.v) : x.vtext)}</b>${x.note ? ` <span class="pod-muted">${esc(x.note)}</span>` : ''}</div>
+				</div>`).join('')}</div>`;
+		};
+		// one 100% bar split into parts, 2px gaps; hover a part for its number
+		const stack = (parts) => {
+			const tot = parts.reduce((a, p) => a + (p.v || 0), 0);
+			if (!tot) return `<div class="pod-an-stack is-empty"></div>`;
+			return `<div class="pod-an-stack">${parts.filter(p => p.v).map(p => `<span style="flex:${p.v};background:${p.color}"
+				data-tip-html="${esc(`<b>${esc(p.label)}</b>: ${esc(n(p.v))} (${this.pct(p.v, tot)}%)`)}"></span>`).join('')}</div>`;
+		};
+
+		// ── 1. Conversion by unit ────────────────────────────────────────
+		const all = { program: '', unit: __('All units') };
+		steps.forEach(st => { all[st.key] = units.reduce((a, u) => a + (u[st.key] || 0), 0); });
+		const conv_rows = (units.length > 1 ? [all] : []).concat(units);
+		const conv = !all.reg ? empty() : `<div class="pod-table-scroll"><table class="pod-table pod-an-conv">
+			<thead><tr><th>${__('Unit')}</th>${steps.map(st => `<th>${esc(st.label)}</th>`).join('')}<th>${__('Registered → joined')}</th></tr></thead>
+			<tbody>${conv_rows.map(u => `<tr class="${u.program ? '' : 'is-total'}"><td><b>${esc(u.unit)}</b></td>${steps.map((st, i) => {
+				const v = u[st.key] || 0;
+				const prev = i ? (u[steps[i - 1].key] || 0) : null;
+				const rate = prev ? v / prev : null;
+				const title = i ? __('{0} of {1} {2} reached {3}', [n(v), n(prev), steps[i - 1].label, st.label]) : '';
+				const extra = u.program ? { programs: [u.program] } : {};
+				return `<td class="pod-an-cell ${v ? 'is-click' : ''}" ${v ? ms_drill(st.key, `${st.label} · ${u.unit}`, extra) : ''}
+					${rate !== null ? `style="${heat(rate)}"` : ''} title="${esc(title)}"><b>${n(v)}</b>${prev ? `<small>${this.pct(v, prev)}%</small>` : ''}</td>`;
+			}).join('')}<td>${pc(u.reach_joined, u.reg)}</td></tr>`).join('')}</tbody></table></div>
+			<div class="pod-an-ramp"><span class="pod-muted">${__('Share who moved on from the step before')}:</span>
+				${['0–17%', '17–33%', '33–50%', '50–67%', '67–83%', '83–100%'].map((l, i) => `<i style="background:${RAMP[i]}"></i><span class="pod-muted">${l}</span>`).join('')}</div>`;
+
+		// ── 2. Job descriptions ──────────────────────────────────────────
+		const jds = (s.jds || []).map((j, i) => Object.assign({ i }, j, {
+			label: [j.role || __('(no role)'), j.job_code].filter(Boolean).join(' · '),
+			sl_rate: j.reg ? j.reach_cv / j.reg : 0,
+			acc_rate: (j.reach_accepted + j.declined) ? j.reach_accepted / (j.reach_accepted + j.declined) : null
+		}));
+		const jd_extra = (j) => Object.assign({ programs: [j.program] }, j.job_code ? { job_codes: [j.job_code] } : {},
+			j.role ? { roles: [j.role] } : {});
+		const jd_ok = (j) => !!(j.job_code || j.role);
+		const jd_cell = (j, k, title) => {
+			const v = j[k] || 0;
+			return v && jd_ok(j) ? `<a class="pod-an-num" ${ms_drill(k, `${title} · ${j.label}`, jd_extra(j))}>${n(v)}</a>` : n(v);
+		};
+		const most = jds.slice(0, 10);
+		const fewest = jds.filter(j => j.reg > 0).slice(-10).reverse();
+		const jd_bar = (j) => ({ label: j.label, v: j.reg, note: j.unit,
+			drill: jd_ok(j) ? dd('registrations', `${__('Applications')} · ${j.label}`, jd_extra(j)) : '' });
+		const hm = s.jd_heat || { months: [], rows: [] };
+		const hmax = Math.max(1, ...hm.rows.flatMap(r => r.cells));
+		const mon = (m) => frappe.datetime.str_to_obj(m + '-01').toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
+		const heat_tbl = !hm.rows.length ? empty() : `<div class="pod-table-scroll"><table class="pod-table pod-an-heat">
+			<thead><tr><th>${__('Job description')}</th>${hm.months.map(m => `<th>${esc(mon(m))}</th>`).join('')}</tr></thead>
+			<tbody>${hm.rows.map(r => `<tr><td title="${esc(r.unit)}"><b>${esc([r.role || __('(no role)'), r.job_code].filter(Boolean).join(' · '))}</b></td>${r.cells.map((c, i) =>
+				`<td class="pod-an-hcell" style="${c ? heat(c / hmax) : ''}" title="${esc(`${mon(hm.months[i])}: ${n(c)} ${__('applications')}`)}">${c ? n(c) : ''}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+
+		// ── 3. Time ──────────────────────────────────────────────────────
+		const tt = Object.fromEntries((s.time_to || []).map(t => [t.key, t]));
+		const cov = s.coverage || {};
+		const hist_pct = cov.moved ? this.pct(cov.history_docs, cov.moved) : 0;
+		const kpi = (label, value, sub, tip) => `
+			<div class="pod-tl-kpi" style="--c:${POD_TONES.info}">
+				<div class="pod-tl-kpi-top"><span>${esc(label)}</span>${this.info_html(tip)}</div>
+				<b>${esc(value)}</b><small>${esc(sub || '')}</small>
+			</div>`;
+		const tkpi = (k, label) => {
+			const t = (tt[k] || {}).all || [null, null, 0];
+			return kpi(label, days(t[0]), t[2] ? __('median · {0} applicants · avg {1}', [n(t[2]), days(t[1])]) : __('no recorded changes yet'),
+				__('Half the applicants took fewer days than this, half took more — from the application date to the day their Application Status first reached this step (from the change history).'));
+		};
+		const time_kpis = `<div class="pod-tl-kpis">
+			${tkpi('reach_offer', __('Application → offer'))}
+			${tkpi('reach_accepted', __('Application → offer accepted'))}
+			${tkpi('reach_joined', __('Application → joined'))}
+			${kpi(__('Change history available'), `${hist_pct}%`, __('{0} of {1} applicants past "New"', [n(cov.history_docs), n(cov.moved)]),
+				__('Time is measured from the Application Status change history (Version). Applicants moved before changes were tracked, or bulk-updated outside the form, have no history and are left out of the time figures.'))}
+		</div>`;
+		const to_rows = (units.length > 1 ? [{ program: '', unit: __('All units') }] : []).concat(units);
+		const to_tbl = `<div class="pod-table-scroll"><table class="pod-table pod-an-conv">
+			<thead><tr><th>${__('Unit')}</th>${(s.time_to || []).map(t => `<th>${esc(__(t.label))}</th>`).join('')}</tr></thead>
+			<tbody>${to_rows.map(u => `<tr class="${u.program ? '' : 'is-total'}"><td><b>${esc(u.unit)}</b></td>${(s.time_to || []).map(t => {
+				const v = u.program ? (t.units || {})[u.program] : t.all;
+				return `<td title="${esc(v && v[2] ? __('median of {0} applicants · average {1}', [n(v[2]), days(v[1])]) : '')}">${v && v[2]
+					? `<b>${esc(days(v[0]))}</b><small>${esc(__('n={0}', [n(v[2])]))}</small>` : '<span class="pod-muted">—</span>'}</td>`;
+			}).join('')}</tr>`).join('')}</tbody></table></div>`;
+		const st = s.steps || [];
+		const owners = s.owners || [];
+		const step_bars = hbars(st.map(x => ({
+			label: __(x.label), v: x.median || 0, vtext: x.n ? days(x.median) : '—', color: OWN[x.owner], dot: OWN[x.owner],
+			note: x.n ? __('avg {0} · {1} stays', [days(x.avg), n(x.n)]) + (x.open ? ' · ' + __('{0} there now', [n(x.open)]) : '')
+				: (x.open ? __('{0} there now', [n(x.open)]) : __('no recorded stays'))
+		})), { empty: __('No status changes recorded for these applicants yet.') });
+		const own_tot = owners.map(o => ({ key: o.key, label: __(o.label), color: OWN[o.key],
+			v: st.filter(x => x.owner === o.key).reduce((a, x) => a + (x.total_days || 0), 0) }));
+		const own_sum = own_tot.reduce((a, o) => a + o.v, 0);
+		const owner_box = !own_sum ? empty(__('No status changes recorded for these applicants yet.')) : `
+			${stack(own_tot)}
+			<div class="pod-an-ownlist">${own_tot.map(o => `<div><i style="background:${o.color}"></i><span>${esc(o.label)}</span>
+				<b>${this.pct(o.v, own_sum)}%</b><span class="pod-muted">${esc(__('{0} applicant-days', [n(o.v)]))}</span></div>`).join('')}</div>`;
+		const ta = s.turnaround || [];
+		const ta_tbl = !ta.length ? empty(__('No interviews with feedback forms for these filters.')) : `<div class="pod-table-scroll"><table class="pod-table">
+			<thead><tr><th>${__('Unit')}</th><th>${__('Median')}</th><th>${__('Average')}</th><th>${__('Within 2 days')}</th><th>${__('No feedback yet')}</th></tr></thead>
+			<tbody>${ta.map(t => `<tr><td><b>${esc(t.unit)}</b></td><td>${esc(days(t.median))}</td><td>${esc(days(t.avg))}</td>
+				<td>${t.n ? `${this.pct(t.within2, t.n)}%` : '—'} <span class="pod-muted">${esc(__('of {0}', [n(t.n)]))}</span></td>
+				<td>${t.pending ? `<a class="pod-an-num" ${dd('pending', `${__('Feedback pending')} · ${t.unit}`, { programs: [t.program] })}>${n(t.pending)}</a>` : '0'}</td></tr>`).join('')}
+			</tbody></table></div>`;
+
+		// ── 4. Sources & referrals ──────────────────────────────────────
+		const src = s.sources || [];
+		const src_tot = src.reduce((a, x) => a + x.reg, 0);
+		const src_max = Math.max(1, ...src.map(x => x.reg));
+		const dim_num = (dim, row, k, title) => {
+			const v = row[k] || 0;
+			return v ? `<a class="pod-an-num" ${ms_drill(k, `${title} · ${row.label}`, { dim, dim_value: row.value })}>${n(v)}</a>` : '0';
+		};
+		const src_tbl = !src.length ? empty() : `<div class="pod-table-scroll pod-short"><table class="pod-table">
+			<thead><tr><th>${__('Source')}</th><th>${__('Applicants')}</th><th>${__('CV shortlisted')}</th><th>${__('Offers')}</th><th>${__('Joined')}</th><th>${__('Offer rate')}</th></tr></thead>
+			<tbody>${src.map(x => `<tr><td title="${esc(x.label)}"><b>${esc(x.label)}</b></td>
+				<td><span class="pod-an-inbar"><i style="width:${(x.reg / src_max) * 100}%"></i></span>${dim_num('source', x, 'reg', __('Applicants'))} <span class="pod-muted">${pc(x.reg, src_tot)}</span></td>
+				<td>${dim_num('source', x, 'reach_cv', __('CV shortlisted'))} <span class="pod-muted">${pc(x.reach_cv, x.reg)}</span></td>
+				<td>${dim_num('source', x, 'reach_offer', __('Offers'))}</td>
+				<td>${dim_num('source', x, 'reach_joined', __('Joined'))}</td>
+				<td>${x.reg ? esc(__('{0} per 1,000', [n(Math.round((x.reach_offer / x.reg) * 10000) / 10)])) : '—'}</td></tr>`).join('')}</tbody></table></div>`;
+		const refs = s.referrers || [];
+		const ref_tbl = !refs.length ? empty(__('No applicant named an employee referrer for these filters.')) : `<div class="pod-table-scroll pod-short"><table class="pod-table">
+			<thead><tr><th>${__('Referred by')}</th><th>${__('Referred')}</th><th>${__('CV shortlisted')}</th><th>${__('Offers')}</th><th>${__('Joined')}</th></tr></thead>
+			<tbody>${refs.map(x => `<tr><td title="${esc(x.value)}"><b>${esc(x.label)}</b></td>
+				<td>${dim_num('referrer', x, 'reg', __('Referred'))}</td>
+				<td>${dim_num('referrer', x, 'reach_cv', __('CV shortlisted'))} <span class="pod-muted">${pc(x.reach_cv, x.reg)}</span></td>
+				<td>${dim_num('referrer', x, 'reach_offer', __('Offers'))}</td><td>${dim_num('referrer', x, 'reach_joined', __('Joined'))}</td></tr>`).join('')}</tbody></table></div>`;
+
+		// ── 5. Diversity ─────────────────────────────────────────────────
+		const g = Object.fromEntries((s.gender || []).map(x => [x.value, x]));
+		const gkeys = ['Female', 'Male', 'Other'];
+		const g_rows = steps.map(stp => {
+			const parts = gkeys.map(k => ({ label: __(k), v: (g[k] || {})[stp.key] || 0, color: GEN[k] }));
+			const known = parts.reduce((a, p) => a + p.v, 0);
+			return `<div class="pod-an-grow"><span class="pod-an-glabel">${esc(stp.label)}</span>${stack(parts)}
+				<span class="pod-an-gval">${known ? `<b>${this.pct(parts[0].v, known)}%</b> ${esc(__('women'))}` : '—'}</span></div>`;
+		}).join('');
+		const g_missing = (g[''] || {}).reg || 0;
+		const g_box = !(s.gender || []).length ? empty(__('Gender is not captured for the units in scope.')) : `${g_rows}
+			${g_missing ? `<div class="pod-tl-note pod-muted">${esc(__('{0} applicants have no gender filled in; they are left out of the shares.', [n(g_missing)]))}</div>` : ''}`;
+		const gu_keys = ['reg', 'reach_cv', 'reach_offer', 'reach_joined'];
+		const w_share = (rows, k) => {
+			const f = (rows.Female || {})[k] || 0;
+			const known = gkeys.reduce((a, x) => a + ((rows[x] || {})[k] || 0), 0);
+			return known ? { pct: this.pct(f, known), f, known } : null;
+		};
+		const gu_tbl = `<div class="pod-table-scroll"><table class="pod-table pod-an-conv">
+			<thead><tr><th>${__('Unit')}</th>${gu_keys.map(k => `<th>${esc(label_of(k))}</th>`).join('')}<th title="${esc(__('Change in the share of women from registration to offer'))}">${__('Change')}</th></tr></thead>
+			<tbody>${(s.gender_units || []).map(u => {
+				if (!u.captured) return `<tr><td><b>${esc(u.unit)}</b></td><td colspan="${gu_keys.length + 1}" class="pod-muted">${__('Gender is not captured on this unit\'s form')}</td></tr>`;
+				const sh = gu_keys.map(k => w_share(u.rows, k));
+				const d = sh[0] && sh[2] ? Math.round((sh[2].pct - sh[0].pct) * 10) / 10 : null;
+				return `<tr><td><b>${esc(u.unit)}</b></td>${sh.map((x, i) => `<td title="${esc(x ? __('{0} women of {1} with gender filled in', [n(x.f), n(x.known)]) : '')}">${x
+					? `<a class="pod-an-num" ${ms_drill(gu_keys[i], `${label_of(gu_keys[i])} · ${__('Women')} · ${u.unit}`, { programs: [u.program], dim: 'gender', dim_value: 'Female' })}>${x.pct}%</a>`
+					: '—'}</td>`).join('')}
+					<td>${d === null ? '—' : `<b class="${d < 0 ? 'pod-an-down' : ''}">${d > 0 ? '+' : ''}${d} ${__('pts')}</b>`}</td></tr>`;
+			}).join('')}</tbody></table></div>`;
+		// filled-in values as bars (biggest first); past `top`, the rest fold into one "Other" bar
+		const dim_bars = (dim, rows, title, top = 8) => {
+			const filled = rows.filter(x => x.value);
+			const items = filled.slice(0, top).map(x => ({
+				label: __(x.label), v: x.reg, note: __('{0} shortlisted', [pc(x.reach_cv, x.reg)]),
+				drill: dd('registrations', `${title} · ${x.label}`, { dim, dim_value: x.value })
+			}));
+			const rest = filled.slice(top);
+			if (rest.length) {
+				const v = rest.reduce((a, x) => a + x.reg, 0);
+				const cv = rest.reduce((a, x) => a + x.reach_cv, 0);
+				items.push({ label: __('Other ({0} values)', [rest.length]), v, note: __('{0} shortlisted', [pc(cv, v)]) });
+			}
+			return hbars(items, { empty: __('Not filled in for these applicants.') });
+		};
+		const not_given = (rows) => {
+			const x = rows.find(r => !r.value);
+			return x && x.reg ? `<div class="pod-tl-note pod-muted">${esc(__('Not filled in: {0}', [n(x.reg)]))}</div>` : '';
+		};
+		const edu = s.education || [];
+		const age = s.age_band || [];
+		const hs = (s.home_state || []).filter(x => x.value);
+
+		// ── 6. Interviewers ──────────────────────────────────────────────
+		const ivs = (s.interviewers || []).filter(x => x.forms);
+		const iv_dec = ivs.reduce((a, x) => a + x.decided, 0);
+		const iv_sel = ivs.reduce((a, x) => a + x.Select, 0);
+		const iv_avg = iv_dec ? (iv_sel / iv_dec) * 100 : null;
+
+		// ── 7. Reasons ───────────────────────────────────────────────────
+		const decl = (s.decline || []).map(x => ({ label: x.value, v: x.n,
+			drill: dd('registrations', `${__('Decline reason')} · ${x.value}`, { stage: 'Not selected', dim: 'decline_reason', dim_value: x.value }) }));
+		const rej = (s.reject || []).map(x => ({ label: x.value, v: x.n, note: __(x.phase),
+			drill: dd('registrations', `${__('Rejection reason')} · ${x.value}`, { stage: 'Not selected', dim: 'reject_reason', dim_value: x.value }) }));
+
+		// ── 8. Data coverage ─────────────────────────────────────────────
+		const FIELD_LABELS = { source: __('How they heard (source)'), gender: __('Gender'), education: __('Education'),
+			age_band: __('Age (age / date of birth)'), home_state: __('Home state'), referrer: __('Employee referrer'),
+			decline_reason: __('Offer decline reason'), reject_reason: __('Rejection reason') };
+		const FIELD_NOTES = { referrer: __('Only filled when someone was referred.'),
+			decline_reason: __('Share of declined offers / not joined with a reason.'), reject_reason: __('Share of rejected applicants with a reason.') };
+		const all_units = cov.all_units || [];
+		const cov_rows = (cov.fields || []).map(x => ({
+			what: FIELD_LABELS[x.key] || x.key,
+			where: x.units.length ? (x.units.length === all_units.length ? __('All units') : x.units.join(', ')) : __('Not captured'),
+			missing: all_units.filter(u => !x.units.includes(u)).join(', '),
+			pct: x.total ? this.pct(x.filled, x.total) : null, filled: x.filled, total: x.total, note: FIELD_NOTES[x.key] || ''
+		})).concat([
+			{ what: __('Application Status change history'), where: __('All units'), pct: hist_pct, filled: cov.history_docs, total: cov.moved,
+				note: __('Needed for every time figure above.') },
+			{ what: __('Interviewer named on the interview'), where: __('All units'), pct: cov.interviews ? this.pct(cov.interviews_named, cov.interviews) : null,
+				filled: cov.interviews_named, total: cov.interviews, note: '' },
+			{ what: __('Urban / rural, city tier (1, 2, 3)'), where: __('Not captured'), missing: '', pct: null, filled: 0, total: 0,
+				note: __('No form asks for it yet — add a field to analyse it.') }
+		]);
+		const cov_tbl = `<div class="pod-table-scroll"><table class="pod-table pod-an-cov">
+			<thead><tr><th>${__('Data')}</th><th>${__('Captured on')}</th><th>${__('Filled in')}</th><th>${__('Note')}</th></tr></thead>
+			<tbody>${cov_rows.map(r => `<tr><td><b>${esc(r.what)}</b></td>
+				<td title="${esc(r.missing ? __('Not on: {0}', [r.missing]) : '')}">${esc(r.where)}${r.missing && r.where !== __('Not captured') ? ` <span class="pod-muted">· ${esc(__('not on {0}', [r.missing]))}</span>` : ''}</td>
+				<td>${r.pct === null ? '<span class="pod-muted">—</span>' : `<span class="pod-an-inbar ${r.pct < 50 ? 'is-low' : ''}"><i style="width:${r.pct}%"></i></span><b>${r.pct}%</b> <span class="pod-muted">${esc(__('{0} of {1}', [n(r.filled), n(r.total)]))}</span>`}</td>
+				<td class="pod-muted" title="${esc(r.note)}">${esc(r.note)}</td></tr>`).join('')}</tbody></table></div>`;
+
+		const updated = String(s.generated_at || '').slice(11, 16);
+		$a.html(`
+			<div class="pod-an-head pod-muted">${esc(__('Every chart follows the filters above · click any number or bar for its list · numbers cached up to 10 minutes (Refresh for fresh ones) · updated {0}', [updated]))}</div>
+
+			${group(__('Conversion'), __('How many applicants move on from each step, and how that differs between units.'))}
+			${box(__('Step-by-step conversion, by unit'), __('Number reaching each step; small % = share of the step before; darker = more moved on'), conv,
+				__('Each step counts everyone who got at least that far, even if rejected later, so the numbers only narrow left to right. The % under a number is the share of the step before who reached it — compare a column across units to see where one unit loses more applicants.'))}
+
+			${group(__('Job descriptions'), __('Which openings draw applications, and how their offers turn out.'))}
+			${box(__('Applications, offers and acceptance by job description'), __('Every job code / role in scope · click a column to sort, a number for its list'),
+				`<div class="pod-an-tools"><input type="search" class="pod-an-jdsearch" placeholder="${esc(__('Filter by role, job code or unit…'))}" aria-label="${esc(__('Filter job descriptions'))}"></div><div class="pod-table-scroll pod-short" id="pod-an-jd"></div>`,
+				__('Acceptance = offers accepted (including everyone now onboarding or joined) ÷ (accepted + declined / not joined). Offers still awaiting a reply are left out of it. Months = calendar months in which this job received applications.'))}
+			<div class="pod-grid-2">
+				${box(__('Most applications'), __('Top 10 job descriptions'), hbars(most.map(jd_bar)))}
+				${box(__('Fewest applications'), __('Bottom 10 job descriptions (with at least one)'), hbars(fewest.map(jd_bar)))}
+			</div>
+			${box(__('Applications per month'), __('The 10 most-applied job descriptions · darker = more applications that month'), heat_tbl)}
+
+			${group(__('Time taken'), __('How long each part of the process takes, and who the waiting is on.'))}
+			${time_kpis}
+			${box(__('Days from application to each step, by unit'), __('Median days · n = applicants with a recorded change'), to_tbl,
+				__('From the application date to the day the Application Status first reached that step. Reaching a later step counts as having reached the earlier ones by then.'))}
+			<div class="pod-grid-2">
+				${box(__('Time spent at each step'), __('Median days per stay, coloured by who the step waits on'), step_bars,
+					__('A stay = from the day an applicant entered a step until their status moved to a different step. Consecutive statuses of the same step (e.g. Recruiter Round → Scheduled → Select) are one stay. "There now" = still at that step.'),
+					legend(owners.map(o => ({ label: __(o.label), color: OWN[o.key] }))))}
+				${box(__('Who the waiting is on'), __('Share of all recorded days applicants spent waiting'), owner_box,
+					__('All completed stays added up per owner. HR team = screening, test, recruiter round, documents, offer letter, onboarding. Interview panel (unit) = functional and leadership rounds. Approvers = compensation approval. Candidate = deciding on the offer. This split is a starting assumption — tell us if a step belongs to someone else.'))}
+			</div>
+			${box(__('Feedback turnaround'), __('Days from the interview to the first feedback form submitted after it'), ta_tbl,
+				__('For every interview held (not cancelled): the days until the applicant\'s first feedback form dated on or after the interview day. "No feedback yet" = no form since that interview; click it for the list.'))}
+			${box(__('Successful candidates'), __('Everyone who accepted an offer · days from application · click a name for their profile'),
+				`<div class="pod-table-scroll pod-short" id="pod-an-succ"></div>`,
+				__('Days come from the status change history; "—" means the change was not recorded.'))}
+
+			${group(__('Sources & referrals'), __('Where applicants heard about the opening, and which sources and employees bring people who get through.'))}
+			${box(__('Source quality'), __('Applicants per source and how far they get'), src_tbl,
+				__('Offer rate = offers made per 1,000 applicants from that source, so small and large sources compare fairly.'))}
+			${box(__('Employee referrers'), (s.referrer_count || 0) > refs.length ? __('Top {0} of {1} employees who referred someone', [refs.length, s.referrer_count]) : __('Employees named as the referrer'), ref_tbl,
+				__('From "If yes — employee name" on the registration (Field). The people who bring in applicants who get shortlisted and hired are your strongest influencers.'))}
+
+			${group(__('Diversity & inclusion'), __('Who applies, and whether that mix holds as applicants move through the process.'))}
+			<div class="pod-grid-2">
+				${box(__('Gender at each step'), __('Share of women, men and other at each step (gender filled in)'), g_box, '',
+					legend(gkeys.map(k => ({ label: __(k), color: GEN[k] }))))}
+				${box(__('Women\'s share by unit'), __('% women at each step · last column = change from registration to offer'), gu_tbl,
+					__('A unit whose share of women rises (or holds) from registration to offer is doing more for gender balance than one where it falls. Click a % for those women.'))}
+			</div>
+			<div class="pod-grid-3">
+				${box(__('Education'), __('Highest qualification · click for the list'), dim_bars('education', edu, __('Education')) + not_given(edu))}
+				${box(__('Age group'), __('At application · click for the list'), dim_bars('age_band', age, __('Age')) + not_given(age),
+					__('From the Age field, or the date of birth on the application date. Placeholder values (0, 1900-01-01, future dates) count as not filled in.'))}
+				${box(__('Home state'), __('Where applicants come from · darker = more'), hs.length ? '<div class="pod-india pod-an-map"></div>' : empty(__('Home state is not filled in for these applicants.')),
+					__('Field: Native State · Health: State / Union territory · Scholarship: State of residence. Grants does not capture it.'))}
+			</div>
+
+			${group(__('Interviewers'), __('How outcomes vary between interviewers — names hidden by default.'))}
+			${box(__('Interviewer outcomes'), iv_avg === null ? '' : __('Average select rate across all interviewers: {0}%', [Math.round(iv_avg * 10) / 10]),
+				`<div class="pod-table-scroll pod-short" id="pod-an-iv"></div>`,
+				__('From the result on each feedback form, per panelist. Select rate = Select ÷ (Select + Reject + On hold). Interviewers see different candidates and rounds, so read a big difference as a prompt for a calibration conversation, not a verdict; fewer than 5 decisions is too few to compare.'),
+				`<label class="pod-an-toggle"><input type="checkbox" class="pod-an-names"> ${__('Show names')}</label>`)}
+
+			${group(__('Reasons'), __('What is recorded about why applicants decline or are turned down.'))}
+			<div class="pod-grid-2">
+				${box(__('Why offers were declined'), __('Decline reason recorded on the registration'),
+					hbars(decl, { empty: __('No decline reasons recorded yet. Filling "Decline Reason" when marking Offer Declined makes this chart work (compensation, location, another offer…).') }))}
+				${box(__('Recorded rejection reasons'), __('"Reasons for reject" / "Reason for regret" on the registration'), hbars(rej, { empty: __('No rejection reasons recorded for these applicants.') }))}
+			</div>
+
+			${group(__('Data coverage'), __('How complete the data behind these charts is — the gaps to close for better analytics.'))}
+			${box(__('What is captured, and how much is filled in'), __('For the applicants in scope'), cov_tbl)}
+		`);
+
+		// job descriptions table (client-side sort + filter over all rows)
+		const jd_cols = [
+			{ key: 'unit', label: __('Unit') },
+			{ key: 'job_code', label: __('Job code'), nw: true },
+			{ key: 'role', label: __('Role') },
+			{ key: 'reg', label: __('Applications'), render: (j) => jd_cell(j, 'reg', __('Applications')) },
+			{ key: 'reach_cv', label: __('CV shortlisted'), render: (j) => `${jd_cell(j, 'reach_cv', __('CV shortlisted'))} <span class="pod-muted">${pc(j.reach_cv, j.reg)}</span>` },
+			{ key: 'reach_offer', label: __('Offers'), render: (j) => jd_cell(j, 'reach_offer', __('Offers')) },
+			{ key: 'reach_accepted', label: __('Accepted'), render: (j) => jd_cell(j, 'reach_accepted', __('Accepted')) },
+			{ key: 'declined', label: __('Declined'), render: (j) => n(j.declined) },
+			{ key: 'acc_rate', label: __('Acceptance'), sort: (j) => (j.acc_rate === null ? -1 : j.acc_rate),
+				render: (j) => (j.acc_rate === null ? '<span class="pod-muted">—</span>' : `<b>${Math.round(j.acc_rate * 1000) / 10}%</b>`) },
+			{ key: 'active_months', label: __('Months'), render: (j) => `${n(j.active_months)} <span class="pod-muted">${esc(j.first ? `${mon(j.first)} – ${mon(j.last)}` : '')}</span>` }
+		];
+		const $jd = $a.find('#pod-an-jd');
+		const draw_jd = () => {
+			const q = String($a.find('.pod-an-jdsearch').val() || '').toLowerCase().trim();
+			const rows = q ? jds.filter(j => `${j.unit} ${j.job_code} ${j.role}`.toLowerCase().includes(q)) : jds;
+			this.sortable_table($jd, jd_cols, rows, { default_sort: 'reg', default_dir: -1, empty: __('No job descriptions match.') });
+		};
+		draw_jd();
+		let jt = null;
+		$a.find('.pod-an-jdsearch').on('input', () => { clearTimeout(jt); jt = setTimeout(draw_jd, 200); });
+
+		// successful candidates
+		this.sortable_table($a.find('#pod-an-succ'), [
+			{ key: 'name', label: __('Applicant'), render: (r) => this.cand_link(r) },
+			{ key: 'unit', label: __('Unit') },
+			{ key: 'role', label: __('Role') },
+			{ key: 'applied', label: __('Applied'), nw: true, render: (r) => esc(this.fmt_date(r.applied)) },
+			...[['to_offer', __('Days to offer')], ['to_accept', __('Days to accept')], ['to_join', __('Days to join')]].map(([k, l]) => ({
+				key: k, label: l, nw: true, sort: (r) => (r[k] === null || r[k] === undefined ? 1e9 : r[k]),
+				render: (r) => (r[k] === null || r[k] === undefined ? '<span class="pod-muted">—</span>' : `<b>${n(r[k])}</b>`) })),
+			{ key: 'status', label: __('Status') }
+		], s.successes || [], { default_sort: 'applied', default_dir: -1, empty: __('Nobody has accepted an offer within these filters.') });
+
+		// interviewers (anonymised unless "Show names" is ticked)
+		const draw_iv = () => {
+			const show = $a.find('.pod-an-names').prop('checked');
+			const rows = ivs.map((x, i) => Object.assign({}, x, {
+				who: show ? x.label : __('Interviewer {0}', [String(i + 1).padStart(2, '0')]),
+				rate: x.decided ? (x.Select / x.decided) * 100 : null
+			}));
+			this.sortable_table($a.find('#pod-an-iv'), [
+				{ key: 'who', label: __('Interviewer'), render: (r) => (show && r.by
+					? `<a class="pod-an-num" ${dd('feedback', `${__('Feedback by')} ${r.label}`, { search: r.by })}>${esc(r.who)}</a>` : `<b>${esc(r.who)}</b>`) },
+				{ key: 'units', label: __('Units'), render: (r) => esc((r.units || []).join(', ')) },
+				{ key: 'forms', label: __('Feedback forms'), render: (r) => n(r.forms) },
+				{ key: 'Select', label: __('Select'), render: (r) => n(r.Select) },
+				{ key: 'Reject', label: __('Reject'), render: (r) => n(r.Reject) },
+				{ key: 'On hold', label: __('On hold'), render: (r) => n(r['On hold']) },
+				{ key: 'rate', label: __('Select rate'), sort: (r) => (r.rate === null ? -1 : r.rate), render: (r) => (r.rate === null ? '<span class="pod-muted">—</span>'
+					: `<b>${Math.round(r.rate * 10) / 10}%</b>${r.decided < 5 ? ` <span class="pod-muted">${esc(__('only {0}', [n(r.decided)]))}</span>` : ''}`) },
+				{ key: 'diff', label: __('vs average'), sort: (r) => (r.rate === null || iv_avg === null ? -1e9 : r.rate - iv_avg), render: (r) => {
+					if (r.rate === null || iv_avg === null || r.decided < 5) return '<span class="pod-muted">—</span>';
+					const d = Math.round((r.rate - iv_avg) * 10) / 10;
+					return `<span class="${d < 0 ? 'pod-an-down' : ''}">${d > 0 ? '+' : ''}${d} ${__('pts')}</span>`;
+				} }
+			], rows, { default_sort: 'forms', default_dir: -1, empty: __('No feedback forms for these filters.') });
+		};
+		draw_iv();
+		$a.find('.pod-an-names').on('change', draw_iv);
+
+		// home state map
+		const $tip = this.$root.find('#pod-tip');
+		const tipon = (e, html) => $tip.html(html).css({ display: 'block', left: e.clientX + 14, top: e.clientY + 14 });
+		if (hs.length) this.india_map($a.find('.pod-an-map'), hs.map(x => ({ state: x.value, n: x.reg })), tipon, $tip, __('applicants'));
+
+		// interactions: hover tooltips, and every [data-drill] opens its list
+		$a.find('[data-tip-html]').on('mousemove', (e) => tipon(e, $(e.currentTarget).attr('data-tip-html')))
+			.on('mouseleave', () => $tip.hide());
+		const open = (el) => {
+			try {
+				const d = JSON.parse(el.getAttribute('data-drill'));
+				$tip.hide();
+				this.drill(d.kind, d.title, d.extra || {});
+			} catch (err) { /* malformed attribute — ignore */ }
+		};
+		$a.off('click.pan keydown.pan')
+			.on('click.pan', '[data-drill]', (e) => { if (!$(e.target).closest('.pod-info').length) open(e.currentTarget); })
+			.on('keydown.pan', '[data-drill]', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(e.currentTarget); } });
+		// applicant names (.pod-cand) are already handled by the page root's delegated click
 	}
 
 	open_timeline(program, id) {
@@ -2751,5 +3208,63 @@ const POD_CSS = `
 @media (prefers-reduced-motion: reduce) {
 	.pod-root *, .pod-root *::before, .pod-root *::after { animation:none !important; transition:none !important; }
 	.pod-kpi.is-click:hover, .pod-tile:hover { transform:none; }
+}
+
+/* ── Analytics tab ── */
+/* categorical slots (validated, light + dark steps): who a step waits on, and gender */
+.pod-root { --an-hr:#2A78D6; --an-unit:#1BAF7A; --an-appr:#EDA100; --an-cand:#6250D6;
+	--an-f:#6250D6; --an-m:#1BAF7A; --an-o:#EDA100; --an-down:#B83232; }
+:root[data-theme="dark"] .pod-root { --an-hr:#3987E5; --an-unit:#199E70; --an-appr:#C98500; --an-cand:#9085E9;
+	--an-f:#9085E9; --an-m:#199E70; --an-o:#C98500; --an-down:#E66767; }
+.pod-an { transition:opacity .15s; }
+.pod-an.pod-st-loading { opacity:.55; pointer-events:none; }
+.pod-an > .pod-tl-chart, .pod-an > .pod-grid-2, .pod-an > .pod-grid-3, .pod-an > .pod-tl-kpis { margin-bottom:12px; }
+.pod-an .pod-grid-2, .pod-an .pod-grid-3 { gap:12px; }
+.pod-an .pod-group-title { margin:20px 2px 2px; }
+.pod-an-head { font-size:12px; color:var(--muted); margin:0 2px 2px; }
+.pod-an-lead { font-size:12.5px; color:var(--text-2); margin:0 2px 10px; }
+.pod-an-bars .pod-bar-row { grid-template-columns:minmax(110px, 36%) minmax(0,1fr) auto; padding:5px 4px; }
+.pod-an-bars .pod-bar-label { overflow:hidden; text-overflow:ellipsis; }
+.pod-an-bars .pod-bar-val { font-variant-numeric:tabular-nums; }
+.pod-an-bars .pod-bar-val .pod-muted { font-size:11.5px; }
+.pod-an .pod-bar-row:focus-visible, .pod-an-cell:focus-visible, .pod-an-num:focus-visible { outline:2px solid var(--brand); outline-offset:-2px; }
+/* conversion / time tables: the number, then its small % */
+.pod-an-conv td b { font-variant-numeric:tabular-nums; }
+.pod-an-conv td small { margin-left:6px; font-size:11px; opacity:.85; }
+.pod-an-conv tr.is-total td { font-weight:600; border-bottom:2px solid var(--border); }
+.pod-an-cell.is-click { cursor:pointer; }
+.pod-an-cell.is-click:hover { box-shadow:inset 0 0 0 2px var(--brand); }
+.pod-an-ramp { display:flex; flex-wrap:wrap; align-items:center; gap:4px 6px; margin-top:8px; }
+.pod-an-ramp i { display:inline-block; width:14px; height:10px; border-radius:2px; border:1px solid var(--border-soft); }
+.pod-an-heat th, .pod-an-heat td { text-align:center; }
+.pod-an-heat th:first-child, .pod-an-heat td:first-child { text-align:left; }
+.pod-an-hcell { font-size:11.5px; min-width:46px; font-variant-numeric:tabular-nums; }
+.pod-an-num { color:var(--link); cursor:pointer; font-weight:600; font-variant-numeric:tabular-nums; }
+.pod-an-num:hover { text-decoration:underline; color:var(--link); }
+.pod-an-inbar { display:inline-block; width:56px; height:6px; margin-right:8px; vertical-align:middle; overflow:hidden;
+	background:var(--border-soft); border-radius:0 3px 3px 0; }
+.pod-an-inbar i { display:block; height:100%; background:var(--pipe-open); border-radius:0 3px 3px 0; }
+.pod-an-inbar.is-low i { background:#B7651B; }
+.pod-an-down { color:var(--an-down); }
+/* one 100% bar split into parts (2px surface gaps) */
+.pod-an-stack { display:flex; gap:2px; height:16px; min-width:0; overflow:hidden; border-radius:0 4px 4px 0; }
+.pod-an-stack.is-empty { background:var(--border-soft); }
+.pod-an-stack span { display:block; min-width:2px; }
+.pod-an-grow { display:grid; grid-template-columns:130px minmax(0,1fr) 92px; align-items:center; gap:10px; padding:6px 2px; }
+.pod-an-glabel { font-size:12.5px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pod-an-gval { font-size:12.5px; text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.pod-an-ownlist { display:grid; gap:7px; margin-top:14px; }
+.pod-an-ownlist div { display:grid; grid-template-columns:12px minmax(0,1fr) auto minmax(110px, auto); gap:8px; align-items:center; font-size:12.5px; }
+.pod-an-ownlist i { width:10px; height:10px; border-radius:2px; }
+.pod-an-ownlist .pod-muted { text-align:right; font-size:11.5px; }
+.pod-an-tools { margin-bottom:8px; }
+.pod-an-tools input { width:min(340px, 100%); height:30px; border:1px solid var(--border); border-radius:8px; padding:0 10px;
+	font-size:12.5px; background:var(--bg); color:var(--text); }
+.pod-an-toggle { display:flex; align-items:center; gap:6px; margin:0; font-size:12px; font-weight:600; color:var(--text-2); cursor:pointer; }
+@media (max-width: 600px) {
+	.pod-an-grow { grid-template-columns:90px minmax(0,1fr); }
+	.pod-an-gval { grid-column:1 / -1; text-align:left; }
+	.pod-an-bars .pod-bar-row { grid-template-columns:minmax(80px, 40%) minmax(0,1fr); }
+	.pod-an-bars .pod-bar-val { grid-column:1 / -1; text-align:left; }
 }
 `;

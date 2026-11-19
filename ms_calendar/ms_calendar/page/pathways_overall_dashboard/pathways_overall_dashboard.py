@@ -51,6 +51,8 @@ PROGRAMS = [
     {
         "key": "Field", "unit_label": "Field",
         "reg": "Field Registration Form",
+        # Only these roles see this unit on the dashboard (see _can_prog).
+        "roles": ["Field Recruiter"],
         "title": "full_name_aadhaar", "email": "email_address", "phone": "phone_number",
         "role": "role", "status": "application_status",
         "unit": "units", "subunit": "department", "location": "location", "job_code": "job_code",
@@ -59,6 +61,9 @@ PROGRAMS = [
         "round_dates": ["date_of_final_round", "date_of_functional_round", "date_of_recruiter_round"],
         "app": ("Field Application Form", "applicant_id"),
         "gender": "gender", "source": "opportunity",
+        # Analytics tab dimensions (None / missing = the form doesn't capture it).
+        "education": "highest_education", "home_state": "native_state", "dob": "dob", "age": "age",
+        "referrer": "employee_referral", "decline_reason": "reason_decline", "reject_reason": "reasons_for_reject",
         "interview": "Field Interview Schedule", "mode": "interview_mode",
         "feedback": sorted({d for dts in FIELD_FEEDBACK_ROUND_MAP.values() for d in dts}),
         "extra_forms": ["Field Self Declaration", "Field MeritTrac Test Result"],
@@ -67,12 +72,15 @@ PROGRAMS = [
     {
         "key": "Health", "unit_label": "Health",
         "reg": "Health Registration Form",
+        "roles": ["Health Recruiter"],
         "title": "full_name", "email": "email_address", "phone": "phone_number",
         "role": "role", "status": "application_status",
         "unit": "unit", "subunit": "department", "location": "location", "job_code": "job_code",
         "app_date": None,
         "app": None,
         "gender": "gender", "source": "opportunity",
+        "education": "education_qualification", "home_state": "state__union_territory", "dob": "date_of_birth",
+        "age": "age", "reject_reason": "reasons_for_reject",
         "interview": "Health Interview Schedule", "mode": "interview_type",
         "feedback": list(MBBS_FEEDBACK_ROUND_DOCTYPES),
         "extra_forms": ["Health Document Collection"],
@@ -80,12 +88,14 @@ PROGRAMS = [
     {
         "key": "Philanthropy", "unit_label": "Grants",
         "reg": "Phil Registration Form",
+        "roles": ["Philanthropy Recruiter"],
         "title": "name1", "email": "email", "phone": "phone",
         "role": "role", "status": "application_status",
         "unit": "unit", "subunit": None, "location": "location", "job_code": "job_code",
         "app_date": None,
         "app": None,
         "gender": None, "source": "source",
+        "education": "highest_level_of_education", "dob": "date_of_birth", "age": "age",
         "interview": "Philanthropy Interview Schedule", "mode": "interview_mode",
         "feedback": ["Philanthrophy Feedback Form"],
         "extra_forms": ["Philanthrophy Document Collection"],
@@ -93,12 +103,14 @@ PROGRAMS = [
     {
         "key": "Scholarship", "unit_label": "Azim Premji Scholarship",
         "reg": "Scholarship Recruitment Form",
+        "roles": ["Scholarship Recruiter", "Scholarship CV Recruiter", "Scholarship Admin"],
         "title": "full_name_as_per_aadhar", "email": "email", "phone": "phone_number",
         "role": "role", "status": "application_status",
         "unit": "unit", "subunit": "department", "location": "location", "job_code": None,
         "app_date": None,
         "app": None,
         "gender": "gender", "source": "opportunity",
+        "education": "highest_level_of_education", "home_state": "state_of_residence", "dob": "date_of_birth",
         "interview": "Interview Schedule", "mode": "interview_mode",
         "feedback": ["Feedback Form One"],
     },
@@ -455,6 +467,20 @@ def _can_read(doctype):
     return bool(doctype) and frappe.db.exists("DocType", doctype) and frappe.has_permission(doctype, "read")
 
 
+# These roles see every unit; everyone else sees only the units in their
+# programme's "roles" list (Field Recruiter → Field only). Read permission
+# alone is not enough: Field / Health registrations are readable by Guest,
+# so every logged-in user would otherwise see them.
+SEE_ALL_ROLES = {"Administrator", "System Manager"}
+
+
+def _can_prog(cfg):
+    roles = set(frappe.get_roles())
+    if not (roles & SEE_ALL_ROLES or roles & set(cfg.get("roles") or [])):
+        return False
+    return _can_read(cfg["reg"])
+
+
 def _scoped(doctype, fields, filters=None):
     """
     The user's permission-scoped SELECT for `doctype` as SQL text, to be used
@@ -475,15 +501,19 @@ def _col(alias, field, present):
 
 
 FILTER_KEYS = ("roles", "units", "subunits", "locations", "job_codes")
+# Analytics dimensions a drilldown may narrow to (one value, e.g. source = LinkedIn).
+DIMS = ("source", "gender", "education", "age_band", "referrer", "decline_reason", "reject_reason")
 
 
-def _parse_filters(programs=None, from_date=None, to_date=None, stages=None, **lists):
+def _parse_filters(programs=None, from_date=None, to_date=None, stages=None, dim=None, dim_value=None, **lists):
     f = frappe._dict(
         programs=[p for p in _list(programs) if p in PROGRAM_KEYS] or PROGRAM_KEYS,
         stages=[s for s in _list(stages) if s in STAGES],
         fd=str(getdate(from_date)) if from_date else None,
         td=str(getdate(to_date)) if to_date else None,
+        dim=dim if dim in DIMS else None,
     )
+    f.dim_value = str(dim_value if dim_value is not None else "")[:200] if f.dim else None
     for k in FILTER_KEYS:
         f[k] = _list(lists.get(k))
     return f
@@ -509,6 +539,8 @@ class _Prog:
                   cfg["role"], cfg["unit"], cfg["subunit"], cfg["location"], cfg["job_code"], cfg["app_date"]]
         fields += cfg.get("round_dates") or []
         fields += [cfg.get("gender"), cfg.get("source")]   # offer update charts
+        fields += [cfg.get(k) for k in ("education", "home_state", "dob", "age", "referrer", "decline_reason",
+                                        "reject_reason")]  # analytics tab
         self.reg_sql, self.reg_fields = _scoped(cfg["reg"], fields)
         self.st = _col("r", cfg["status"], self.reg_fields)
         self.rl = _col("r", cfg["role"], self.reg_fields)
@@ -538,6 +570,14 @@ class _Prog:
             else:
                 conds.append(f"{col} IN %({pf}{fkey})s")
                 params[f"{pf}{fkey}"] = tuple(vals)
+        if f.get("dim"):
+            # One analytics value (source / gender / …); a form that doesn't capture it has no rows.
+            expr = self.dim_expr(f.dim)
+            if expr is None:
+                conds.append("1=0")
+            else:
+                conds.append(f"{expr} = %({pf}dimv)s")
+                params[f"{pf}dimv"] = f.dim_value
         if include_stage and self.stages:
             sts = self.allowed_statuses or []
             if not sts:
@@ -567,6 +607,37 @@ class _Prog:
                 conds.append(f"{days} <= %({pf}dmax)s")
                 params[f"{pf}dmax"] = self.dmax
         return " AND ".join(conds), params
+
+    def dim_expr(self, dim):
+        """
+        SQL for one analytics dimension on `r` ('' = not filled in), or None
+        when this programme's form doesn't capture it. The Analytics tab
+        groups by exactly this expression and drilldowns filter on it, so a
+        bar and its list always agree.
+        """
+        if dim == "age_band":
+            parts = []
+            age = _col("r", self.cfg.get("age"), self.reg_fields)
+            dob = _col("r", self.cfg.get("dob"), self.reg_fields)
+            # Placeholder values (age 0, DOB 1900-01-01 or a future date) fall outside 18–75 → "not given".
+            if age != "NULL":
+                parts.append(f"IF(CAST({age} AS SIGNED) BETWEEN 18 AND 75, CAST({age} AS SIGNED), NULL)")
+            if dob != "NULL":
+                yrs = f"TIMESTAMPDIFF(YEAR, {dob}, {self.adate})"
+                parts.append(f"IF({yrs} BETWEEN 18 AND 75, {yrs}, NULL)")
+            if not parts:
+                return None
+            a = f"COALESCE({', '.join(parts)})" if len(parts) > 1 else parts[0]
+            return (f"CASE WHEN {a} IS NULL THEN '' WHEN {a} < 25 THEN '18-24' WHEN {a} < 30 THEN '25-29' "
+                    f"WHEN {a} < 35 THEN '30-34' WHEN {a} < 40 THEN '35-39' WHEN {a} < 50 THEN '40-49' ELSE '50+' END")
+        col = _col("r", self.cfg.get(dim), self.reg_fields)
+        if col == "NULL":
+            return None
+        if dim == "gender":
+            return (f"CASE WHEN LOWER(TRIM({col})) IN ('other', 'others') THEN 'Other' "
+                    f"WHEN LOWER(TRIM({col})) = 'male' THEN 'Male' WHEN LOWER(TRIM({col})) = 'female' THEN 'Female' "
+                    f"ELSE IFNULL(TRIM({col}), '') END")
+        return f"IFNULL(TRIM({col}), '')"
 
     def pipeline(self):
         """
@@ -641,7 +712,7 @@ class _Prog:
 def _progs(f):
     out = []
     for cfg in PROGRAMS:
-        if cfg["key"] in f.programs and _can_read(cfg["reg"]):
+        if cfg["key"] in f.programs and _can_prog(cfg):
             out.append(_Prog(cfg, f, idx=len(out)))
     return out
 
@@ -765,7 +836,7 @@ def get_dashboard_data(programs=None, from_date=None, to_date=None, stages=None,
     # all-time registrations (ignores every filter except programme + permissions)
     all_time = 0
     for cfg in PROGRAMS:
-        if cfg["key"] in f.programs and _can_read(cfg["reg"]):
+        if cfg["key"] in f.programs and _can_prog(cfg):
             sql, _ = _scoped(cfg["reg"], ["name"])
             all_time += frappe.db.sql(f"SELECT COUNT(*) FROM ({sql}) t")[0][0]
 
@@ -789,7 +860,7 @@ def get_dashboard_data(programs=None, from_date=None, to_date=None, stages=None,
     out = {
         "filters": {"programs": f.programs, "from_date": f.fd, "to_date": f.td, "stages": f.stages,
                     **{k: f[k] for k in FILTER_KEYS}},
-        "programs_available": [c["key"] for c in PROGRAMS if _can_read(c["reg"])],
+        "programs_available": [c["key"] for c in PROGRAMS if _can_prog(c)],
         "units_in_scope": [{"program": pg.key, "unit": pg.cfg["unit_label"]} for pg in progs],
         "options": _cached_filter_options(f.programs),
         "stages": STAGES,
@@ -801,7 +872,7 @@ def get_dashboard_data(programs=None, from_date=None, to_date=None, stages=None,
         "funnel": funnel,
         "status_rows": status_rows,
         "trend": sorted(trend.items()),
-        "has_status_log": any(c.get("status_log") and c["key"] in f.programs and _can_read(c["reg"])
+        "has_status_log": any(c.get("status_log") and c["key"] in f.programs and _can_prog(c)
                               for c in PROGRAMS),
         "all_time_registrations": all_time,
         "generated_at": frappe.utils.now(),
@@ -832,7 +903,7 @@ def _filter_options(programs):
     """
     roles, locations, combos = set(), set(), set()
     for cfg in PROGRAMS:
-        if cfg["key"] not in programs or not _can_read(cfg["reg"]):
+        if cfg["key"] not in programs or not _can_prog(cfg):
             continue
         sql, present = _scoped(cfg["reg"], ["name", cfg["role"], cfg["location"], cfg["unit"],
                                             cfg["subunit"], cfg["job_code"]])
@@ -1185,7 +1256,7 @@ def _hhmm(t):
 
 
 def _filters_from(kw):
-    return {k: kw.get(k) for k in ("programs", "from_date", "to_date", "stages") + FILTER_KEYS}
+    return {k: kw.get(k) for k in ("programs", "from_date", "to_date", "stages", "dim", "dim_value") + FILTER_KEYS}
 
 
 # ── Timeline tab: offer update charts ──────────────────────────────────────
@@ -1322,6 +1393,411 @@ def get_offer_stats(stage=None, status=None, pipe=None, days_min=None, days_max=
         "total": sum(u["offers"] for u in units),
         "sources": top,
         "states": sorted(({"state": k, "n": n} for k, n in states.items()), key=lambda x: -x["n"]),
+    }
+
+
+# ── Analytics tab ──────────────────────────────────────────────────────────
+#
+# The "next level" asked for in the Nov 2026 review: the same permission-
+# scoped registrations (same filters as every other tab), sliced by unit,
+# job description, source, referrer, gender, education, age and home state;
+# how long each step takes and who it waits on (from the Application Status
+# change history in Version); feedback turnaround; and outcomes per
+# interviewer. One grouped scan per programme + one pass over its status
+# history, cached 10 minutes per user + filters (Refresh bypasses it).
+
+ANALYTICS_CACHE_SECONDS = 600
+# "Reached at least this far" steps (Registered = everyone), nested: each ⊆ the one before.
+MILESTONES = [("reach_cv", "CV shortlisted"), ("reach_leader", "Leadership round"), ("reach_offer", "Offer made"),
+              ("reach_accepted", "Offer accepted"), ("reach_joined", "Joined")]
+_MS_KEYS = [k for k, _ in MILESTONES]
+STATUS_DECLINED = _statuses("offer_declined", "not_joined")
+
+# Steps an applicant waits at, in order, with who the wait is on (time
+# analysis). Consecutive statuses of one step (e.g. Recruiter Round →
+# Recruiter Round Scheduled → Recruiter Round Select) count as one stay.
+STEP_OWNERS = {"hr": "HR team", "unit": "Interview panel (unit)", "approver": "Approvers", "candidate": "Candidate"}
+STEP_DEFS = [
+    ("screening", "CV screening", "hr", ["new"]),
+    ("test", "Shortlisted / test", "hr", ["cv_shortlist", "test_select"]),
+    ("recruiter", "Recruiter round", "hr", ["recruiter"]),
+    ("functional", "Functional rounds", "unit", ["functional"]),
+    ("leadership", "Leadership rounds", "unit", ["leadership"]),
+    ("docs", "Documents & fitment", "hr", ["doc_collection", "fitment"]),
+    ("comp", "Compensation approval", "approver", ["comp_due", "comp_approved"]),
+    ("offer_prep", "Offer letter to be sent", "hr", ["offer_not_sent"]),
+    ("offer_reply", "Waiting for the candidate's reply", "candidate", ["offer_sent"]),
+    ("onboarding", "Onboarding (addendum → IT email)", "hr",
+     ["offer_accepted", "addendum_accepted", "prejoin_done", "prejoin_pending", "it_sent", "it_not_sent"]),
+]
+_STEP_EXTRA = {"Field": {"Test Initiated": "test", "Test Process": "test"}}
+
+
+def _step_map(prog):
+    """status key → step key for one programme (statuses of no step = journey ended / unknown)."""
+    out = {}
+    for step, _, _, cards in STEP_DEFS:
+        for c in cards:
+            for s in STATUS.get(c, {}).get(prog, []):
+                out.setdefault(_status_key(s), step)
+    for s, step in _STEP_EXTRA.get(prog, {}).items():
+        out.setdefault(_status_key(s), step)
+    return out
+
+
+def _outcome(result):
+    """A feedback form's result → Select / Reject / On hold / Not recorded."""
+    s = (result or "").strip().lower()
+    if not s:
+        return "Not recorded"
+    if "reject" in s or "regret" in s:
+        return "Reject"
+    if "hold" in s:
+        return "On hold"
+    if "select" in s:
+        return "Select"
+    return "Other"
+
+
+def _hist_stats(hist):
+    """{days: count} → (median, average, n)."""
+    n = sum(hist.values())
+    if not n:
+        return None, None, 0
+    keys = sorted(hist)
+
+    def kth(k):     # the k-th smallest value (0-based)
+        seen = 0
+        for d in keys:
+            seen += hist[d]
+            if seen > k:
+                return d
+        return keys[-1]
+
+    total = sum(d * c for d, c in hist.items())
+    return (kth((n - 1) // 2) + kth(n // 2)) / 2, round(total / n, 1), n
+
+
+def _hist_add(hist, days, n=1):
+    hist[days] = hist.get(days, 0) + n
+
+
+def _full_names(values):
+    """email → full name for the values that are users' emails (others are kept as they are)."""
+    emails = sorted({v for v in values if v and "@" in v})
+    out = {}
+    for i in range(0, len(emails), 500):
+        for u in frappe.get_all("User", filters={"name": ["in", emails[i:i + 500]]}, fields=["name", "full_name"]):
+            if u.full_name:
+                out[u.name] = u.full_name
+    return out
+
+
+def _person(value, names):
+    """A referrer / panelist as a name: their user's full name, else 'first.last@…' → 'First Last'."""
+    v = (value or "").strip()
+    if v in names:
+        return names[v]
+    if "@" in v:
+        return " ".join(w.capitalize() for w in v.split("@")[0].replace("_", ".").split(".") if w) or v
+    return v
+
+
+def _status_history(pg, w, p):
+    """
+    {docname: [ (date, from, to), … ]} oldest first, plus {docname: application date} —
+    every Application Status change recorded in Version for registrations in scope.
+    """
+    import re
+
+    fld = pg.cfg["status"]
+    tok = r'("(?:[^"\\]|\\.)*"|null)'
+    rx = re.compile(r'\[\s*"' + re.escape(fld) + r'"\s*,\s*' + tok + r'\s*,\s*' + tok + r'\s*\]')
+    hist, adates = {}, {}
+    # Only a short slice of each Version's JSON (around the status change) leaves the
+    # database, so even a few lakh changes stay light to fetch.
+    rows = frappe.db.sql(
+        f"""SELECT v.docname, {pg.adate} AS ad, v.creation,
+                SUBSTRING(v.data, GREATEST(1, LOCATE(%(_vkey)s, v.data) - 1), 400) AS data
+            FROM `tabVersion` v
+            JOIN ({pg.reg_sql}) r ON r.name = v.docname
+            WHERE v.ref_doctype = %(_vdt)s AND v.data LIKE %(_vlike)s AND {w}
+            ORDER BY v.creation""",
+        dict(p, _vdt=pg.cfg["reg"], _vkey=f'"{fld}"', _vlike=f'%"{fld}"%'), as_dict=True)
+    for v in rows:
+        m = rx.search(v.data or "")
+        if not m:
+            continue
+        try:
+            frm, to = (frappe.parse_json(x) for x in m.groups())
+        except Exception:
+            continue
+        if (frm or "") == (to or ""):
+            continue
+        hist.setdefault(v.docname, []).append((getdate(v.creation), frm or "", to or ""))
+        adates[v.docname] = getdate(v.ad) if v.ad else None
+    return hist, adates
+
+
+@frappe.whitelist()
+def get_analytics(refresh=0, **kw):
+    filters = _filters_from(kw)
+    filters.pop("dim", None)
+    filters.pop("dim_value", None)
+    f = _parse_filters(**filters)
+    key = "pathways_overall:analytics:v1:" + hashlib.sha1(
+        frappe.as_json([frappe.session.user, f]).encode()).hexdigest()
+    if not cint(refresh):
+        hit = frappe.cache.get_value(key)
+        if hit:
+            return hit
+    out = _analytics(_progs(f))
+    out["generated_at"] = frappe.utils.now()
+    frappe.cache.set_value(key, out, expires_in_sec=ANALYTICS_CACHE_SECONDS)
+    return out
+
+
+def _analytics(progs):
+    today = getdate(nowdate())
+    blank = lambda: {"reg": 0, **{k: 0 for k in _MS_KEYS}}  # noqa: E731
+
+    def bump(bucket, n, flags):
+        bucket["reg"] += n
+        for k in flags:
+            bucket[k] += n
+
+    units, gender_units, jds = [], [], {}
+    dims = {d: {} for d in ("source", "gender", "education", "age_band", "home_state", "referrer")}
+    captured = {d: [] for d in list(dims) + ["decline_reason", "reject_reason"]}
+    filled = {d: [0, 0] for d in captured}             # [filled, total over units that capture it]
+    decline, reject = {}, {}
+    steps = {s: {"all": {}, "open": 0, "units": {}} for s, _, _, _ in STEP_DEFS}
+    to_ms = {k: {"all": {}, "units": {}} for k in _MS_KEYS}
+    turnaround, panel, successes = [], {}, []
+    history = {"docs": 0, "moved": 0}
+    interviews_named = [0, 0]
+
+    for pg in progs:
+        cfg = pg.cfg
+        w, p = pg.where()
+        reach = {k: {_status_key(s) for s in STATUS[k].get(pg.key, [])} for k in _MS_KEYS}
+        declined = {_status_key(s) for s in STATUS_DECLINED.get(pg.key, [])}
+        ex = {d: pg.dim_expr(d) for d in DIMS}
+        hs = _col("r", cfg.get("home_state"), pg.reg_fields)
+        jc = _col("r", cfg["job_code"], pg.reg_fields)
+        for d in captured:
+            has = hs != "NULL" if d == "home_state" else ex.get(d) is not None
+            if has:
+                captured[d].append(cfg["unit_label"])
+
+        # 1. one grouped scan: status × every dimension × JD × month
+        rows = frappe.db.sql(
+            f"""SELECT IFNULL({pg.st}, '') AS st, {ex['source'] or 'NULL'} AS src, {ex['gender'] or 'NULL'} AS g,
+                    {ex['education'] or 'NULL'} AS edu, {ex['age_band'] or 'NULL'} AS agb,
+                    {ex['referrer'] or 'NULL'} AS ref, {ex['decline_reason'] or 'NULL'} AS dcl,
+                    {ex['reject_reason'] or 'NULL'} AS rej, IFNULL(TRIM({hs}), '') AS hs,
+                    IFNULL(TRIM({pg.rl}), '') AS jrole, IFNULL(TRIM({jc}), '') AS jc,
+                    DATE_FORMAT({pg.adate}, '%%Y-%%m') AS mon, COUNT(*) AS n
+                FROM ({pg.reg_sql}) r WHERE {w}
+                GROUP BY st, src, g, edu, agb, ref, dcl, rej, hs, jrole, jc, mon""", p, as_dict=True)
+        u = {"program": pg.key, "unit": cfg["unit_label"], **blank()}
+        gu = {}
+        for r in rows:
+            n = cint(r.n)
+            sk = _status_key(r.st)
+            flags = [k for k in _MS_KEYS if sk in reach[k]]
+            bump(u, n, flags)
+            for d, v in (("source", r.src), ("gender", r.g), ("education", r.edu), ("age_band", r.agb),
+                         ("referrer", r.ref)):
+                if v is None:
+                    continue
+                filled[d][1] += n
+                if v:
+                    filled[d][0] += n
+                if d == "referrer" and not v:
+                    continue   # only people who named a referrer
+                bump(dims[d].setdefault(v, blank()), n, flags)
+            if r.g is not None:
+                bump(gu.setdefault(r.g, blank()), n, flags)
+            if hs != "NULL":
+                filled["home_state"][1] += n
+                state = _state_of(r.hs) if r.hs else ""
+                if state:
+                    filled["home_state"][0] += n
+                bump(dims["home_state"].setdefault(state or "", blank()), n, flags)
+            # job descriptions: one row per (unit, job code, role)
+            jd = jds.setdefault((pg.key, r.jc, r.jrole), {
+                "program": pg.key, "unit": cfg["unit_label"], "job_code": r.jc, "role": r.jrole,
+                "declined": 0, "months": {}, **blank()})
+            bump(jd, n, flags)
+            if sk in declined:
+                jd["declined"] += n
+            jd["months"][r.mon] = jd["months"].get(r.mon, 0) + n
+            # reasons
+            if r.dcl is not None and sk in declined:
+                filled["decline_reason"][1] += n
+                if r.dcl:
+                    filled["decline_reason"][0] += n
+                    decline[r.dcl] = decline.get(r.dcl, 0) + n
+            if r.rej is not None and _stage(r.st) == "Not selected":
+                filled["reject_reason"][1] += n
+                if r.rej:
+                    filled["reject_reason"][0] += n
+                    k = (r.rej, "Declined the offer / did not join" if sk in declined else "Rejected")
+                    reject[k] = reject.get(k, 0) + n
+        units.append(u)
+        gender_units.append({"program": pg.key, "unit": cfg["unit_label"], "captured": ex["gender"] is not None,
+                             "rows": gu})
+
+        # 2. status history → time spent per step + days to each milestone
+        step_of = _step_map(pg.key)
+        hist, adates = _status_history(pg, w, p)
+        history["docs"] += len(hist)
+        history["moved"] += sum(cint(r.n) for r in rows if _status_key(r.st) not in ("", "new applicant"))
+        first = {}
+        for doc, evs in hist.items():
+            ad = adates.get(doc)
+            cur, start = step_of.get(_status_key(evs[0][1])), ad
+            reached = {}
+            for when, _frm, to in evs:
+                nxt = step_of.get(_status_key(to))
+                if nxt != cur:
+                    if cur and start:
+                        days = max(0, (when - start).days)
+                        _hist_add(steps[cur]["all"], days)
+                        _hist_add(steps[cur]["units"].setdefault(pg.key, {}), days)
+                    cur, start = nxt, when
+                tk = _status_key(to)
+                for k in _MS_KEYS:
+                    if k not in reached and tk in reach[k]:
+                        reached[k] = when
+            if cur:
+                steps[cur]["open"] += 1
+            if ad:
+                # reaching a later step means every earlier one was reached by then too
+                for i, k in enumerate(_MS_KEYS):
+                    later = [reached[x] for x in _MS_KEYS[i:] if x in reached]
+                    if later:
+                        days = max(0, (min(later) - ad).days)
+                        reached.setdefault(k, min(later))
+                        _hist_add(to_ms[k]["all"], days)
+                        _hist_add(to_ms[k]["units"].setdefault(pg.key, {}), days)
+                first[doc] = {k: max(0, (reached[k] - ad).days) for k in reached}
+
+        # successful candidates: everyone at "offer accepted" or beyond
+        acc = STATUS["reach_accepted"].get(pg.key)
+        if acc:
+            for r in frappe.db.sql(
+                    f"""SELECT r.name AS id, IFNULL(NULLIF(TRIM({_col('r', cfg['title'], pg.reg_fields)}), ''), r.name) AS name,
+                            {pg.rl} AS role, {pg.adate} AS applied, IFNULL({pg.st}, '') AS status
+                        FROM ({pg.reg_sql}) r WHERE {w} AND IFNULL({pg.st}, '') IN %(_acc)s""",
+                    dict(p, _acc=tuple(acc)), as_dict=True):
+                d = first.get(r.id) or {}
+                successes.append({"program": pg.key, "unit": cfg["unit_label"], "id": r.id, "name": r.name,
+                                  "role": r.role or "", "applied": str(r.applied or ""), "status": r.status,
+                                  "to_offer": d.get("reach_offer"), "to_accept": d.get("reach_accepted"),
+                                  "to_join": d.get("reach_joined")})
+
+        # 3. interviews → feedback turnaround, and outcomes per interviewer
+        iv_sql, iv_f = pg.interview_sql()
+        fb_union = pg.feedback_union()
+        if iv_sql:
+            canc = _col("i", "is_cancelled", iv_f)
+            ivn = _col("i", "interviewer_name", iv_f)
+            named, total = frappe.db.sql(
+                f"""SELECT SUM(IFNULL(TRIM({ivn}), '') <> ''), COUNT(*) FROM ({iv_sql}) i
+                    JOIN ({pg.reg_sql}) r ON r.name = i.application_id WHERE {w} AND IFNULL({canc},0)=0""", p)[0]
+            interviews_named[0] += cint(named)
+            interviews_named[1] += cint(total)
+        if iv_sql and fb_union:
+            th = {}
+            pending = 0
+            for d, n in frappe.db.sql(
+                    f"""SELECT x.d, COUNT(*) FROM (
+                            SELECT DATEDIFF(MIN(DATE(u.creation)), i.interview_date) AS d
+                            FROM ({iv_sql}) i JOIN ({pg.reg_sql}) r ON r.name = i.application_id
+                            LEFT JOIN ({fb_union}) u ON u.applicant_id = i.application_id
+                                AND DATE(u.creation) >= i.interview_date
+                            WHERE {w} AND IFNULL({canc},0)=0 AND i.interview_date <= %(_t)s
+                            GROUP BY i.name) x GROUP BY x.d""", dict(p, _t=today)):
+                if d is None:
+                    pending += cint(n)
+                else:
+                    _hist_add(th, cint(d), cint(n))
+            med, avg, cnt = _hist_stats(th)
+            turnaround.append({"program": pg.key, "unit": cfg["unit_label"], "median": med, "avg": avg, "n": cnt,
+                               "within2": sum(c for d, c in th.items() if d <= 2), "pending": pending})
+        if fb_union:
+            for by, res, n in frappe.db.sql(
+                    f"""SELECT IFNULL(TRIM(u.by_), ''), u.result, COUNT(*) FROM ({fb_union}) u
+                        JOIN ({pg.reg_sql}) r ON r.name = u.applicant_id WHERE {w} GROUP BY 1, 2""", p):
+                row = panel.setdefault(by or "", {"by": by or "", "units": set(), "forms": 0, "Select": 0,
+                                                  "Reject": 0, "On hold": 0, "Not recorded": 0, "Other": 0})
+                row["units"].add(cfg["unit_label"])
+                row["forms"] += cint(n)
+                row[_outcome(res)] += cint(n)
+
+    # ── shape for the page ──
+    names = _full_names(list(dims["referrer"]) + list(panel))
+
+    def dim_rows(d, label=None, limit=None):
+        rows = [{"value": v, "label": (label(v) if label else v) or "Not given", **c} for v, c in dims[d].items()]
+        rows.sort(key=lambda x: -x["reg"])
+        return rows[:limit] if limit else rows
+
+    def step_out(s, label, owner):
+        st = steps[s]
+        med, avg, n = _hist_stats(st["all"])
+        tot = sum(d * c for d, c in st["all"].items())
+        return {"key": s, "label": label, "owner": owner, "median": med, "avg": avg, "n": n, "total_days": tot,
+                "open": st["open"], "units": {p: _hist_stats(h)[0] for p, h in st["units"].items()}}
+
+    panel_rows = []
+    for by, row in panel.items():
+        decided = row["Select"] + row["Reject"] + row["On hold"]
+        panel_rows.append(dict(row, units=sorted(row["units"]), label=_person(by, names) or "Not recorded",
+                               decided=decided))
+    panel_rows.sort(key=lambda x: -x["forms"])
+
+    jd_rows = sorted(jds.values(), key=lambda x: -x["reg"])
+    top_months = sorted({m for j in jd_rows for m in j["months"] if m})[-24:]
+    heat = [{"program": j["program"], "unit": j["unit"], "role": j["role"], "job_code": j["job_code"],
+             "cells": [j["months"].get(m, 0) for m in top_months]} for j in jd_rows[:10]]
+    for j in jd_rows:
+        j["active_months"] = sum(1 for m, c in j["months"].items() if c and m)
+        j["first"] = min((m for m in j["months"] if m), default="")
+        j["last"] = max((m for m in j["months"] if m), default="")
+        del j["months"]
+
+    return {
+        "milestones": [{"key": k, "label": lbl} for k, lbl in MILESTONES],
+        "units": units,
+        "jds": jd_rows,
+        "jd_heat": {"months": top_months, "rows": heat},
+        "sources": dim_rows("source"),
+        "referrers": dim_rows("referrer", label=lambda v: _person(v, names), limit=25),
+        "referrer_count": len(dims["referrer"]),
+        "gender": dim_rows("gender"),
+        "gender_units": gender_units,
+        "education": dim_rows("education"),
+        "age_band": sorted(dim_rows("age_band"), key=lambda x: (x["value"] == "", x["value"])),
+        "home_state": dim_rows("home_state"),
+        "decline": sorted(({"value": k, "n": n} for k, n in decline.items()), key=lambda x: -x["n"])[:15],
+        "reject": sorted(({"value": k[0], "phase": k[1], "n": n} for k, n in reject.items()), key=lambda x: -x["n"])[:20],
+        "steps": [step_out(s, lbl, o) for s, lbl, o, _ in STEP_DEFS],
+        "owners": [{"key": k, "label": v} for k, v in STEP_OWNERS.items()],
+        "time_to": [{"key": k, "label": lbl, "all": _hist_stats(to_ms[k]["all"]),
+                     "units": {p: _hist_stats(h) for p, h in to_ms[k]["units"].items()}} for k, lbl in MILESTONES],
+        "successes": successes,
+        "turnaround": turnaround,
+        "interviewers": panel_rows,
+        "coverage": {
+            "fields": [{"key": d, "units": captured[d], "filled": filled[d][0], "total": filled[d][1]}
+                       for d in captured],
+            "history_docs": history["docs"], "moved": history["moved"],
+            "interviews_named": interviews_named[0], "interviews": interviews_named[1],
+            "all_units": [pg.cfg["unit_label"] for pg in progs],
+        },
     }
 
 
@@ -1464,6 +1940,8 @@ def _candidate(program, name):
     cfg = next((c for c in PROGRAMS if c["key"] == program), None)
     if not cfg or not name or not frappe.db.exists(cfg["reg"], name):
         frappe.throw("Applicant not found")
+    if not _can_prog(cfg):
+        frappe.throw("Not permitted to view this applicant", frappe.PermissionError)
     if not frappe.has_permission(cfg["reg"], "read", doc=name):
         frappe.throw("Not permitted to view this applicant", frappe.PermissionError)
     return cfg, frappe.get_doc(cfg["reg"], name)

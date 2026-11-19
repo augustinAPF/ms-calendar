@@ -267,7 +267,7 @@
 										<div class="pod-c360-avatar">${esc(this.c360_initials(c.name))}</div>
 										<div class="pod-c360-name">${esc(c.name)}</div>
 										<button class="pod-c360-code" title="${esc(__('Copy Applicant ID'))}">${esc(c.id)} <span class="pod-c360-copy">⧉</span></button>
-										<div class="pod-c360-pills">${this.program_pill(c.program)} ${this.stage_pill(c.stage)}</div>
+										<div class="pod-c360-pills">${this.program_pill(c.program)}</div>
 									</div>
 									${c.status ? `<button class="pod-c360-statusbox pod-c360-go" data-goto="history" title="${esc(__('See status history'))}"
 										style="--sc:${POD_STAGE_COLORS[c.stage] || '#64748B'}">
@@ -673,19 +673,8 @@ a.pod-c360-doc:hover { background:var(--hover); border-color:var(--link); }
 		},
 	};
 
-	// Registration lists: clicking an applicant's name opens the profile
-	// (Ctrl/Cmd/Shift-click or middle-click still opens the form in a tab).
-	// Capture phase: Frappe's router handles link clicks on <body>, which
-	// would otherwise navigate to the form before a bubbling handler runs.
-	document.addEventListener('click', function (e) {
-		const a = e.target && e.target.closest && e.target.closest('.frappe-list .list-row a[data-doctype][data-name]');
-		if (!a || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey) return;
-		const doctype = a.getAttribute('data-doctype');
-		if (!AP_PROGRAMS[doctype]) return;
-		e.preventDefault();
-		e.stopPropagation();
-		window.pathways_applicant_profile.open_for(doctype, a.getAttribute('data-name'));
-	}, true);
+	// Registration lists: an applicant's name opens the form (Frappe's own
+	// link); the list's eye button opens this profile.
 
 	// ── Registration form summary header ──────────────────────────────────
 	// A card at the top of a saved registration record: avatar + name, ID
@@ -754,7 +743,6 @@ a.pod-c360-doc:hover { background:var(--hover); border-color:var(--link); }
 	color:color-mix(in srgb, var(--sc) 85%, #000); background:color-mix(in srgb, var(--sc) 11%, var(--card-bg, #fff));
 	border:1px solid color-mix(in srgb, var(--sc) 35%, transparent); cursor:pointer; }
 .pw-head-status::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--sc); }
-.pw-head-stage { font-size:11.5px; color:var(--text-muted, #6B7A8A); }
 .pw-head-meta { display:flex; flex-wrap:wrap; gap:6px; }
 .pw-head-chip { font-size:12px; color:var(--text-color, #1A2B3C); background:var(--subtle-fg, #F3F6FA); border:1px solid var(--border-color, #E4E9EF);
 	border-radius:6px; padding:2px 9px; }
@@ -787,7 +775,6 @@ a.pod-c360-doc:hover { background:var(--hover); border-color:var(--link); }
 					<span class="pw-head-name">${esc(name)}</span>
 					<span class="pw-head-id" title="${esc(__('Copy ID'))}">${esc(d.name)} ⧉</span>
 					<span class="pw-head-status" title="${esc(__('Go to Application Status'))}">${esc(status)}</span>
-					<span class="pw-head-stage">${esc(__(stage))}</span>
 				</div>
 				${chips ? `<div class="pw-head-meta">${chips}</div>` : ''}
 			</div>

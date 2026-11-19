@@ -62,7 +62,7 @@ frappe.ui.form.on("Enablers Interview Schedule", {
 						method: "ms_calendar.api.ms_enablers.cancel_interview",
 						args: { name: frm.doc.name, reason },
 						freeze: true,
-						freeze_message: __("Cancelling the invite…"),
+						freeze_message: eis_loader_html(__("Cancelling the invite…"), __("Cancelling the Outlook meeting for the interviewers.")),
 					}).then(() => frm.reload_doc()),
 					__("Cancel Interview"),
 					__("Cancel Interview")
@@ -215,13 +215,27 @@ function eis_fetch_round(frm) {
 	});
 }
 
+// Loader shown over the form while Outlook / email work runs (can take
+// 10–30 seconds): spinner, what is happening, and "please wait".
+function eis_loader_html(title, detail) {
+	return `
+		<div class="text-center" style="min-width:280px;">
+			<div class="spinner-border text-primary mb-3" style="width:2.5rem;height:2.5rem;" role="status"></div>
+			<div style="font-size:16px;font-weight:600;">${title}</div>
+			<div class="text-muted" style="font-size:13px;margin-top:6px;">${detail}</div>
+			<div class="text-muted" style="font-size:12px;margin-top:10px;">${__("Please wait, this can take up to a minute. Do not close this page.")}</div>
+		</div>`;
+}
+
 function eis_send(frm, method) {
 	const reschedule = method === "reschedule_interview";
 	frappe.call({
 		method: `ms_calendar.api.ms_enablers.${method}`,
 		args: { name: frm.doc.name },
 		freeze: true,
-		freeze_message: reschedule ? __("Updating the invite…") : __("Sending the invite…"),
+		freeze_message: reschedule
+			? eis_loader_html(__("Updating the invite…"), __("Updating the Outlook meeting and emailing the interviewers and the applicant."))
+			: eis_loader_html(__("Sending the invite…"), __("Creating the Outlook meeting and emailing the interviewers and the applicant.")),
 	}).then(() => {
 		frappe.show_alert({
 			message: reschedule ? __("Invite updated and applicant emailed") : __("Invite sent to the interviewers and the applicant"),
