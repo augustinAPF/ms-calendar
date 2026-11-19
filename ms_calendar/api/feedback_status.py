@@ -23,6 +23,8 @@ import json
 import re
 
 import frappe
+from frappe import _
+from frappe.rate_limiter import rate_limit
 
 PANELIST_EMAIL_FIELDS = ("panelist_email", "panelist__email", "interviewer_email")
 PANELIST_NAME_FIELDS = ("panelist_name", "panal_name", "interviewer_name")
@@ -453,11 +455,11 @@ def _identity_signature(payload):
     return hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
 
 
-def _set_feedback_identity(email):
+def _set_feedback_identity(email, hours=FEEDBACK_ID_HOURS):
     import base64
     from datetime import timedelta
 
-    expires = frappe.utils.now_datetime() + timedelta(hours=FEEDBACK_ID_HOURS)
+    expires = frappe.utils.now_datetime() + timedelta(hours=hours)
     payload = base64.urlsafe_b64encode(f"{email}|{int(expires.timestamp())}".encode()).decode()
     frappe.local.cookie_manager.set_cookie(
         FEEDBACK_ID_COOKIE,
@@ -474,9 +476,12 @@ def _feedback_identity():
     import hmac
     import time
 
+    from urllib.parse import unquote
+
     try:
         raw = (frappe.request.cookies.get(FEEDBACK_ID_COOKIE) or "") if frappe.request else ""
-        payload, _, sig = raw.partition(".")
+        # Frappe's cookie_manager URL-encodes the value ("==" → "%3D%3D").
+        payload, _, sig = unquote(raw).partition(".")
         if not (payload and sig) or not hmac.compare_digest(sig, _identity_signature(payload)):
             return ""
         email, _, exp = base64.urlsafe_b64decode(payload.encode()).decode().rpartition("|")
@@ -565,3 +570,116 @@ def microsoft_return(code: str, state: str):
     except Exception:
         frappe.log_error(title="Feedback Microsoft Sign-in Error", message=frappe.get_traceback()[:2000])
     _redirect(frappe.utils.get_url(redirect_to))
+
+
+# ── Email code (OTP) on the first Submit ────────────────────────────────────
+# Where Microsoft sign-in doesn't work (UAT), the shared invite link shows the
+# panel's names as buttons. A wrong click would let someone submit under
+# another panel member's name, so the FIRST Submit on a device asks for a
+# 6-digit code sent to the picked member's email. A correct code sets the
+# same signed identity cookie as Microsoft sign-in (FEEDBACK_OTP_DAYS), so
+# submitted_feedback → "me" picks them by themselves on every later link,
+# and no code is asked again until it expires or they click "Change".
+FEEDBACK_OTP_CACHE = "apf_feedback_otp:"
+FEEDBACK_OTP_TTL = 10 * 60  # code valid 10 minutes
+FEEDBACK_OTP_COOLDOWN = 60  # seconds between codes to the same email
+FEEDBACK_OTP_MAX_ATTEMPTS = 5
+FEEDBACK_OTP_DAYS = 30
+# Mailbox per unit (same as the registration-form OTPs in api/otp.py); any
+# other unit → the site's default outgoing account.
+FEEDBACK_OTP_SENDERS = {
+    "field": "field.recruitment@azimpremjifoundation.org",
+    "health": "health.jobs@azimpremjifoundation.org",
+}
+
+
+def _otp_email_allowed(doctype, link_id, email):
+    """Only a member of this interview's panel (or a known interviewer) gets a
+    code — the panel list in the link could be edited by anyone."""
+    module = _module(doctype)
+    if not (module and link_id and "@" in email):
+        return False
+    try:
+        schedule = _find_schedule(module, doctype, link_id, [email], {email: ""})
+        if schedule and email in json.dumps(schedule.as_dict(), default=str).lower():
+            return True
+    except Exception:
+        frappe.log_error(title="Feedback OTP Panel Check Error", message=frappe.get_traceback()[:2000])
+    from ms_calendar.api.ms_field import _field_panelist_names
+
+    return bool(_field_panelist_names([email]))
+
+
+@frappe.whitelist(allow_guest=True)
+@rate_limit(limit=10, seconds=60 * 60)
+def send_feedback_otp(doctype, link_id, email):
+    """Email a 6-digit code to a panel member before their first Submit."""
+    import random
+
+    email = (email or "").strip().lower()
+    link_id = (link_id or "").strip()
+    if not _otp_email_allowed(doctype, link_id, email):
+        return {"ok": False, "message": _("This email is not on the panel for this interview.")}
+    cooldown_key = f"{FEEDBACK_OTP_CACHE}cooldown:{email}"
+    if frappe.cache.get_value(cooldown_key):
+        return {"ok": False, "message": _("A code was just sent. Please wait a minute before asking again.")}
+
+    code = str(random.SystemRandom().randint(100000, 999999))
+    frappe.cache.set_value(f"{FEEDBACK_OTP_CACHE}{email}", code, expires_in_sec=FEEDBACK_OTP_TTL)
+    frappe.cache.delete_value(f"{FEEDBACK_OTP_CACHE}attempts:{email}")
+    frappe.cache.set_value(cooldown_key, 1, expires_in_sec=FEEDBACK_OTP_COOLDOWN)
+    try:
+        frappe.sendmail(
+            recipients=[email],
+            sender=FEEDBACK_OTP_SENDERS.get(_module(doctype)),
+            subject=_("Your code for the interview feedback form"),
+            message=(
+                '<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;color:#333;">'
+                "<p>Use this code to confirm it is you filling the interview feedback form.</p>"
+                '<div style="background:#f4f4f4;border-radius:6px;text-align:center;padding:18px;margin:16px 0;">'
+                f'<span style="font-size:32px;font-weight:800;letter-spacing:10px;color:#1e6e66;">{code}</span>'
+                "</div>"
+                '<p style="font-size:13px;color:#888;">Valid for 10 minutes. You are asked for it only '
+                "once on this device. If you did not open the feedback form, ignore this email.</p>"
+                "</div>"
+            ),
+            now=True,
+        )
+    except Exception:
+        frappe.log_error(title="Feedback OTP Send Error", message=frappe.get_traceback()[:2000])
+        frappe.cache.delete_value(f"{FEEDBACK_OTP_CACHE}{email}")
+        frappe.cache.delete_value(cooldown_key)
+        return {"ok": False, "message": _("The code could not be sent. Please try again.")}
+    return {"ok": True, "message": _("Code sent to {0}.").format(email)}
+
+
+@frappe.whitelist(allow_guest=True)
+@rate_limit(limit=30, seconds=60 * 60)
+def verify_feedback_otp(email, code):
+    """Right code → identity cookie (FEEDBACK_OTP_DAYS) for this panel member."""
+    email = (email or "").strip().lower()
+    code = (code or "").strip()
+    key = f"{FEEDBACK_OTP_CACHE}{email}"
+    attempts_key = f"{FEEDBACK_OTP_CACHE}attempts:{email}"
+    stored = frappe.cache.get_value(key)
+    if not (email and stored):
+        return {"ok": False, "message": _("The code has expired. Please send a new code.")}
+    if str(stored) != code:
+        attempts = int(frappe.cache.get_value(attempts_key) or 0) + 1
+        if attempts >= FEEDBACK_OTP_MAX_ATTEMPTS:
+            frappe.cache.delete_value(key)
+            frappe.cache.delete_value(attempts_key)
+            return {"ok": False, "message": _("Too many wrong codes. Please send a new code.")}
+        frappe.cache.set_value(attempts_key, attempts, expires_in_sec=FEEDBACK_OTP_TTL)
+        return {"ok": False, "message": _("Wrong code. Please check the email and try again.")}
+    frappe.cache.delete_value(key)
+    frappe.cache.delete_value(attempts_key)
+    _set_feedback_identity(email, hours=FEEDBACK_OTP_DAYS * 24)
+    return {"ok": True}
+
+
+@frappe.whitelist(allow_guest=True)
+def forget_feedback_identity():
+    """"Change" on the form: this device no longer counts as that member."""
+    frappe.local.cookie_manager.delete_cookie(FEEDBACK_ID_COOKIE)
+    return {"ok": True}

@@ -17,6 +17,11 @@
 //   every later link (ME_ANY_KEY), so the next invite picks them by itself.
 //   Then only that member and "Consolidated (whole panel)" are offered; a
 //   click fills the name(s)/email(s) and loads that draft.
+//   The FIRST Submit on a device asks for a 6-digit code emailed to the
+//   picked member (feedback_status.send_feedback_otp), so a wrong click on
+//   another member's name can't submit as them. A right code = verified for
+//   30 days (signed cookie → status.me): later links pick them by themselves
+//   and Submit asks nothing. "Change" forgets both.
 //   A personal ?panelist_email= link that also has ?panel= skips the email
 //   question. With one member, or a personal link without ?panel= (the
 //   reminder emails), the panelist fields are filled straight away.
@@ -90,6 +95,11 @@
 	let pick_choices = [];
 	// {interview_date, mode, online_panel} of the interview, once known.
 	let schedule_info = {};
+	// Shared invite link (?panel=, picked on the form): the first Submit on a
+	// device asks for an email code (feedback_status.send_feedback_otp), so a
+	// wrong click on someone else's name can't submit as them.
+	let otp_panel = null; // the whole panel, when the code may be asked
+	let verified_me = ""; // panel member this device has proven to be (status.me)
 
 	// ?panel= (ms_field._field_panel_feedback_block): base64url JSON
 	// [[email, name], …] of the interview's panel members.
@@ -651,12 +661,152 @@
 		// Your answers so far are kept as your draft; the page reopens the choice.
 		$who.find(".apf-not-me").on("click", (ev) => {
 			ev.preventDefault();
-			// Ask again (someone else on this device).
-			storage_remove(me_key());
-			storage_remove(ME_ANY_KEY);
-			window.location.reload();
+			change_person();
 		});
 		$(".web-form-wrapper").first().before($who);
+	}
+
+	// "Change" / "Not you?": forget who this device is (the browser's choice
+	// AND the verified identity cookie) and show the names again.
+	function change_person() {
+		storage_remove(me_key());
+		storage_remove(ME_ANY_KEY);
+		const reload = () => window.location.reload();
+		frappe
+			.call({ method: "ms_calendar.api.feedback_status.forget_feedback_identity", callback: reload, error: reload })
+			.fail(reload);
+	}
+
+	// ── Email code on the first Submit (shared invite link only) ───────────
+	function needs_otp() {
+		if (!otp_panel || !chosen) return false;
+		if (chosen.consolidated) return !panel_member(otp_panel, verified_me);
+		return verified_me !== (chosen.email || "").trim().toLowerCase();
+	}
+
+	let otp_email = "";
+
+	function show_otp() {
+		const esc = (v) => frappe.utils.escape_html(v || "");
+		$(".apf-otp-overlay").remove();
+		// Individual → the picked member. Consolidated → they say which
+		// member they are first.
+		otp_email = chosen.consolidated ? "" : (chosen.email || "").trim().toLowerCase();
+		const who = chosen.consolidated
+			? `<div class="small" style="margin:10px 0 6px;">${__("Which panel member are you?")}</div>
+				<div style="display:flex;flex-wrap:wrap;gap:8px;">${otp_panel
+					.map((p, i) => `<button type="button" class="btn btn-sm btn-default apf-otp-btn" data-act="who" data-i="${i}">${esc(p.name || p.email)}</button>`)
+					.join("")}</div>`
+			: "";
+		const $box = $(`
+			<div class="apf-otp-overlay" style="position:fixed;inset:0;background:rgba(17,24,39,.45);z-index:1060;
+				display:flex;align-items:center;justify-content:center;padding:16px;">
+				<div role="dialog" aria-modal="true" style="background:var(--card-bg,#fff);border:1px solid var(--border-color,#d1d5db);
+					border-radius:8px;max-width:440px;width:100%;padding:18px 20px;">
+					<div style="font-weight:600;font-size:16px;">${__("Confirm it's you")}</div>
+					<div class="text-muted small" style="margin-top:4px;">${__(
+						"Only the first time on this device: we email you a 6-digit code. After that this device remembers you."
+					)}</div>
+					${who}
+					<div class="apf-otp-to small" style="margin:12px 0 8px;${otp_email ? "" : "display:none;"}">${__("Code goes to")}
+						<b class="apf-otp-addr">${esc(otp_email)}</b></div>
+					<button type="button" class="btn btn-sm btn-default apf-otp-btn apf-otp-send" data-act="send"
+						style="${otp_email ? "" : "display:none;"}">${__("Send code")}</button>
+					<div class="apf-otp-row" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px;">
+						<input type="text" class="form-control apf-otp-code" inputmode="numeric" autocomplete="one-time-code"
+							maxlength="6" placeholder="${__("6-digit code")}" style="max-width:150px;">
+						<button type="button" class="btn btn-sm btn-default apf-otp-btn" data-act="verify">${__("Verify and submit")}</button>
+						<a href="#" class="apf-otp-btn small" data-act="send">${__("Send again")}</a>
+					</div>
+					<div class="apf-otp-msg small" style="margin-top:8px;min-height:18px;"></div>
+					<div class="small" style="margin-top:10px;border-top:1px solid var(--border-color,#e5e7eb);padding-top:10px;">
+						${chosen.consolidated ? "" : `<a href="#" class="apf-otp-btn" data-act="change">${__("Not you? Pick your own name")}</a> · `}
+						<a href="#" class="apf-otp-btn" data-act="close">${__("Cancel")}</a>
+						<span class="text-muted"> · ${__("your answers stay saved")}</span>
+					</div>
+				</div>
+			</div>`);
+		$box.find(".apf-otp-code").on("keydown", (e) => {
+			if (e.key === "Enter") {
+				e.preventDefault();
+				otp_action("verify");
+			}
+		});
+		$("body").append($box);
+		save_draft(false);
+	}
+
+	function otp_msg(text, bad) {
+		$(".apf-otp-msg").text(text || "").css("color", bad ? "#b91c1c" : "#15803d");
+	}
+
+	function otp_action(act, el) {
+		if (act === "close") {
+			$(".apf-otp-overlay").remove();
+		} else if (act === "change") {
+			save_draft(false);
+			change_person();
+		} else if (act === "who") {
+			const p = otp_panel[+el.getAttribute("data-i")];
+			otp_email = (p.email || "").trim().toLowerCase();
+			$(".apf-otp-overlay [data-act='who']").removeClass("btn-dark").addClass("btn-default");
+			$(el).removeClass("btn-default").addClass("btn-dark");
+			$(".apf-otp-addr").text(otp_email);
+			$(".apf-otp-to").show();
+			$(".apf-otp-send").show();
+			$(".apf-otp-row").hide();
+			otp_msg("");
+		} else if (act === "send") {
+			if (!otp_email) return;
+			otp_msg(__("Sending…"));
+			frappe
+				.call({
+					method: "ms_calendar.api.feedback_status.send_feedback_otp",
+					args: { doctype: wf.doc_type, link_id: link_id(), email: otp_email },
+					callback: (r) => {
+						const m = (r && r.message) || {};
+						otp_msg(m.message || "", !m.ok);
+						if (m.ok) {
+							$(".apf-otp-send").hide();
+							$(".apf-otp-row").css("display", "flex");
+							$(".apf-otp-code").val("").trigger("focus");
+						}
+					},
+				})
+				.fail(() => otp_msg(__("The code could not be sent. Please try again."), true));
+		} else if (act === "verify") {
+			const code = ($(".apf-otp-code").val() || "").replace(/\D/g, "");
+			if (code.length !== 6) {
+				otp_msg(__("Enter the 6-digit code from the email."), true);
+				return;
+			}
+			otp_msg(__("Checking…"));
+			frappe
+				.call({
+					method: "ms_calendar.api.feedback_status.verify_feedback_otp",
+					args: { email: otp_email, code },
+					callback: (r) => {
+						const m = (r && r.message) || {};
+						if (!m.ok) {
+							otp_msg(m.message || __("Wrong code."), true);
+							return;
+						}
+						verified_me = otp_email;
+						remember_me(otp_email);
+						$(".apf-otp-overlay").remove();
+						submit_now();
+					},
+				})
+				.fail(() => otp_msg(__("Could not check the code. Please try again."), true));
+		}
+	}
+
+	// The real Submit, through the page's own Submit button (so each form's
+	// own submit handling still runs); our capture handler lets it through now.
+	function submit_now() {
+		const btn = $(".web-form-footer .submit-btn").get(0);
+		if (btn) btn.click();
+		else wf.save();
 	}
 
 	// Our buttons are handled here, in the window's capture phase, before any
@@ -667,12 +817,15 @@
 	// a Submit while no panel member has been picked.
 	function on_click_capture(e) {
 		const el = e.target && e.target.closest && e.target.closest(
-			".apf-save-draft-btn, .apf-pick, .apf-me-go, .apf-ms-login, .web-form-footer .submit-btn"
+			".apf-save-draft-btn, .apf-pick, .apf-me-go, .apf-ms-login, .apf-otp-btn, .web-form-footer .submit-btn"
 		);
 		if (!el) return;
 		if (el.classList.contains("submit-btn")) {
-			if (!picking()) return; // a real Submit — let it through
-			ask_to_pick();
+			if (picking()) ask_to_pick();
+			else if (needs_otp()) show_otp();
+			else return; // a real Submit — let it through
+		} else if (el.classList.contains("apf-otp-btn")) {
+			otp_action(el.getAttribute("data-act"), el);
 		} else if (el.classList.contains("apf-me-go")) {
 			me_continue();
 		} else if (el.classList.contains("apf-ms-login")) {
@@ -861,6 +1014,10 @@
 				ask_to_pick();
 				return false;
 			}
+			if (needs_otp()) {
+				show_otp();
+				return false;
+			}
 			return orig_save.apply(this, arguments);
 		};
 	}
@@ -929,6 +1086,11 @@
 				// else Microsoft sign-in by itself (once). No Microsoft
 				// sign-in on this site (UAT) → their names as buttons: one
 				// click, no typing, remembered for the next links.
+				// Picked on the form → the first Submit asks for an email code,
+				// unless this device already proved who it is (status.me:
+				// Microsoft sign-in, an earlier code, or a site login).
+				otp_panel = panel;
+				verified_me = status.me || "";
 				const known =
 					panel_member(panel, status.me) ||
 					panel_member(panel, storage_get(me_key())) ||
