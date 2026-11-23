@@ -9,7 +9,15 @@ from frappe.utils.file_manager import save_file
 from frappe.utils.pdf import get_pdf
 
 from ms_calendar.api import enablers_panel
-from ms_calendar.api.ms_enablers import ERF, ROUND_PDF_FIELD, SCHEDULE_DOCTYPE, form_link, notify_recruiters
+from ms_calendar.api.ms_enablers import (
+	ERF,
+	ROUND_PDF_FIELD,
+	ROUND_UPLOAD_FIELD,
+	SCHEDULE_DOCTYPE,
+	form_link,
+	notify_recruiters,
+	round_name,
+)
 
 
 class EnablersFeedbackForm(Document):
@@ -47,9 +55,9 @@ class EnablersFeedbackForm(Document):
 			)
 		notify_recruiters(
 			self.application_id,
-			_("Feedback submitted – {0} – {1}").format(self.applicant_name, self.interview_round),
+			_("Feedback submitted – {0} – {1}").format(self.applicant_name, round_name(self.interview_round)),
 			_("<p>{0} submitted {1} feedback for {2} ({3}, {4}): <b>{5}</b>.</p><p><a href=\"{6}\">Open the feedback</a></p>").format(
-				escape_html(self.interviewer_name), self.interview_round, self.applicant_name, self.application_id,
+				escape_html(self.interviewer_name), round_name(self.interview_round), self.applicant_name, self.application_id,
 				self.role or "", self.recommendation, form_link(self.doctype, self.name),
 			),
 			self.doctype,
@@ -69,7 +77,7 @@ def feedback_html(application_id, interview_round):
 	applicant, role = frappe.db.get_value(ERF, application_id, ["full_name", "role"])
 	parts = [
 		f"<h2 style='font-family:sans-serif'>{escape_html(applicant or '')} ({application_id}) — "
-		f"{escape_html(role or '')} — {interview_round} feedback</h2>"
+		f"{escape_html(role or '')} — {round_name(interview_round)} feedback</h2>"
 	]
 	for name in names:
 		fb = frappe.get_doc("Enablers Feedback Form", name)
@@ -89,6 +97,13 @@ def build_round_feedback_pdf(application_id, interview_round):
 	html = feedback_html(application_id, interview_round)
 	if not (fieldname and html):
 		return None
+	# "Feedback One/Two/Three PDF" (first tab): filled with the built PDF
+	# unless someone uploaded their own file there.
+	upload_field = ROUND_UPLOAD_FIELD.get(interview_round)
+	has_upload_field = upload_field and frappe.get_meta(ERF).has_field(upload_field)
+	old_built, old_upload = frappe.db.get_value(
+		ERF, application_id, [fieldname, upload_field if has_upload_field else fieldname]
+	)
 	for old in frappe.get_all(
 		"File",
 		filters={"attached_to_doctype": ERF, "attached_to_name": application_id, "attached_to_field": fieldname},
@@ -103,5 +118,8 @@ def build_round_feedback_pdf(application_id, interview_round):
 		df=fieldname,
 		is_private=1,
 	)
-	frappe.db.set_value(ERF, application_id, fieldname, file_doc.file_url, update_modified=False)
+	values = {fieldname: file_doc.file_url}
+	if has_upload_field and (not old_upload or old_upload == old_built):
+		values[upload_field] = file_doc.file_url
+	frappe.db.set_value(ERF, application_id, values, update_modified=False)
 	return file_doc.file_url

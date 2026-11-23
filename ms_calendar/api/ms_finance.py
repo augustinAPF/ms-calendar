@@ -58,18 +58,20 @@ FELLOWSHIP_SUB_UNIT = "Finance Fellowship"
 FELLOWSHIP_ROLE = "Azim Premji Finance Fellowship"
 FELLOWSHIP_WEB_FORM = "finance-fellowship-registration-form"
 
-# Status list for Fellowship applicants (Process Flow – Finance Fellowship).
+# Status list for Fellowship applicants — since 2026-11-23 the statuses the
+# user set on the live Enablers Registration Form (shared with Enablers):
+# Recruiter Round, then Functional Round (each "<Round>" / Select / Reject).
 FELLOWSHIP_STATUSES = [
-	"New Applicant",
-	"Shortlist - CV", "On hold - CV", "Regret - CV",
-	"Round 1 Scheduled", "Shortlist - R1", "On hold - R1", "Regret - R1",
+	"New Applicant", "On Hold", "CV Shortlist",
+	"Recruiter Round", "Recruiter Round Select", "Recruiter Round Reject",
 	"Application Form Received",
+	"Functional Round", "Functional Round Select", "Functional Round Reject",
 	"Round 2 Scheduled", "Shortlist - R2", "On hold - R2", "Regret - R2",
 	"Documents Received", "Documents Verified",
 	"Salary Fitment Done",
 	"Offer Released", "Offer Accepted", "Offer Declined",
 ]
-REGRET_STATUSES = ("Regret - CV", "Regret - R1", "Regret - R2")
+REGRET_STATUSES = ("Recruiter Round Reject", "Functional Round Reject", "Regret - R2")
 
 LANGUAGE_FIELDS = (
 	"lang_english", "lang_bengali", "lang_chhattisgarhi", "lang_gujarati", "lang_hindi",
@@ -122,13 +124,13 @@ SCHEDULE_DOCTYPE = "Enablers Interview Schedule"
 IST = ZoneInfo("Asia/Kolkata")
 GRAPH = "https://graph.microsoft.com/v1.0"
 
-ROUND_STATUS = {"Round 1": "Round 1 Scheduled", "Round 2": "Round 2 Scheduled"}
+ROUND_STATUS = {"Recruiter Round": "Recruiter Round", "Functional Round": "Functional Round"}
 # Statuses that are already past a round — scheduling never moves them back.
-PAST_ROUND_1 = (
-	"Shortlist - R1", "On hold - R1", "Application Form Received", "Round 2 Scheduled",
-	"Shortlist - R2", "On hold - R2", "Documents Received", "Documents Verified",
+PAST_ROUND_2 = (
+	"Functional Round Select", "Shortlist - R2", "On hold - R2", "Documents Received", "Documents Verified",
 	"Salary Fitment Done", "Offer Released", "Offer Accepted", "Offer Declined",
 )
+PAST_ROUND_1 = ("Recruiter Round Select", "Application Form Received", "Functional Round", "Round 2 Scheduled") + PAST_ROUND_2
 
 
 # ---------------------------------------------------------------- Fellowship applicant (Enablers Registration Form)
@@ -298,10 +300,9 @@ def fellowship_on_update(doc):
 	if doc.flags.in_insert or not doc.has_value_changed("application_status"):
 		return
 	status = doc.application_status
-	if status == "Shortlist - R1":
+	# "Shortlist - R2" sends no documents email from here (removed 2026-11-19).
+	if status == "Recruiter Round Select":
 		request_application_form(doc)
-	elif status == "Shortlist - R2":
-		request_documents(doc)
 	elif status == "Offer Released":
 		send_offer(doc)
 
@@ -317,11 +318,6 @@ def send_email(doc, template, attachments=None, **extra):
 def request_application_form(doc, remarks=None):
 	send_email(doc, "application_form_request", upload_link=upload_link(doc, STAGE_APPLICATION_FORM), remarks=remarks)
 	doc.db_set("application_form_requested_on", now_datetime(), update_modified=False)
-
-
-def request_documents(doc, remarks=None):
-	send_email(doc, "document_request", upload_link=upload_link(doc, STAGE_DOCUMENTS), remarks=remarks)
-	doc.db_set("documents_requested_on", now_datetime(), update_modified=False)
 
 
 def send_offer(doc):
@@ -362,7 +358,6 @@ def resend_email(application_id, kind):
 	actions = {
 		"application_received": lambda: send_email(doc, "application_received"),
 		"application_form": lambda: request_application_form(doc),
-		"documents": lambda: request_documents(doc),
 		"offer": lambda: send_offer(doc),
 	}
 	if kind not in actions:
@@ -433,7 +428,7 @@ def _invite_context(schedule, registration, settings, teams=("", "", ""), docume
 		assignment=(schedule.assignment_details or "Yes") if cint(schedule.assignment_round) else "",
 		message=schedule.message_to_the_interviewer or "",
 		feedback_link=schedule.feedback_link,
-		earlier_feedback=schedule.interview_round == "Round 2",
+		earlier_feedback=schedule.interview_round == "Functional Round",
 		**enablers_panel.invite_extras(schedule, list(documents)),
 	)
 
@@ -498,10 +493,10 @@ def _invite_attachments(schedule, registration):
 	"""[(label, file url)] for the panel invite: resume, registration form,
 	and for Round 2 the Round 1 feedback + the filled Application Form."""
 	files = [("Resume", registration.resume), ("Registration form", _application_pdf_url(registration))]
-	if schedule.interview_round == "Round 2":
+	if schedule.interview_round == "Functional Round":
 		files.append((
 			"Round 1 feedback",
-			registration.get(ROUND_PDF_FIELD["Round 1"]) or build_round_feedback_pdf(registration.name, "Round 1"),
+			registration.get(ROUND_PDF_FIELD["Recruiter Round"]) or build_round_feedback_pdf(registration.name, "Recruiter Round"),
 		))
 		files.append((
 			"Application form",
@@ -576,9 +571,9 @@ def _move_applicant_status(registration, interview_round):
 	registration = frappe.get_doc(REGISTRATION_DOCTYPE, registration.name)
 	target = ROUND_STATUS[interview_round]
 	current = registration.application_status
-	if current == target or (interview_round == "Round 1" and current in PAST_ROUND_1):
+	if current == target or (interview_round == "Recruiter Round" and current in PAST_ROUND_1):
 		return
-	if interview_round == "Round 2" and current in PAST_ROUND_1[4:]:
+	if interview_round == "Functional Round" and current in PAST_ROUND_2:
 		return
 	registration.application_status = target
 	registration.save()
@@ -750,21 +745,22 @@ def send_due_regret_emails():
 # Applicant-facing stage, per status. Regret shows only once the regret
 # email has gone out (until then the applicant still sees "under review").
 STATUS_STAGES = (
-	("Application received", ("New Applicant", "On hold - CV")),
-	("Round 1 discussion", ("Shortlist - CV", "Round 1 Scheduled")),
-	("Round 2 discussion", ("Shortlist - R1", "On hold - R1", "Application Form Received", "Round 2 Scheduled")),
-	("Document verification", ("Shortlist - R2", "On hold - R2", "Documents Received", "Documents Verified", "Salary Fitment Done")),
+	("Application received", ("New Applicant", "On Hold")),
+	("Round 1 discussion", ("CV Shortlist", "Recruiter Round")),
+	("Round 2 discussion", ("Recruiter Round Select", "Application Form Received", "Functional Round", "Round 2 Scheduled")),
+	("Document verification", ("Functional Round Select", "Shortlist - R2", "On hold - R2", "Documents Received", "Documents Verified", "Salary Fitment Done")),
 	("Offer", ("Offer Released", "Offer Accepted", "Offer Declined")),
 )
 STAGE_MESSAGES = {
 	"New Applicant": "We have received your application and are reviewing it.",
-	"On hold - CV": "We have received your application and are reviewing it.",
-	"Shortlist - CV": "You are shortlisted for the Round 1 discussion. We will email you the details.",
-	"Round 1 Scheduled": "Your Round 1 discussion is scheduled. Please check your email for the details.",
-	"Shortlist - R1": "Please upload your Application Form using the link we emailed you.",
-	"On hold - R1": "Your Round 1 discussion is complete. We will contact you with an update.",
+	"On Hold": "We have received your application and are reviewing it.",
+	"CV Shortlist": "You are shortlisted for the Round 1 discussion. We will email you the details.",
+	"Recruiter Round": "Your Round 1 discussion is scheduled. Please check your email for the details.",
+	"Recruiter Round Select": "Please upload your Application Form using the link we emailed you.",
 	"Application Form Received": "We have received your Application Form. We will email you the Round 2 details.",
+	"Functional Round": "Your Round 2 discussion is scheduled. Please check your email for the details.",
 	"Round 2 Scheduled": "Your Round 2 discussion is scheduled. Please check your email for the details.",
+	"Functional Round Select": "Please upload your documents using the link we emailed you.",
 	"Shortlist - R2": "Please upload your documents using the link we emailed you.",
 	"On hold - R2": "Your Round 2 discussion is complete. We will contact you with an update.",
 	"Documents Received": "We have received your documents and are verifying them.",

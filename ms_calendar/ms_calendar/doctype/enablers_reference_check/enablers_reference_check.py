@@ -8,7 +8,7 @@ from ms_calendar.api.ms_enablers import ERF
 
 # The applicant moves to "Reference Check" once the first one is recorded
 # after their documents were asked for / received.
-MOVE_FROM = ("Round 3 Select", "Document Collection", "Documents Received")
+MOVE_FROM = ("Final Round Select", "Shortlist - R3", "Document Collection", "Documents Received")
 
 
 class EnablersReferenceCheck(Document):

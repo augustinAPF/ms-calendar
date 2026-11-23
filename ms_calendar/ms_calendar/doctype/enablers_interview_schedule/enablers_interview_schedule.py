@@ -21,11 +21,11 @@ from ms_calendar.ms_calendar.doctype.finance_fellowship_settings.finance_fellows
 # applicant's status (it is not picked by hand).
 # Enablers: Rounds 1 and 2 on MS Teams, Round 3 an in-person panel.
 # Finance Fellowship: Round 1 on MS Teams, Round 2 in person (+ assignment).
-ROUND_MODE = {"Round 1": "Online (MS Teams)", "Round 2": "Online (MS Teams)", "Round 3": "In-person"}
-FELLOWSHIP_ROUND_MODE = {"Round 1": "Online (MS Teams)", "Round 2": "In-person"}
+ROUND_MODE = {"Recruiter Round": "Online (MS Teams)", "Functional Round": "Online (MS Teams)", "Final Round": "In-person"}
+FELLOWSHIP_ROUND_MODE = {"Recruiter Round": "Online (MS Teams)", "Functional Round": "In-person"}
 FELLOWSHIP_SCHEDULABLE_FROM = {
-	"Round 1": ("Shortlist - CV", "On hold - CV", "Round 1 Scheduled"),
-	"Round 2": ("Shortlist - R1", "On hold - R1", "Application Form Received", "Round 2 Scheduled"),
+	"Recruiter Round": ("CV Shortlist", "On Hold", "Recruiter Round"),
+	"Functional Round": ("Recruiter Round Select", "Application Form Received", "Functional Round", "Round 2 Scheduled"),
 }
 
 
@@ -56,7 +56,7 @@ class EnablersInterviewSchedule(Document):
 		if not self.organizer_email:
 			settings = get_fellowship_settings() if fellowship else get_settings()
 			self.organizer_email = settings.default_organizer_email
-		if not (fellowship and self.interview_round == "Round 2"):
+		if not (fellowship and self.interview_round == "Functional Round"):
 			self.assignment_round = 0
 		if get_time(self.end_time) <= get_time(self.start_time):
 			frappe.throw(_("End Time must be after Start Time."))

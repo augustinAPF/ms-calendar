@@ -60,48 +60,103 @@ UPLOAD_ROUTE = "/enablers-document-upload/new"
 FEEDBACK_ROUTE = "/enablers-interview-feedback/new"
 
 REGRET_STATUSES = (
-	"CV Reject", "Recruiter Reject", "Round 1 Reject", "Round 2 Reject", "Round 3 Reject", "Round 4 Reject",
+	"Recruiter Round Reject", "Functional Round Reject", "Final Round Reject",
+	"Regret - R2", "Regret - R3", "Regret - R4",
 )
-# Scheduling an interview moves the applicant to "<Round> Scheduled" (same
-# names as the Finance Fellowship flow). The old "Round One/Two/Three"
-# options stay on the form and are treated as the same stage.
-ROUND_STATUS = {"Round 1": "Round 1 Scheduled", "Round 2": "Round 2 Scheduled", "Round 3": "Round 3 Scheduled"}
-ROUND_PDF_FIELD = {
-	"Round 1": "round_1_feedback_pdf",
-	"Round 2": "round_2_feedback_pdf",
-	"Round 3": "round_3_feedback_pdf",
+# Enablers interview rounds (2026-11-23, user): CV Shortlist → Recruiter
+# Round → Functional Round → Final Round — these ARE the Interview Round
+# values on the Interview Schedule / Feedback Forms (were Round 1/2/3; old
+# records are renamed by ensure_enablers_schema via LEGACY_ROUND).
+ROUNDS = ("Recruiter Round", "Functional Round", "Final Round")
+LEGACY_ROUND = {"Round 1": "Recruiter Round", "Round 2": "Functional Round", "Round 3": "Final Round"}
+ROUND_NAME = dict(LEGACY_ROUND, **{r: r for r in ROUNDS})
+# DocTypes whose interview_round uses these values (Fellowship: first two).
+ROUND_DOCTYPES = {
+	"Enablers Interview Schedule": ROUNDS,
+	"Enablers Feedback Form": ROUNDS,
+	"Finance Fellowship Feedback Form": ROUNDS[:2],
 }
-# Status at which a round is scheduled: CV Shortlist → Round 1, Round 1
-# Select → Round 2, Round 2 Select → Round 3 (and again from "<Round>
-# Scheduled" after a cancelled interview).
+# Each round has its own statuses (user, 2026-11-23): "<Round>" (interview
+# scheduled), "<Round> Select", "<Round> Reject". Scheduling an interview
+# moves the applicant to "<Round>".
+ROUND_STATUS = {r: r for r in ROUNDS}
+ROUND_PDF_FIELD = {
+	"Recruiter Round": "round_1_feedback_pdf",
+	"Functional Round": "round_2_feedback_pdf",
+	"Final Round": "round_3_feedback_pdf",
+}
+# "Feedback One/Two/Three PDF" — attach fields the user added on live
+# (first tab). An uploaded file there wins over the built round PDF.
+ROUND_UPLOAD_FIELD = {"Recruiter Round": "feedback_one_pdf", "Functional Round": "feedback_two_pdf", "Final Round": "feedback_three_pdf"}
+# Status at which a round is scheduled: CV Shortlist → Recruiter Round,
+# Recruiter Round Select → Functional Round, Functional Round Select → Final
+# Round (and again from the round's own status after a cancelled interview).
+# The older R2 / R3 statuses on the list still work the same way.
 SCHEDULABLE_FROM = {
-	"Round 1": ("Pre Shortlist", "CV Shortlist", "On Hold", "Recruiter Round", "Round 1 Scheduled", "Round One"),
-	"Round 2": ("Round 1 Select", "Round 2 Scheduled", "Round Two"),
-	"Round 3": ("Round 2 Select", "Round 3 Scheduled", "Round Three"),
+	"Recruiter Round": ("CV Shortlist", "On Hold", "Recruiter Round", "Scheduled"),
+	"Functional Round": ("Recruiter Round Select", "Application Form Received", "Functional Round", "Round 2 Scheduled"),
+	"Final Round": ("Functional Round Select", "Final Round", "Shortlist - R2", "On hold - R2", "Round 3 Scheduled"),
 }
 # Who may change the status, by the status it is changing FROM.
-ROUND_1_STAGE = ("Round 1 Scheduled", "Round One")
+ROUND_1_STAGE = ("Recruiter Round", "Scheduled")
 RECRUITER_STAGE = (
-	"Round 1 Select", "Round 2 Scheduled", "Round Two", "Round 2 Select",
-	"Round 3 Scheduled", "Round Three", "Round 3 Select",
+	"Recruiter Round Select", "Application Form Received",
+	"Functional Round", "Functional Round Select", "Final Round", "Final Round Select",
+	"Round 2 Scheduled", "Shortlist - R2", "On hold - R2",
+	"Round 3 Scheduled", "Shortlist - R3", "On hold - R3",
+	"Round 4 Scheduled", "Shortlist - R4", "On hold - R4",
 )
 
-# Enablers status list (the form shows only these for Enablers applicants;
-# Finance Fellowship ones get FELLOWSHIP_STATUSES). On the DocType they come
-# first, then the Fellowship ones, then any old option (Round One/Two/Three).
+# Status list = the Application Status options the user set on the live
+# DocType (2026-11-23), plus the Functional / Final Round statuses the user
+# asked for the same day (after Recruiter Round's). ("Scheduled" is on live as
+# its own option; treated as the Recruiter Round stage.) Finance Fellowship
+# applicants use the same list (ms_finance.FELLOWSHIP_STATUSES is a subset).
 STATUS_OPTIONS = [
-	"New Applicant", "Pre Shortlist", "CV Shortlist", "On Hold", "CV Reject",
-	"Recruiter Round", "Recruiter Reject",
-	"Round 1 Scheduled", "Round 1 Select", "Round 1 Reject",
-	"Round 2 Scheduled", "Round 2 Select", "Round 2 Reject",
-	"Round 3 Scheduled", "Round 3 Select", "Round 3 Reject",
-	"Round Four", "Round 4 Reject",
-	"Document Collection", "Documents Received", "Reference Check",
-	"Offer", "Blocklist",
+	"New Applicant", "On Hold", "Blocklisted", "CV Shortlist",
+	"Recruiter Round Select", "Recruiter Round Reject", "Recruiter Round", "Scheduled",
+	"Application Form Received",
+	"Functional Round", "Functional Round Select", "Functional Round Reject",
+	"Final Round", "Final Round Select", "Final Round Reject",
+	"Shortlist - R2", "On hold - R2", "Regret - R2", "Round 2 Scheduled",
+	"Shortlist - R3", "On hold - R3", "Regret - R3", "Round 3 Scheduled",
+	"Shortlist - R4", "On hold - R4", "Regret - R4", "Round 4 Scheduled",
+	"Document Collection", "Documents Received", "Reference Check", "Documents Verified",
+	"Salary Fitment Done", "Offer Released", "Offer Accepted", "Offer Declined", "Talent Pool",
 ]
-LEGACY_ROUND_STATUS = {"Round One": "Round 1 Scheduled", "Round Two": "Round 2 Scheduled", "Round Three": "Round 3 Scheduled"}
-STATUS_RANK = {s: i for i, s in enumerate(STATUS_OPTIONS)}
-STATUS_RANK.update({old: STATUS_RANK[new] for old, new in LEGACY_ROUND_STATUS.items()})
+# Progress order (scheduling never moves an applicant backwards).
+STATUS_PROGRESS = [
+	"New Applicant", "On Hold", "CV Shortlist", "Recruiter Round", "Scheduled",
+	"Recruiter Round Select", "Application Form Received",
+	"Functional Round", "Round 2 Scheduled", "On hold - R2", "Functional Round Select", "Shortlist - R2",
+	"Final Round", "Round 3 Scheduled", "On hold - R3", "Final Round Select", "Shortlist - R3",
+	"Round 4 Scheduled", "On hold - R4", "Shortlist - R4",
+	"Document Collection", "Documents Received", "Reference Check", "Documents Verified",
+	"Salary Fitment Done", "Offer Released", "Offer Accepted", "Offer Declined",
+]
+# Old status → new one (Enablers + Finance Fellowship lists before
+# 2026-11-23). Old statuses with no new equivalent (CV Reject, Regret - CV,
+# Pre Shortlist) are left as they are.
+LEGACY_STATUS = {
+	"Shortlist - CV": "CV Shortlist", "On hold - CV": "On Hold",
+	"Round 1 Scheduled": "Recruiter Round", "Round One": "Recruiter Round",
+	"Shortlist - R1": "Recruiter Round Select", "Round 1 Select": "Recruiter Round Select",
+	"On hold - R1": "On Hold",
+	"Regret - R1": "Recruiter Round Reject", "Round 1 Reject": "Recruiter Round Reject",
+	"Recruiter Reject": "Recruiter Round Reject",
+	"Round Two": "Round 2 Scheduled", "Round 2 Select": "Shortlist - R2", "Round 2 Reject": "Regret - R2",
+	"Round Three": "Round 3 Scheduled", "Round 3 Select": "Shortlist - R3", "Round 3 Reject": "Regret - R3",
+	"Round Four": "Round 4 Scheduled", "Round 4 Reject": "Regret - R4",
+	"Blocklist": "Blocklisted", "Offer": "Offer Released",
+}
+STATUS_RANK = {s: i for i, s in enumerate(STATUS_PROGRESS)}
+STATUS_RANK["Scheduled"] = STATUS_RANK["Recruiter Round"]
+STATUS_RANK["Round 2 Scheduled"] = STATUS_RANK["Functional Round"]
+STATUS_RANK["Round 3 Scheduled"] = STATUS_RANK["Final Round"]
+
+
+def round_name(interview_round):
+	return ROUND_NAME.get(interview_round, interview_round or "")
 
 # Fields the workflow adds to the Enablers Registration Form (after the
 # last existing field), in this order.
@@ -156,6 +211,7 @@ def ensure_enablers_schema():
 	without that DocType."""
 	if not frappe.db.exists("DocType", ERF):
 		return
+	_ensure_round_values()
 	if not frappe.db.exists("Role", RECRUITER_ROLE):
 		frappe.get_doc({"doctype": "Role", "role_name": RECRUITER_ROLE, "desk_access": 1}).insert(ignore_permissions=True)
 	_ensure_fellowship_masters()
@@ -165,8 +221,16 @@ def ensure_enablers_schema():
 
 	status = dt.get("fields", {"fieldname": "application_status"})[0]
 	current = [o for o in (status.options or "").split("\n") if o.strip()]
+	# One list for Enablers and Finance Fellowship (as set on live). Records
+	# still at an old status move to its new name; any other old option is
+	# dropped unless a record still uses it.
+	for old, new in LEGACY_STATUS.items():
+		frappe.db.sql(
+			f"update `tab{ERF}` set application_status=%s where application_status=%s", (new, old)
+		)
 	wanted = STATUS_OPTIONS + [s for s in FELLOWSHIP_STATUSES if s not in STATUS_OPTIONS]
-	options = wanted + [o for o in current if o not in wanted]
+	in_use = set(frappe.get_all(ERF, filters={"application_status": ["is", "set"]}, pluck="application_status", distinct=True))
+	options = wanted + [o for o in current if o not in wanted and o in in_use]
 	if current != options:
 		status.options = "\n".join(options)
 		changed = True
@@ -222,6 +286,63 @@ def ensure_enablers_schema():
 	if changed:
 		dt.flags.ignore_permissions = True
 		dt.save()
+		frappe.db.commit()
+
+
+def _ensure_round_values():
+	"""Interview Round = Recruiter / Functional / Final Round (was Round
+	1/2/3). The DocType JSON carries the new options, but on live these
+	DocTypes are custom=1 (edited on the cloud), so the options / depends_on
+	are also fixed here, and old records are renamed."""
+	changed = False
+	for doctype, rounds in ROUND_DOCTYPES.items():
+		if not frappe.db.exists("DocType", doctype):
+			continue
+		options = "\n" + "\n".join(rounds)
+		for row in frappe.get_all(
+			"DocField", filters={"parent": doctype}, fields=["name", "fieldname", "options", "depends_on", "mandatory_depends_on"]
+		):
+			values = {}
+			if row.fieldname == "interview_round" and row.options != options:
+				values["options"] = options
+			for key in ("depends_on", "mandatory_depends_on"):
+				expr = row.get(key) or ""
+				new = expr
+				for old, name in LEGACY_ROUND.items():
+					new = new.replace(f'"{old}"', f'"{name}"').replace(f"'{old}'", f"'{name}'")
+				if new != expr:
+					values[key] = new
+			if values:
+				frappe.db.set_value("DocField", row.name, values, update_modified=False)
+				changed = True
+		for old, name in LEGACY_ROUND.items():
+			frappe.db.sql(f"update `tab{doctype}` set interview_round=%s where interview_round=%s", (name, old))
+		frappe.clear_cache(doctype=doctype)
+	# The two feedback web forms keep their own copy of the options.
+	for row in frappe.get_all(
+		"Web Form Field",
+		filters={"fieldname": "interview_round", "parent": ["in", ["enablers-interview-feedback", "finance-fellowship-feedback-form"]]},
+		fields=["name", "parent", "options"],
+	):
+		rounds = ROUNDS[:2] if row.parent == "finance-fellowship-feedback-form" else ROUNDS
+		if row.options != "\n" + "\n".join(rounds):
+			frappe.db.set_value("Web Form Field", row.name, "options", "\n" + "\n".join(rounds), update_modified=False)
+	for row in frappe.get_all(
+		"Web Form Field",
+		filters={"parent": ["in", ["enablers-interview-feedback", "finance-fellowship-feedback-form"]]},
+		fields=["name", "depends_on", "mandatory_depends_on"],
+	):
+		values = {}
+		for key in ("depends_on", "mandatory_depends_on"):
+			expr = row.get(key) or ""
+			new = expr
+			for old, name in LEGACY_ROUND.items():
+				new = new.replace(f'"{old}"', f'"{name}"').replace(f"'{old}'", f"'{name}'")
+			if new != expr:
+				values[key] = new
+		if values:
+			frappe.db.set_value("Web Form Field", row.name, values, update_modified=False)
+	if changed:
 		frappe.db.commit()
 
 
@@ -339,10 +460,9 @@ def on_registration_update(doc, method=None):
 	if doc.flags.in_insert or not doc.has_value_changed("application_status"):
 		return
 	status = doc.application_status
+	# "Document Collection" sends no email from here (removed 2026-11-19).
 	if status in REGRET_STATUSES and cint(get_settings().regret_delay_days) == 0:
 		send_regret(doc)
-	elif status == "Document Collection":
-		request_documents(doc)
 
 
 # ---------------------------------------------------------------- emails
@@ -390,18 +510,6 @@ def send_regret(doc):
 	doc.db_set("regret_email_sent_on", now_datetime(), update_modified=False)
 
 
-def request_documents(doc, remarks=None):
-	if not doc.get("email_address"):
-		return
-	send_email(
-		doc,
-		"document_request",
-		upload_link=public_url(UPLOAD_ROUTE, app_id=doc.name, key=access_key(doc)),
-		remarks=remarks,
-	)
-	doc.db_set("documents_requested_on", now_datetime(), update_modified=False)
-
-
 def notify_recruiters(doc_or_name, subject, message, reference_doctype, reference_name):
 	"""The sub-unit's recruiter + the recruitment team email (Settings)."""
 	registration = frappe.get_doc(ERF, doc_or_name) if isinstance(doc_or_name, str) else doc_or_name
@@ -417,14 +525,6 @@ def notify_recruiters(doc_or_name, subject, message, reference_doctype, referenc
 			reference_name=reference_name,
 			**sender_kwargs(settings),
 		)
-
-
-@frappe.whitelist()
-def resend_documents_email(application_id):
-	doc = frappe.get_doc(ERF, application_id)
-	doc.check_permission("write")
-	request_documents(doc)
-	return _("Email queued to {0}.").format(doc.email_address)
 
 
 def send_due_regret_emails():
@@ -466,7 +566,7 @@ def _invite_context(schedule, registration, teams=("", "", ""), documents=()):
 	return email_context(
 		registration,
 		interviewer_name=schedule.interviewer_names or "Interviewer",
-		interview_round=schedule.interview_round,
+		interview_round=round_name(schedule.interview_round),
 		interview_date=start.strftime("%A, %d %b %Y"),
 		interview_time=f"{start.strftime('%I:%M %p')} – {end.strftime('%I:%M %p')}",
 		mode=_mode_label(schedule),
@@ -478,7 +578,7 @@ def _invite_context(schedule, registration, teams=("", "", ""), documents=()):
 		map_link=(schedule.google_map_link or "") if in_person else "",
 		message=schedule.message_to_the_interviewer or "",
 		feedback_link=schedule.feedback_link,
-		earlier_feedback=schedule.interview_round in ("Round 2", "Round 3"),
+		earlier_feedback=schedule.interview_round in ("Functional Round", "Final Round"),
 		**enablers_panel.invite_extras(schedule, list(documents)),
 	)
 
@@ -498,27 +598,40 @@ def _payload(schedule, body, subject):
 
 
 def _application_pdf_url(registration):
-	"""The registration form PDF for the panel: the site's own application PDF
-	if the web form made one, else a clean one built from the record."""
+	"""The registration form PDF for the panel: the "Registration Form" file
+	uploaded on the applicant, else the site's own application PDF if the web
+	form made one, else a clean one built from the record."""
+	if registration.get("registration_form"):
+		return registration.registration_form
 	if registration.get("application_pdf"):
 		return registration.application_pdf
 	return enablers_panel.registration_pdf_url(registration)
 
 
-def _invite_attachments(schedule, registration):
+def _round_feedback_url(registration, rnd):
 	from ms_calendar.ms_calendar.doctype.enablers_feedback_form.enablers_feedback_form import (
 		build_round_feedback_pdf,
 	)
 
-	"""[(label, file url)]: resume, registration form and every earlier
-	round's feedback (Round 2 gets Round 1's, Round 3 both)."""
+	return (
+		registration.get(ROUND_UPLOAD_FIELD[rnd])
+		or registration.get(ROUND_PDF_FIELD[rnd])
+		or build_round_feedback_pdf(registration.name, rnd)
+	)
+
+
+def _invite_attachments(schedule, registration):
+	"""[(label, file url)] for the panel, by round:
+	Recruiter Round — resume + registration (application) form;
+	Functional Round — + Recruiter Round feedback;
+	Final Round — + Recruiter and Functional feedback + Medical Fitness Form
+	(the medical form goes with the Final Round only)."""
 	files = [("Resume", registration.get("resume")), ("Registration form", _application_pdf_url(registration))]
-	earlier = {"Round 2": ["Round 1"], "Round 3": ["Round 1", "Round 2"]}.get(schedule.interview_round, [])
+	earlier = {"Functional Round": ["Recruiter Round"], "Final Round": ["Recruiter Round", "Functional Round"]}.get(schedule.interview_round, [])
 	for rnd in earlier:
-		files.append((
-			f"{rnd} feedback",
-			registration.get(ROUND_PDF_FIELD[rnd]) or build_round_feedback_pdf(registration.name, rnd),
-		))
+		files.append((f"{round_name(rnd)} feedback", _round_feedback_url(registration, rnd)))
+	if schedule.interview_round == "Final Round":
+		files.append(("Medical fitness form", registration.get("medical_fitness_form")))
 	return [(label, url) for label, url in files if url]
 
 
@@ -575,7 +688,8 @@ def _fellowship_schedule(name):
 @frappe.whitelist()
 def schedule_interview(name):
 	"""Outlook invite to the interviewers (+ meeting room), applicant email
-	with a calendar file, applicant moved to "Round 1/2/3 Scheduled"."""
+	with a calendar file, applicant moved to the round's status (Recruiter
+	Round / Round 2 Scheduled / Round 3 Scheduled)."""
 	if _fellowship_schedule(name):
 		from ms_calendar.api import ms_finance
 
@@ -701,30 +815,39 @@ def cancel_interview(name, reason):
 
 # ---------------------------------------------------------------- applicant pages (guest)
 STATUS_STAGES = (
-	("Application received", ("New Applicant", "Pre Shortlist", "On Hold", "Blocklist")),
-	("Round 1 interview", ("CV Shortlist", "Recruiter Round", "Round 1 Scheduled", "Round One")),
-	("Round 2 interview", ("Round 1 Select", "Round 2 Scheduled", "Round Two")),
-	("Round 3 interview", ("Round 2 Select", "Round 3 Scheduled", "Round Three", "Round Four")),
-	("Documents", ("Round 3 Select", "Document Collection", "Documents Received", "Reference Check")),
-	("Offer", ("Offer",)),
+	("Application received", ("New Applicant", "On Hold", "Blocklisted", "Talent Pool")),
+	("Recruiter Round", ("CV Shortlist", "Recruiter Round", "Scheduled")),
+	("Functional Round", ("Recruiter Round Select", "Application Form Received", "Functional Round", "Round 2 Scheduled",
+						  "On hold - R2")),
+	("Final Round", ("Functional Round Select", "Final Round", "Shortlist - R2", "Round 3 Scheduled", "On hold - R3",
+					 "Round 4 Scheduled", "Shortlist - R4", "On hold - R4")),
+	("Documents", ("Final Round Select", "Shortlist - R3", "Document Collection", "Documents Received", "Reference Check",
+				   "Documents Verified", "Salary Fitment Done")),
+	("Offer", ("Offer Released", "Offer Accepted", "Offer Declined")),
 )
+_SCHEDULED = "Your {0} interview is scheduled. Please check your email for the details."
+_CLEARED_FUNCTIONAL = "You have cleared the Functional Round. We will email you the Final Round details."
+_CLEARED_FINAL = "You have cleared the interviews. We will email you the next steps."
 STAGE_MESSAGES = {
 	"CV Shortlist": "You are shortlisted for an interview. We will email you the details.",
-	"Recruiter Round": "You are shortlisted for an interview. We will email you the details.",
-	"Round 1 Scheduled": "Your Round 1 interview is scheduled. Please check your email for the details.",
-	"Round One": "Your Round 1 interview is scheduled. Please check your email for the details.",
-	"Round 1 Select": "You have cleared Round 1. We will email you the Round 2 details.",
-	"Round 2 Scheduled": "Your Round 2 interview is scheduled. Please check your email for the details.",
-	"Round Two": "Your Round 2 interview is scheduled. Please check your email for the details.",
-	"Round 2 Select": "You have cleared Round 2. We will email you the Round 3 details.",
-	"Round 3 Scheduled": "Your Round 3 interview is scheduled. Please check your email for the details.",
-	"Round Three": "Your Round 3 interview is scheduled. Please check your email for the details.",
-	"Round Four": "Your next interview is scheduled. Please check your email for the details.",
-	"Round 3 Select": "You have cleared the interviews. We will email you the next steps.",
+	"Recruiter Round": _SCHEDULED.format("Recruiter Round"),
+	"Scheduled": _SCHEDULED.format("Recruiter Round"),
+	"Recruiter Round Select": "You have cleared the Recruiter Round. We will email you the Functional Round details.",
+	"Application Form Received": "We have received your application form. We will email you the Functional Round details.",
+	"Functional Round": _SCHEDULED.format("Functional Round"),
+	"Round 2 Scheduled": _SCHEDULED.format("Functional Round"),
+	"Functional Round Select": _CLEARED_FUNCTIONAL,
+	"Shortlist - R2": _CLEARED_FUNCTIONAL,
+	"Final Round": _SCHEDULED.format("Final Round"),
+	"Round 3 Scheduled": _SCHEDULED.format("Final Round"),
+	"Round 4 Scheduled": "Your next interview is scheduled. Please check your email for the details.",
+	"Final Round Select": _CLEARED_FINAL,
+	"Shortlist - R3": _CLEARED_FINAL,
 	"Document Collection": "Please upload your documents using the link we emailed you.",
 	"Documents Received": "We have received your documents and are verifying them.",
+	"Documents Verified": "Your documents are verified. We will email you the next steps.",
 	"Reference Check": "We are completing your reference checks.",
-	"Offer": "Your offer is being shared with you. Please check your email.",
+	"Offer Released": "Your offer is being shared with you. Please check your email.",
 }
 UNDER_REVIEW = "We have received your application and are reviewing it."
 

@@ -18,8 +18,8 @@ from ms_calendar.ms_calendar.doctype.finance_fellowship_settings.finance_fellows
 SCHEDULE_DOCTYPE = "Enablers Interview Schedule"
 
 ROUND_PDF_FIELD = {
-	"Round 1": "round_1_feedback_pdf",
-	"Round 2": "round_2_feedback_pdf",
+	"Recruiter Round": "round_1_feedback_pdf",
+	"Functional Round": "round_2_feedback_pdf",
 }
 
 RATING_FIELDS = (
@@ -32,15 +32,33 @@ RATING_FIELDS = (
 	"assignment_performance",
 )
 TEXT_FIELDS = ("strengths", "concerns", "summary")
+# 2026-11-20 feedback sheet ("Feedback and interviewer list"): the form now
+# asks only these (Custom Fields on live); the ratings above stay for old
+# records and print only when filled.
+DETAIL_FIELDS = (
+	"interview_feedback_type",
+	"earlier_application_history",
+	"current_location",
+	"joining_location",
+	"education_qualification",
+	"work_experience_reasons",
+	"notice_period",
+	"family_background",
+	"interest_in_role",
+)
 
 # Panel recommendation -> applicant status for that round
 # (ms_finance.FELLOWSHIP_STATUSES). Only an applicant still at
 # "Round N Scheduled" is moved, so the FIRST feedback of a round decides and
 # later panel members' feedback never flips it (and never re-sends emails);
 # the recruiter can still change the status by hand.
-ROUND_SCHEDULED_STATUS = {"Round 1": "Round 1 Scheduled", "Round 2": "Round 2 Scheduled"}
-ROUND_SUFFIX = {"Round 1": "R1", "Round 2": "R2"}
-RECOMMENDATION_STATUS = {"Select": "Shortlist", "On hold": "On hold", "Regret": "Regret"}
+ROUND_SCHEDULED_STATUS = {"Recruiter Round": "Recruiter Round", "Functional Round": "Functional Round"}
+# Statuses set on live 2026-11-23: Round 1 = Recruiter Round (no "On hold"
+# of its own → On Hold), Round 2 = "<Shortlist/On hold/Regret> - R2".
+ROUND_DECISION_STATUS = {
+	"Recruiter Round": {"Select": "Recruiter Round Select", "On hold": "On Hold", "Regret": "Recruiter Round Reject"},
+	"Functional Round": {"Select": "Functional Round Select", "On hold": "On hold - R2", "Regret": "Functional Round Reject"},
+}
 
 
 class FinanceFellowshipFeedbackForm(Document):
@@ -94,20 +112,19 @@ class FinanceFellowshipFeedbackForm(Document):
 		)
 
 	def move_applicant_status(self):
-		"""Select -> "Shortlist - R1/R2", On hold -> "On hold - R1/R2",
-		Regret -> "Regret - R1/R2". Saving the applicant runs the usual status
-		emails (Shortlist - R1: Application Form request, Shortlist - R2:
-		document request, Regret: regret email after the Settings delay)."""
-		suffix = ROUND_SUFFIX.get(self.interview_round)
-		decision = RECOMMENDATION_STATUS.get(self.recommendation)
-		if not (suffix and decision and self.application_id):
+		"""Round 1: Select -> Recruiter Round Select, On hold -> On Hold,
+		Regret -> Recruiter Round Reject; Round 2: Shortlist / On hold /
+		Regret - R2. Saving the applicant runs the usual status emails
+		(Recruiter Round Select: Application Form request, Regret: regret
+		email after the Settings delay)."""
+		new_status = ROUND_DECISION_STATUS.get(self.interview_round, {}).get(self.recommendation)
+		if not (new_status and self.application_id):
 			return
 		if not frappe.db.exists(REGISTRATION_DOCTYPE, self.application_id):
 			return
 		registration = frappe.get_doc(REGISTRATION_DOCTYPE, self.application_id)
 		if registration.application_status != ROUND_SCHEDULED_STATUS[self.interview_round]:
 			return
-		new_status = f"{decision} - {suffix}"
 		# A problem on the applicant's record must not lose the panel's
 		# feedback: undo only the status change and tell the recruiter.
 		frappe.db.savepoint("ff_feedback_status")
@@ -151,8 +168,8 @@ def feedback_html(application_id, interview_round):
 		rows = "".join(
 			f"<tr><td style='padding:4px 8px;border:1px solid #ccc'>{_(meta.get_label(f))}</td>"
 			f"<td style='padding:4px 8px;border:1px solid #ccc'>{escape_html(fb.get(f) or '')}</td></tr>"
-			for f in RATING_FIELDS + TEXT_FIELDS + ("recommendation", "recommended_category")
-			if fb.get(f)
+			for f in DETAIL_FIELDS + RATING_FIELDS + TEXT_FIELDS + ("recommendation", "recommended_category")
+			if meta.has_field(f) and fb.get(f)
 		)
 		parts.append(
 			f"<h3 style='font-family:sans-serif;margin-top:24px'>{escape_html(fb.panelist_name)}"
