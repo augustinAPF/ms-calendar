@@ -102,11 +102,18 @@ _OTP_SENDER_BY_FORM = {
         "Health Registration Form",
     ),
     "Finance Fellowship Registration Form": (
-        "health.fellowship@azimpremjifoundation.org",
+        "finance.fellowship@azimpremjifoundation.org",
         "Finance Fellowship Registration Form",
     ),
 }
 _DEFAULT_OTP_SENDER = _OTP_SENDER_BY_FORM["Field Registration Form"]
+
+# A sender without an enabled outgoing Email Account on the site cannot send
+# (Outlook refuses "send as"), so the OTP would never arrive. Until that
+# mailbox's Email Account is set up, use this one instead.
+_OTP_FALLBACK_SENDER = {
+    "finance.fellowship@azimpremjifoundation.org": "health.fellowship@azimpremjifoundation.org",
+}
 
 # Health Registration Form serves both fellowship and job openings. The
 # Sub Unit (department, filled from the job-opening link) decides the
@@ -119,6 +126,11 @@ def _get_otp_sender(doctype, sub_unit=None):
     sender, form_label = _OTP_SENDER_BY_FORM.get(doctype, _DEFAULT_OTP_SENDER)
     if doctype == "Health Registration Form" and "fellowship" in (sub_unit or "").lower():
         sender = _HEALTH_FELLOWSHIP_SENDER
+    fallback = _OTP_FALLBACK_SENDER.get(sender)
+    if fallback and not frappe.db.exists(
+        "Email Account", {"email_id": sender, "enable_outgoing": 1}
+    ):
+        sender = fallback
     return sender, form_label
 
 
