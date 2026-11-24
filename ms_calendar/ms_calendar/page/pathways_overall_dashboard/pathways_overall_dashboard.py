@@ -56,6 +56,7 @@ PROGRAMS = [
         "title": "full_name_aadhaar", "email": "email_address", "phone": "phone_number",
         "role": "role", "status": "application_status",
         "unit": "units", "subunit": "department", "location": "location", "job_code": "job_code",
+        "jo_link": "job_title",   # Link → Job Opening (Job Opening filter)
         "app_date": "application_date",
         # Latest round first — the first one filled is when the current round started.
         "round_dates": ["date_of_final_round", "date_of_functional_round", "date_of_recruiter_round"],
@@ -130,6 +131,158 @@ _CLOSED = {"not selected", "offer declined", "document verification fail", "bloc
            "blocklist", "duplicated", "addendum declined", "not joined"}
 
 
+# Select / Reject views (2026-11-24). Every applicant in the top card falls in
+# exactly one step, so the steps add up to Total Select / Total Reject.
+# Section "result" = the Select / Reject outcome of each round (CV, test,
+# recruiter, functional = every round before the final round, final = leader
+# rounds / calibration / final round), for every unit. Section "process" = the
+# rest (still waiting for a result, later stages, hold, other).
+# (key, card name, one-line explanation on the card, full meaning for the (i), section)
+REJECT_GROUPS = [
+    ("cv", "CV Reject", "Not shortlisted at CV screening",
+     "Rejected / regretted at CV screening or application review.", "result"),
+    ("test", "Test Reject", "Did not pass the written / online test",
+     "Did not pass the written / online test.", "result"),
+    ("recruiter", "Recruiter Round Reject", "Rejected in the recruiter round",
+     "Rejected in the recruiter round (all units).", "result"),
+    ("round1", "Functional Round Reject", "Rejected in a round before the final round",
+     "Rejected in a round before the final round: Field functional / subject / education capacity / technical / "
+     "demo round; Health R1; Philanthropy round 1; Scholarship round 1.", "result"),
+    ("leader", "Final Round Reject", "Rejected in a leader / final round",
+     "Rejected in the final rounds: Field leader rounds 1-3 and calibration; Health R2-R3; "
+     "Philanthropy rounds 2-4 and final round; Scholarship round 2.", "result"),
+    ("noshow", "No Show", "Did not attend the test or interview",
+     "Did not turn up for the test or an interview.", "process"),
+    ("docs", "Documents / Fitment Reject", "Failed documents or fitment",
+     "Failed document verification or rejected at fitment.", "process"),
+    ("offer", "Offer Declined", "Candidate declined the offer", "The candidate declined the offer.", "process"),
+    ("joining", "Addendum Declined / Not Joined", "Declined the addendum or did not join",
+     "Declined the addendum or did not join.", "process"),
+    ("other", "Other Reject", "Not selected, duplicate or blocklisted",
+     "Not selected, duplicate, blocklisted or any other closing status.", "process"),
+]
+
+SELECT_GROUPS = [
+    ("cv_sel", "CV Shortlist", "Cleared CV screening, test not started",
+     "Shortlisted at CV screening and not moved on yet.", "result"),
+    ("test_sel", "Test Select", "Passed the test, next round not started",
+     "Passed the written / online test and not moved on yet.", "result"),
+    ("rec_sel", "Recruiter Round Select", "Cleared the recruiter round",
+     "Selected in the recruiter round (all units), next round not started yet.", "result"),
+    ("fun_sel", "Functional Round Select", "Cleared a round before the final round",
+     "Selected in a round before the final round: Field functional / subject / education capacity / technical / "
+     "demo round (and the same rounds of any other unit).", "result"),
+    ("fin_sel", "Final Round Select", "Cleared a leader / final round",
+     "Selected in the final rounds: Field leader rounds 1-3 and calibration; Philanthropy round 4 and final round.",
+     "result"),
+    ("test", "Test In Progress", "Test initiated or in process",
+     "Test initiated / in process, or marks being corrected — no result yet.", "process"),
+    ("recruiter", "In Recruiter Round", "Scheduled or in progress, no result yet",
+     "In the recruiter round (scheduled or in progress), no result yet.", "process"),
+    ("round1", "In Functional Round", "Before the final round, no result yet",
+     "In a round before the final round, no result yet: Field functional / subject / education capacity / "
+     "technical / demo; Health R1; Philanthropy / Scholarship round one.", "process"),
+    ("leader", "In Final Round", "Leader / final round, no result yet",
+     "In a final round, no result yet: Field leader rounds and calibration; Health R2-R3; Philanthropy rounds "
+     "2-4 / final; Scholarship round two.", "process"),
+    ("docs", "Documents & Fitment", "Documents collected or in fitment",
+     "Document collection / verification passed, or in fitment.", "process"),
+    ("comp", "Compensation", "Approved or waiting for approval", "Compensation approved or awaiting approval.",
+     "process"),
+    ("offer", "Offer Stage", "Offer sent, not sent yet or accepted", "Offer sent, not sent yet or accepted.",
+     "process"),
+    ("onboarding", "Onboarding", "Addendum, pre-joining or IT email",
+     "Addendum accepted, pre-joining, or the IT email stage.", "process"),
+    ("joined", "Joined", "Joined or ERP ID stage", "Joined, or the ERP ID stage.", "process"),
+    ("hold", "On Hold", "Kept on hold at any step", "Kept on hold at any step.", "process"),
+    ("other", "Other Open", "Talent pool, visit or other open status",
+     "Any other open status (e.g. Talent Pool, Visit, PI Edited).", "process"),
+]
+
+_ROUND_LEADER = ("leader", "calibration", "final round", "r2", "r3", "round 2", "round 3", "round 4",
+                 "round two", "round three", "round four", "round-2", "round-3")
+_ROUND_ONE = ("functional", "subject", "education capacity", "technical", "demo", "r1", "round 1",
+              "round one", "round-1", "interview")
+
+
+def _select_group(status):
+    """Which step an open (not rejected, not new) status belongs to (keyword rules, like _stage)."""
+    s = (status or "").strip().lower()
+    sel = "select" in s
+    if "hold" in s:
+        return "hold"
+    if "cv" in s.split() or s.startswith("cv ") or "pre shortlist" in s:
+        return "cv_sel"
+    if "test" in s or "correction" in s:
+        return "test_sel" if sel else "test"
+    if "recruiter" in s:
+        return "rec_sel" if sel else "recruiter"
+    if "document" in s or "fitment" in s:
+        return "docs"
+    if "compensation" in s:
+        return "comp"
+    if any(k in s for k in ("addendum", "pre join", "pre-join", "it team", "it email")):
+        return "onboarding"
+    if s == "joined" or "erp id" in s:
+        return "joined"
+    if "offer" in s:
+        return "offer"
+    if any(k in s for k in _ROUND_LEADER):
+        return "fin_sel" if sel else "leader"
+    if any(k in s for k in _ROUND_ONE):
+        return "fun_sel" if sel else "round1"
+    return "other"
+
+
+def _reject_group(status):
+    """Which rejection step a "Not selected" status belongs to (keyword rules, like _stage)."""
+    s = (status or "").strip().lower()
+    if "no show" in s or "no-show" in s:
+        return "noshow"
+    if "cv" in s.split() or "- cv" in s or "application reject" in s or s.startswith("cv "):
+        return "cv"
+    if "test" in s:
+        return "test"
+    if "recruiter" in s:
+        return "recruiter"
+    if "document" in s or "fitment" in s:
+        return "docs"
+    if "offer" in s:
+        return "offer"
+    if "addendum" in s or "join" in s:
+        return "joining"
+    if any(k in s for k in _ROUND_LEADER):
+        return "leader"
+    if any(k in s for k in _ROUND_ONE):
+        return "round1"
+    return "other"
+
+
+def _status_options(doctype, fieldname):
+    """The Select options of a form's status field (as configured on this site)."""
+    df = frappe.get_meta(doctype).get_field(fieldname)
+    return [o.strip() for o in (df.options or "").split("\n") if o.strip()] if df else []
+
+
+def _step_source(pg, key, classify, stages, seen):
+    """One unit's row of the "How each card is counted" table for step `key`."""
+    counts = dict(seen)
+    have = {_status_key(x) for x in counts}
+    for o in _status_options(pg.cfg["reg"], pg.cfg["status"]):
+        if _stage(o) in stages and classify(o) == key and _status_key(o) not in have:
+            counts[o] = 0
+            have.add(_status_key(o))
+    return {"program": pg.key, "unit": pg.cfg["unit_label"], "doctype": pg.cfg["reg"], "field": pg.cfg["status"],
+            "statuses": sorted(counts.items(), key=lambda x: (-x[1], x[0]))}
+
+
+# Step sets the top cards open: (steps, classifier, stages it covers).
+STEP_SETS = {
+    "reject": (REJECT_GROUPS, _reject_group, ("Not selected",)),
+    "select": (SELECT_GROUPS, _select_group, ("In process", "On hold", "Offer / Selected")),
+}
+
+
 def _status_key(status):
     """How MariaDB compares statuses (utf8mb4 *_ci, PAD SPACE): case-insensitive, trailing spaces ignored."""
     return (status or "").rstrip().lower()
@@ -187,7 +340,8 @@ STATUS = {
                   "Leader Round-2 Scheduled", "Leader Round-2 Select", "Leader Round-3", "Leader Round-3 Scheduled",
                   "Leader Round-3 Select", "Calibration Process", "Calibration Process Scheduled", "Calibration Select"],
         "Health": ["Shortlist - R2", "Shortlist - R3"],
-        "Philanthropy": ["Round Two", "Round Three", "Round Four"], "Scholarship": ["Round Two"]},
+        "Philanthropy": ["Round Two", "Round Three", "Round Four", "Round 4 Select", "Final Round",
+                         "Final Round Select"], "Scholarship": ["Round Two"]},
     # Feedback, from the status alone: still in a round (no result yet) = pending;
     # the round has a result (Select / Reject / Regret / On hold) = completed.
     "fb_pending": {
@@ -198,7 +352,7 @@ STATUS = {
                   "Demo Round Scheduled", "Leader Round-1 Scheduled", "Leader Round-2 Scheduled",
                   "Leader Round-3 Scheduled", "Calibration Process Scheduled"],
         "Health": ["Recruiter Round", "Shortlist - R1", "Shortlist - R2", "Shortlist - R3"],
-        "Philanthropy": ["Recruiter Round", "Round One", "Round Two", "Round Three", "Round Four"],
+        "Philanthropy": ["Recruiter Round", "Round One", "Round Two", "Round Three", "Round Four", "Final Round"],
         "Scholarship": ["Recruiter Round", "Round One", "Round Two"]},
     "fb_done": {
         "Field": ["Recruiter Round Select", "Recruiter Round Reject", "Education Capacity Select",
@@ -208,7 +362,8 @@ STATUS = {
                   "Leader Round-1 Reject", "Leader Round-2 Select", "Leader Round-2 Reject",
                   "Leader Round-3 Select", "Leader Round-3 Reject", "Calibration Select", "Calibration Reject"],
         "Health": ["Regret - R1", "Regret - R2", "Regret - R3", "On hold - R1", "On hold - R2", "On hold - R3"],
-        "Philanthropy": ["Recruiter Reject", "Round 1 Reject", "Round 2 Reject", "Round 3 Reject", "Round 4 Reject"],
+        "Philanthropy": ["Recruiter Reject", "Round 1 Reject", "Round 2 Reject", "Round 3 Reject", "Round 4 Reject",
+                         "Round 4 Select", "Final Round Select", "Final Round Reject"],
         "Scholarship": ["Recruiter Reject", "Reject - Round 1", "Reject - Round 2"]},
     "doc_collection": {"Field": ["Document Collection", "Document Verification Pass"],
                        "Health": ["Document Collection"], "Philanthropy": ["Document Collection"],
@@ -267,7 +422,7 @@ _LEADER_DONE = {
     "Field": ["Leader Round-1 Reject", "Leader Round-2 Reject", "Leader Round-3 Reject", "Calibration Reject",
               "Fitment Reject", "Document Verification Fail"],
     "Health": ["Regret - R2", "Regret - R3", "On hold - R2", "On hold - R3"],
-    "Philanthropy": ["Round 2 Reject", "Round 3 Reject", "Round 4 Reject"],
+    "Philanthropy": ["Round 2 Reject", "Round 3 Reject", "Round 4 Reject", "Final Round Reject"],
     "Scholarship": ["Reject - Round 2"],
 }
 # Past CV screening but not in any board list (test in progress / no-show).
@@ -282,6 +437,12 @@ STATUS["reach_leader"] = _statuses("leadership", *_PAST_LEADER, extra=_LEADER_DO
 STATUS["reach_accepted"] = _statuses(*_ACCEPTED)
 STATUS["reach_joined"] = _statuses(*_JOINED)
 FUNNEL_CARDS = ["reach_cv", "reach_leader", "reach_accepted", "reach_joined"]
+# Top-row "Total Offer process" (2026-11-24): everyone in documents → offer →
+# onboarding right now, not yet joined and not declined.
+STATUS["offer_process"] = _statuses(
+    "doc_collection", "fitment", "comp_approved", "comp_due", "offer_sent", "offer_not_sent", "offer_accepted",
+    "addendum_accepted", "prejoin_done", "prejoin_pending", "it_sent", "it_not_sent")
+TOP_CARDS = FUNNEL_CARDS + ["offer_process"]
 
 # Offer update charts (Timeline tab): everyone who has been made an offer,
 # split by where that offer stands now. The four groups don't overlap.
@@ -342,6 +503,7 @@ CARDS = {
     "reach_joined": dict(label="Joined", tone="good", funnel=True),
     # Offer update charts (Hiring Funnel tab) → "Offers · <unit>" list
     "reach_offer": dict(label="Offers made", tone="info", funnel=True),
+    "offer_process": dict(label="Total Offer process", tone="info", funnel=True),
 }
 
 # Plain-language definition of every card — shown on the card's (i) and in
@@ -386,6 +548,8 @@ CARD_DESC = {
                       "joined / not joined or ERP ID.",
     "reach_joined": "Joined the Foundation (Joined or ERP ID stage).",
     "reach_offer": "Made an offer: offer sent, accepted, declined, onboarding, joined or not joined.",
+    "offer_process": "In the offer process right now: document collection, fitment, compensation, offer letter, "
+                     "offer accepted, addendum, pre-joining or IT email. Not yet joined; declines are not counted.",
 }
 
 
@@ -463,6 +627,18 @@ def _list(value):
     return [str(v).strip() for v in value if isinstance(v, (str, int)) and str(v).strip()][:500]
 
 
+def _job_openings(names):
+    """The chosen Job Openings (name, job_code, designation, unit, department), once per request."""
+    key = tuple(sorted(set(names)))
+    cache = getattr(frappe.local, "pod_job_openings", None)
+    if cache is None:
+        cache = frappe.local.pod_job_openings = {}
+    if key not in cache:
+        cache[key] = frappe.get_all("Job Opening", filters={"name": ["in", list(key)]},
+                                    fields=["name", "job_code", "designation", "unit", "department"]) if key else []
+    return cache[key]
+
+
 def _can_read(doctype):
     return bool(doctype) and frappe.db.exists("DocType", doctype) and frappe.has_permission(doctype, "read")
 
@@ -500,7 +676,7 @@ def _col(alias, field, present):
     return f"{alias}.`{field}`" if field and field in present else "NULL"
 
 
-FILTER_KEYS = ("roles", "units", "subunits", "locations", "job_codes")
+FILTER_KEYS = ("roles", "units", "subunits", "locations", "job_codes", "job_openings")
 # Analytics dimensions a drilldown may narrow to (one value, e.g. source = LinkedIn).
 DIMS = ("source", "gender", "education", "age_band", "referrer", "decline_reason", "reject_reason")
 
@@ -529,6 +705,7 @@ class _Prog:
         # programmes can share one UNION ALL query.
         self.pfx = f"p{idx}_"
         self.one_status = None
+        self.rej_statuses = None          # one step of the Select / Reject view
         self.card_key = None
         self.panel_from = self.panel_to = None
         self.pipe = None                  # "open" / "ended" (Timeline tab)
@@ -539,6 +716,7 @@ class _Prog:
                   cfg["role"], cfg["unit"], cfg["subunit"], cfg["location"], cfg["job_code"], cfg["app_date"]]
         fields += cfg.get("round_dates") or []
         fields += [cfg.get("gender"), cfg.get("source")]   # offer update charts
+        fields += [cfg.get("jo_link")]                     # Job Opening filter
         fields += [cfg.get(k) for k in ("education", "home_state", "dob", "age", "referrer", "decline_reason",
                                         "reject_reason")]  # analytics tab
         self.reg_sql, self.reg_fields = _scoped(cfg["reg"], fields)
@@ -559,6 +737,10 @@ class _Prog:
         if f.td:
             conds.append(f"{self.adate} <= %({pf}td)s")
             params[f"{pf}td"] = f.td
+        if f.get("job_openings"):
+            cond, jp = self.job_opening_cond(f.job_openings)
+            conds.append(cond)
+            params.update(jp)
         for fkey, cfg_key in (("roles", "role"), ("units", "unit"), ("subunits", "subunit"),
                               ("locations", "location"), ("job_codes", "job_code")):
             vals = f[fkey]
@@ -585,6 +767,12 @@ class _Prog:
             else:
                 conds.append(f"IFNULL({self.st}, '') IN %({pf}sts)s")
                 params[f"{pf}sts"] = tuple(sts)
+        if include_stage and self.rej_statuses is not None:
+            if not self.rej_statuses:
+                conds.append("1=0")
+            else:
+                conds.append(f"IFNULL({self.st}, '') IN %({pf}rej)s")
+                params[f"{pf}rej"] = tuple(self.rej_statuses)
         if include_stage and self.one_status is not None:
             conds.append(f"IFNULL({self.st}, '') = %({pf}one)s")
             params[f"{pf}one"] = self.one_status
@@ -660,6 +848,41 @@ class _Prog:
             f"{pf}today": str(getdate(nowdate())),
         }
 
+    def job_opening_cond(self, names):
+        """
+        Applicants of the chosen Job Openings, on this form (2026-11-24). A
+        registration belongs to an opening when (1) its Job Opening link points
+        at it (Field: job_title), or (2) its job code equals the opening's job
+        code, or (3) on forms without that link, its role + unit (+ sub-unit
+        when the opening has one) equal the opening's designation + unit.
+        """
+        pf, conds, params = self.pfx, [], {}
+        jos = _job_openings(names)
+        if not jos:
+            return "1=0", {}
+        link = _col("r", self.cfg.get("jo_link"), self.reg_fields)
+        if link != "NULL":
+            conds.append(f"{link} IN %({pf}jo)s")
+            params[f"{pf}jo"] = tuple(j.name for j in jos)
+        jc = _col("r", self.cfg["job_code"], self.reg_fields)
+        codes = tuple(sorted({j.job_code.strip() for j in jos if (j.job_code or "").strip()}))
+        if jc != "NULL" and codes:
+            conds.append(f"{jc} IN %({pf}jojc)s")
+            params[f"{pf}jojc"] = codes
+        if link == "NULL":
+            unit = _col("r", self.cfg["unit"], self.reg_fields)
+            sub = _col("r", self.cfg["subunit"], self.reg_fields)
+            for i, j in enumerate(jos):
+                if not (j.designation and j.unit) or self.rl == "NULL" or unit == "NULL":
+                    continue
+                c = f"({self.rl} = %({pf}jor{i})s AND {unit} = %({pf}jou{i})s"
+                params[f"{pf}jor{i}"], params[f"{pf}jou{i}"] = j.designation, j.unit
+                if j.department and sub != "NULL":
+                    c += f" AND {sub} = %({pf}jod{i})s"
+                    params[f"{pf}jod{i}"] = j.department
+                conds.append(c + ")")
+        return ("(" + " OR ".join(conds) + ")" if conds else "1=0"), params
+
     def status_counts(self):
         w, p = self.where(include_stage=False)
         rows = frappe.db.sql(
@@ -722,7 +945,7 @@ def _progs(f):
 @frappe.whitelist()
 def get_dashboard_data(programs=None, from_date=None, to_date=None, stages=None, refresh=0, **kw):
     f = _parse_filters(programs, from_date, to_date, stages, **{k: kw.get(k) for k in FILTER_KEYS})
-    key = "pathways_overall:v5:" + hashlib.sha1(
+    key = "pathways_overall:v11:" + hashlib.sha1(
         frappe.as_json([frappe.session.user, f]).encode()).hexdigest()
     if not cint(refresh):
         hit = frappe.cache.get_value(key)
@@ -842,6 +1065,31 @@ def get_dashboard_data(programs=None, from_date=None, to_date=None, stages=None,
 
     status_rows.sort(key=lambda x: -x["count"])
 
+    # Select / Reject views: every applicant in exactly one step (adds up to the top card).
+    step_groups = {}
+    for set_key, (groups, classify, stages) in STEP_SETS.items():
+        rg = {k: {"value": 0, "units": {}, "statuses": {}, "prog_st": {}} for k, *_ in groups}
+        for r in status_rows:
+            if r["stage"] not in stages:
+                continue
+            g = rg[classify(r["raw"])]
+            g["value"] += r["count"]
+            g["units"][r["program"]] = g["units"].get(r["program"], 0) + r["count"]
+            g["statuses"][r["status"]] = g["statuses"].get(r["status"], 0) + r["count"]
+            ps = g["prog_st"].setdefault(r["program"], {})
+            ps[r["status"]] = ps.get(r["status"], 0) + r["count"]
+        step_groups[set_key] = [{
+            "key": k, "label": label, "hint": hint, "desc": desc, "section": section, "value": rg[k]["value"],
+            "by_unit": [{"program": pg.key, "unit": pg.cfg["unit_label"], "value": rg[k]["units"].get(pg.key, 0)}
+                        for pg in progs],
+            "statuses": sorted(rg[k]["statuses"].items(), key=lambda x: -x[1]),
+            # Where each count comes from: unit → form + Application Status field → every status value
+            # of that form that belongs to this card (0 when nobody has it). The per-round
+            # "result" cards list every unit, even one whose form has no such status.
+            "sources": [src for src in (_step_source(pg, k, classify, stages, rg[k]["prog_st"].get(pg.key) or {})
+                                        for pg in progs) if src["statuses"] or section == "result"],
+        } for k, label, hint, desc, section in groups]
+
     # hints that carry an extra, actionable number
     hints = {}
 
@@ -868,8 +1116,9 @@ def get_dashboard_data(programs=None, from_date=None, to_date=None, stages=None,
         "funnel_cards": [{"key": k, "label": CARDS[k]["label"], "tone": CARDS[k]["tone"], "desc": _card_desc(k),
                           "value": cards[k],
                           "by_unit": [{"program": pg.key, "unit": pg.cfg["unit_label"], "value": by_unit[k][pg.key]}
-                                      for pg in progs if pg.key in by_unit[k]]} for k in FUNNEL_CARDS],
+                                      for pg in progs if pg.key in by_unit[k]]} for k in TOP_CARDS],
         "funnel": funnel,
+        "step_groups": step_groups,
         "status_rows": status_rows,
         "trend": sorted(trend.items()),
         "has_status_log": any(c.get("status_log") and c["key"] in f.programs and _can_prog(c)
@@ -886,7 +1135,7 @@ OPTIONS_CACHE_SECONDS = 600
 
 def _cached_filter_options(programs):
     """_filter_options() cached per user + programmes for 10 minutes (Refresh bypasses the card cache, not this)."""
-    key = "pathways_overall:opts:v1:" + hashlib.sha1(
+    key = "pathways_overall:opts:v2:" + hashlib.sha1(
         frappe.as_json([frappe.session.user, sorted(programs)]).encode()).hexdigest()
     hit = frappe.cache.get_value(key)
     if hit:
@@ -921,7 +1170,31 @@ def _filter_options(programs):
         "locations": sorted(locations),
         "units": sorted({u for u, _, _ in combos if u}),
         "combos": sorted(combos),
+        "job_openings": _job_opening_options(programs),
     }
+
+
+def _job_opening_options(programs):
+    """Job Openings for the filter: the units on this dashboard (or no unit), open ones first."""
+    if not frappe.db.exists("DocType", "Job Opening") or not frappe.has_permission("Job Opening", "read"):
+        return []
+    units = [c["unit_label"] for c in PROGRAMS if c["key"] in programs]
+    rows = frappe.get_list("Job Opening", fields=["name", "job_title", "job_code", "unit", "status", "location"],
+                           filters=[["unit", "in", units + [""]]], or_filters=None,
+                           order_by="status desc, posted_on desc", limit_page_length=0)
+    rows += frappe.get_list("Job Opening", fields=["name", "job_title", "job_code", "unit", "status", "location"],
+                            filters=[["unit", "is", "not set"]], limit_page_length=0)
+    seen, out = set(), []
+    for r in rows:
+        if r.name in seen:
+            continue
+        seen.add(r.name)
+        bits = [r.job_title or r.name]
+        if r.job_code:
+            bits.append(f"#{r.job_code}")
+        label = " · ".join(bits) + (f" ({r.unit})" if r.unit else "") + (" — Closed" if r.status == "Closed" else "")
+        out.append({"value": r.name, "label": label, "unit": r.unit or ""})
+    return out
 
 
 # ── drilldowns: every row, paged / sorted / searched in SQL ───────────────
@@ -1132,7 +1405,7 @@ def _setup_progs(filters, stage=None, status=None, pipe=None, days_min=None, day
 
 
 def _drill_setup(kind, filters, stage=None, status=None, card=None, date_from=None, date_to=None, own_dates=0,
-                 pipe=None, days_min=None, days_max=None):
+                 pipe=None, days_min=None, days_max=None, step_group=None):
     if kind not in DRILL_KINDS:
         frappe.throw("Unknown drilldown")
     if cint(own_dates):
@@ -1147,6 +1420,14 @@ def _drill_setup(kind, filters, stage=None, status=None, card=None, date_from=No
         if CARDS[card].get("kind"):           # interview / feedback cards
             kind, card = CARDS[card]["kind"], None
     _, progs = _setup_progs(filters, stage, status, pipe, days_min, days_max)
+    if step_group:
+        # One step of the Select / Reject view ("select:test"): that programme's statuses in this step.
+        set_key, _, step = str(step_group).partition(":")
+        if set_key not in STEP_SETS or step not in {g[0] for g in STEP_SETS[set_key][0]}:
+            frappe.throw("Unknown step")
+        _, classify, stages = STEP_SETS[set_key]
+        for pg in progs:
+            pg.rej_statuses = [r.s for r in pg.status_counts() if _stage(r.s) in stages and classify(r.s) == step]
     today = getdate(nowdate())
     parts = []
     for pg in progs:
@@ -1809,8 +2090,9 @@ def get_drilldown(kind, stage=None, status=None, card=None, page=1, page_size=10
     One page of the rows behind any card / table number — same scoped
     queries as the summary, no cap on how many rows exist.
     """
+    step_group = kw.pop("step_group", None)
     kind, parts = _drill_setup(kind, _filters_from(kw), stage, status, card, date_from, date_to, own_dates,
-                               pipe, days_min, days_max)
+                               pipe, days_min, days_max, step_group)
     page_size = cint(page_size) if cint(page_size) in PAGE_SIZES else 100
     page = max(1, cint(page) or 1)
     col, d, order = _order(kind, sort_by, sort_dir, card)
@@ -1878,8 +2160,9 @@ def export_drilldown_csv(kind, stage=None, status=None, card=None, sort_by=None,
     from werkzeug.wsgi import wrap_file
 
     date_label = (CARDS.get(card) or {}).get("date_label") if kind == "card" else None
+    step_group = kw.pop("step_group", None)
     kind, parts = _drill_setup(kind, _filters_from(kw), stage, status, card, date_from, date_to, own_dates,
-                               pipe, days_min, days_max)
+                               pipe, days_min, days_max, step_group)
     _, _, order = _order(kind, sort_by, sort_dir)
     cols = [c for c in _kind_cols(kind) if c != "by_"] + (["by"] if kind == "feedback" else []) + ["stage"]
     if kind == "feedback":

@@ -27,7 +27,7 @@ const POD_STORE_KEY = 'pod-filters-v2';
 // No Programme filter (the user asked): Units covers the same split — each
 // programme's Unit field holds one value (Field / Health / Grants /
 // Azim Premji Scholarship). Programme is still sent as [] = all.
-const POD_LIST_FILTERS = ['units', 'subunits', 'locations', 'job_codes', 'roles', 'stages'];
+const POD_LIST_FILTERS = ['units', 'subunits', 'locations', 'job_codes', 'job_openings', 'roles', 'stages'];
 
 // Programme identity colours (categorical slots, fixed order) — always shown
 // with the programme name, never colour alone.
@@ -89,6 +89,34 @@ const POD_TILES = {
 	comp_approved: ['Compensation', 'coins'], offer_sent: ['Offer letter', 'send'], offer_accepted: ['Offer response', 'handshake'],
 	addendum_accepted: ['Addendum', 'filesign'], prejoin_done: ['Pre-joining form', 'clipboard'], it_sent: ['IT email', 'mail'],
 	joined: ['Joining', 'door'], erp_created: ['ERP ID', 'idcard']
+};
+// Which board cards each top card shows when clicked (all = every card).
+// Select and Reject have their own step-wise view (POD_STEP_VIEWS).
+const POD_VIEWS = {
+	offer: ['doc_collection', 'fitment', 'comp_approved', 'comp_due', 'offer_sent', 'offer_not_sent',
+		'offer_accepted', 'offer_declined'],
+	joined: ['addendum_accepted', 'addendum_declined', 'prejoin_done', 'prejoin_pending', 'it_sent', 'it_not_sent',
+		'joined', 'not_joined', 'erp_created', 'erp_not_created']
+};
+// Timeline tab cards → which applicants the list below shows.
+const POD_TL_VIEWS = {
+	all: {},
+	select: { stages: ['In process', 'On hold', 'Offer / Selected'] },
+	reject: { stages: ['Not selected'] },
+	new: { stages: ['New'] },
+	offer: { card: 'offer_process' },
+	joined: { card: 'reach_joined' }
+};
+// Top cards that open a step-wise view (server STEP_SETS) instead of filtering the board.
+const POD_STEP_VIEWS = {
+	select: { cols: 6, title: __('Selected'), by_unit: __('Selected by step and unit'),
+		sections: { result: __('Select at each round — all units'), process: __('Still in process — no result yet, or a later stage') },
+		of_all: __('of all selected'), pct_col: __('% of selected'), total: __('Total selected'),
+		empty: __('No selected applicants for these filters.') },
+	reject: { cols: 5, title: __('Rejected'), by_unit: __('Rejected by step and unit'),
+		sections: { result: __('Reject at each round — all units'), process: __('Other rejects') },
+		of_all: __('of all rejects'), pct_col: __('% of rejects'), total: __('Total rejected'),
+		empty: __('No rejected applicants for these filters.') }
 };
 // Days-in-pipeline filter choices ("min-max", empty max = no upper limit).
 const POD_DAY_RANGES = [
@@ -216,6 +244,7 @@ class PathwaysOverallDashboard {
 							<span class="pod-muted" id="pod-sub"></span>
 							<button class="btn btn-default btn-xs" id="pod-guide" title="${__('What each number means')}">ⓘ ${__('Card guide')}</button>
 							<button class="btn btn-default btn-xs" id="pod-refresh" title="${__('Fetch fresh numbers')}">⟳ ${__('Refresh')}</button>
+							<button class="btn btn-primary btn-xs" id="pod-ai-open" title="${__('Ask a question about these numbers')}">${__('Ask AI')}</button>
 						</div>
 					</div>
 					<div class="pod-filter-row">
@@ -225,6 +254,7 @@ class PathwaysOverallDashboard {
 						<div class="pod-f"><label>${__('Sub-units')}</label><div class="pod-ms" id="pod-ms-subunits" data-placeholder="${__('All sub-units')}"></div></div>
 						<div class="pod-f"><label>${__('Location')}</label><div class="pod-ms" id="pod-ms-locations" data-placeholder="${__('All locations')}"></div></div>
 						<div class="pod-f"><label>${__('Job code')}</label><div class="pod-ms" id="pod-ms-job_codes" data-placeholder="${__('All job codes')}"></div></div>
+						<div class="pod-f"><label title="${__('Applicants of the chosen Job Openings (Job Opening link, job code, or role + unit)')}">${__('Job opening')}</label><div class="pod-ms" id="pod-ms-job_openings" data-placeholder="${__('All job openings')}"></div></div>
 						<div class="pod-f"><label>${__('Role')}</label><div class="pod-ms" id="pod-ms-roles" data-placeholder="${__('All roles')}"></div></div>
 						<div class="pod-f"><label>${__('Stage')}</label><div class="pod-ms" id="pod-ms-stages" data-placeholder="${__('All stages')}"></div></div>
 						<div class="pod-f pod-f-btns">
@@ -235,6 +265,7 @@ class PathwaysOverallDashboard {
 				</div>
 
 				<div class="pod-pane" data-pane="timeline" hidden>
+					<div class="pod-cards pod-tl-cards" id="pod-tl-cards"></div>
 					<div class="pod-panel pod-tl-list">
 						<div class="pod-panel-head"><div>
 							<div class="pod-panel-title">${__('Applicant timeline')}</div>
@@ -350,6 +381,21 @@ class PathwaysOverallDashboard {
 				<div class="pod-board" id="pod-board"></div>
 				</div>
 				<div class="pod-tip" id="pod-tip"></div>
+				<aside class="pod-ai" id="pod-ai" aria-label="${__('Ask AI')}" hidden>
+					<div class="pod-ai-head">
+						<div>
+							<div class="pod-ai-title">${__('Ask AI')}</div>
+							<div class="pod-ai-sub">${__('Answers from the dashboard numbers for the filters applied above. Counts only — no names or contact details are sent.')}</div>
+						</div>
+						<button class="btn btn-default btn-xs" id="pod-ai-clear" title="${__('Start a new chat')}">${__('Clear')}</button>
+						<button class="btn btn-default btn-xs" id="pod-ai-close" aria-label="${__('Close')}">✕</button>
+					</div>
+					<div class="pod-ai-log" id="pod-ai-log" aria-live="polite"></div>
+					<div class="pod-ai-input">
+						<textarea id="pod-ai-q" rows="2" maxlength="2000" placeholder="${__('Ask about the numbers… e.g. How many Test Select in each unit?')}"></textarea>
+						<button class="btn btn-primary btn-sm" id="pod-ai-send">${__('Send')}</button>
+					</div>
+				</aside>
 			</div>
 		`);
 
@@ -373,6 +419,7 @@ class PathwaysOverallDashboard {
 			this.load(this.current_filters());
 		});
 		$c.find('#pod-guide').on('click', () => this.open_guide());
+		this.bind_ai($c);
 		$c.find('.pod-tab').on('click', (e) => this.show_tab(String($(e.currentTarget).data('tab'))));
 		$(document).on('click.pod', (e) => { if (!$(e.target).closest('.pod-ms').length) $('.pod-ms.open').removeClass('open'); });
 		this.bind_candidate_links($c);
@@ -418,6 +465,9 @@ class PathwaysOverallDashboard {
 		this.ms.job_codes.setOptions(uniq(combos
 			.filter(c => (!units.length || units.includes(c[0])) && (!this.ms.subunits.val().length || this.ms.subunits.val().includes(c[1])))
 			.map(c => c[2])));
+		// Job openings of the chosen units (an opening with no unit stays listed).
+		this.ms.job_openings.setOptions(((this.data.options || {}).job_openings || [])
+			.filter(o => !units.length || !o.unit || units.includes(o.unit)));
 	}
 
 	args(f, extra = {}) {
@@ -437,6 +487,8 @@ class PathwaysOverallDashboard {
 		const placeholder = $el.data('placeholder') || __('All');
 		let options = [];
 		let selected = [];
+		const labels = {};          // value → label (options given as {value, label})
+		const lab = (v) => labels[v] || v;
 		$el.html(`
 			<div class="pod-ms-box"></div>
 			<div class="pod-ms-panel">
@@ -451,15 +503,15 @@ class PathwaysOverallDashboard {
 			$box.empty();
 			if (!selected.length) { $box.append(`<span class="pod-ms-ph">${esc(placeholder)}</span>`); return; }
 			selected.slice(0, 2).forEach(v => $box.append(
-				`<span class="pod-ms-chip" title="${esc(v)}"><span class="txt">${esc(v)}</span><span class="x" data-v="${esc(v)}">&times;</span></span>`));
+				`<span class="pod-ms-chip" title="${esc(lab(v))}"><span class="txt">${esc(lab(v))}</span><span class="x" data-v="${esc(v)}">&times;</span></span>`));
 			if (selected.length > 2) $box.append(`<span class="pod-ms-more">+${selected.length - 2}</span>`);
 		};
 		const render_list = () => {
 			const q = ($search.val() || '').toLowerCase();
-			const matches = options.filter(v => v.toLowerCase().includes(q));
+			const matches = options.filter(v => lab(v).toLowerCase().includes(q) || v.toLowerCase().includes(q));
 			$list.html(matches.length ? matches.map(v => `
 				<label class="pod-ms-opt"><input type="checkbox" data-v="${esc(v)}" ${selected.includes(v) ? 'checked' : ''}>
-				<span>${esc(v)}</span></label>`).join('') : `<div class="pod-ms-empty">${__('No matches')}</div>`);
+				<span>${esc(lab(v))}</span></label>`).join('') : `<div class="pod-ms-empty">${__('No matches')}</div>`);
 		};
 		$box.on('click', (e) => {
 			if ($(e.target).hasClass('x')) return;
@@ -482,13 +534,19 @@ class PathwaysOverallDashboard {
 		$el.find('.pod-ms-all').on('click', (e) => {
 			e.stopPropagation();
 			const q = ($search.val() || '').toLowerCase();
-			selected = [...new Set([...selected, ...options.filter(v => v.toLowerCase().includes(q))])];
+			selected = [...new Set([...selected, ...options.filter(v => lab(v).toLowerCase().includes(q) || v.toLowerCase().includes(q))])];
 			render_box(); render_list(); changed();
 		});
 		$el.find('.pod-ms-none').on('click', (e) => { e.stopPropagation(); selected = []; render_box(); render_list(); changed(); });
 		render_box();
 		return {
-			setOptions(opts) { options = opts.slice(); render_box(); },
+			setOptions(opts) {
+				options = (opts || []).map(o => {
+					if (o && typeof o === 'object') { labels[o.value] = o.label || o.value; return String(o.value); }
+					return o;
+				});
+				render_box();
+			},
 			setVal(vals) { selected = (vals || []).slice(); render_box(); },
 			val() { return selected.slice(); },
 			clear() { selected = []; render_box(); }
@@ -521,6 +579,7 @@ class PathwaysOverallDashboard {
 				// Sub-unit / job-code lists depend on the chosen units.
 				this.ms.subunits.setVal(f.subunits);
 				this.ms.job_codes.setVal(f.job_codes);
+				this.ms.job_openings.setVal(f.job_openings);
 				this.cascade('units');
 				this.render_all();
 			},
@@ -538,7 +597,7 @@ class PathwaysOverallDashboard {
 			: __('All time');
 		const extra = [];
 		[['units', __('unit(s)')], ['subunits', __('sub-unit(s)')], ['locations', __('location(s)')],
-			['job_codes', __('job code(s)')], ['roles', __('role(s)')]].forEach(([k, l]) => {
+			['job_codes', __('job code(s)')], ['job_openings', __('job opening(s)')], ['roles', __('role(s)')]].forEach(([k, l]) => {
 			if ((f[k] || []).length) extra.push(f[k].length === 1 ? f[k][0] : `${f[k].length} ${l}`);
 		});
 		if ((f.stages || []).length) extra.push(f.stages.join(', '));
@@ -627,6 +686,42 @@ class PathwaysOverallDashboard {
 		return defs;
 	}
 
+	// Top row (2026-11-24): 5 cards. Clicking one shows only its cards on the
+	// board below (POD_VIEWS); "View list" above the board opens the list.
+	// Applicants = New + Select + Reject.
+	top_defs() {
+		const regs = this.sum('registrations');
+		const fc = Object.fromEntries((this.data.funnel_cards || []).map(c => [c.key, c]));
+		const share = (v) => regs ? this.pct(v || 0, regs) : null;
+		const of_reg = __('of total registrations');
+		const stage_units = (...st) => this.headline_units(f => st.reduce((s, x) => s + ((f.stages || {})[x] || 0), 0));
+		const sel_st = ['In process', 'On hold', 'Offer / Selected'];
+		const sel = sel_st.reduce((s, x) => s + this.stage_total(x), 0);
+		const rej = this.stage_total('Not selected');
+		const where = this.reject_breakdown();
+		const defs = [
+			{ k: 'registrations', view: 'all', tone: 'info', label: __('Total Applicants'), v: regs,
+				share: regs ? 100 : null, share_of: of_reg, sub: __('in the selected period'),
+				units: this.headline_units(f => f.registrations),
+				desc: __('Every registration whose application date is in the selected range, after all the filters above. Click to show all cards.') },
+			{ k: 'stages:' + sel_st.join('|'), view: 'select', tone: 'good', label: __('Total Select'), v: sel,
+				share: share(sel), share_of: of_reg, units: stage_units(...sel_st),
+				desc: __('Moved past CV screening and not rejected: in the test or an interview round, on hold, in the offer process or joined. Click to show the select cards.') },
+			{ k: 'stage:Not selected', view: 'reject', tone: 'bad', label: __('Total Reject'), v: rej,
+				share: share(rej), share_of: of_reg, units: stage_units('Not selected'),
+				desc: __('Everyone whose journey ended without selection: any Reject / Regret / No Show status, Not Selected, Offer declined, Not joined, Duplicated or Blocklisted. Click to show the reject cards.')
+					+ (where.length ? '\n\n' + __('Where they dropped out') + ':\n' + where.map(w => `${w.label}: ${this.n(w.n)} (${this.pct(w.n, rej)}%)`).join('\n') : '') },
+		];
+		[['offer_process', 'offer', __('Click to show the offer cards.')],
+			['reach_joined', 'joined', __('Click to show the onboarding and joining cards.')]].forEach(([key, view, tip]) => {
+			const c = fc[key];
+			if (!c) return;
+			defs.push({ k: 'card:' + key, view, tone: 'good', label: key === 'reach_joined' ? __('Total Joined') : __(c.label),
+				v: c.value, units: c.by_unit, share: share(c.value), share_of: of_reg, desc: `${c.desc} ${tip}` });
+		});
+		return defs;
+	}
+
 	// Rejected applicants grouped by the step they dropped out at, from the
 	// status counts already loaded (same scope + filters as the cards).
 	reject_breakdown() {
@@ -686,22 +781,22 @@ class PathwaysOverallDashboard {
 	// A card shows only its name, the count and the percentage. What the %
 	// is "of", the unit split and the extra notes live in the (i) and in the
 	// popup (which opens with one card per unit).
-	card_html(d, i) {
+	card_html(d, i, active = this.view) {
 		const col = POD_TONES[d.tone] || POD_TONES.neutral;
 		const click = d.v ? 'is-click' : '';
 		const has_share = d.share !== null && d.share !== undefined;
 		const desc = [d.desc, has_share && d.share_of ? `${d.share}% = ${d.share_of}` : '', d.hint ? `${d.hint}` : '']
 			.filter(Boolean).join('\n\n');
 		return `
-			<div class="pod-kpi ${click} ${d.aside ? 'is-aside' : ''}" style="--c:${col};--i:${i}" data-i="${i}" data-k="${this.esc(d.k)}" data-l="${this.esc(d.label)}"
-				${d.v ? 'role="button" tabindex="0"' : ''}>
+			<div class="pod-kpi ${click} ${d.aside ? 'is-aside' : ''} ${d.view && d.view === active ? 'is-on' : ''}" style="--c:${col};--i:${i}" data-i="${i}" data-k="${this.esc(d.k)}" data-l="${this.esc(d.label)}"
+				${d.v ? `role="button" tabindex="0"${d.view ? ` aria-pressed="${d.view === active}"` : ''}` : ''}>
 				<div class="pod-kpi-top">
 					<span class="pod-kpi-label">${d.tone !== 'info' ? `<i class="pod-dot" style="--c:${col}"></i>` : ''}${this.esc(d.label)}</span>
 					${this.info_html(desc)}
 				</div>
 				<div class="pod-kpi-value">${this.count_html(d.v)}${has_share
 					? `<span class="pod-share" title="${this.esc(d.share_of || '')}">${d.share}%</span>` : ''}</div>
-				<div class="pod-kpi-sub">${this.esc(d.k === 'registrations' ? __('in the selected period') : (d.share_of || ''))}</div>
+				<div class="pod-kpi-sub">${this.esc(d.sub || (d.k === 'registrations' ? __('in the selected period') : (d.share_of || '')))}</div>
 			</div>`;
 	}
 
@@ -715,17 +810,35 @@ class PathwaysOverallDashboard {
 
 	render_cards() {
 		const $el = this.$root.find('#pod-cards');
-		const defs = this.card_defs();
-		$el.html(`<div class="pod-headline is-funnel">${defs.map((d, i) => this.card_html(d, i)).join('')}</div>`);
-		// Every card opens its list; the popup starts with one card per unit.
+		const defs = this.top_defs();
+		this.view = this.view || 'all';
+		this.top_by_view = Object.fromEntries(defs.map(d => [d.view, d]));
+		$el.html(`<div class="pod-headline is-five">${defs.map((d, i) => this.card_html(d, i)).join('')}</div>`);
+		// Every list opens in the popup, which starts with one card per unit.
 		const open = (k, label, extra = {}) => {
 			if (k.startsWith('card:')) this.drill('card', label, Object.assign({ card: k.slice(5) }, extra));
 			else if (k.startsWith('stage:')) this.drill('registrations', label, Object.assign({ stage: k.slice(6) }, extra));
+			else if (k.startsWith('stages:')) {
+				// Several stages: narrow the page's own Stage filter (if any) to them.
+				const want = k.slice(7).split('|');
+				const page = (this.filters || {}).stages || [];
+				const stages = page.length ? want.filter(s => page.includes(s)) : want;
+				this.drill('registrations', label, Object.assign({ stages }, extra));
+			}
 			else this.drill(k, label, extra);
 		};
+		this.open_top = open;
+		// A top card picks which cards the board shows (click again = all).
 		this.bind_click($el.find('.pod-kpi.is-click'), (el) => {
 			const d = defs[+$(el).data('i')];
-			open(d.k, d.label, { units: d.units });
+			this.view = d.view === this.view ? 'all' : d.view;
+			$el.find('.pod-kpi').each((_, k) => {
+				const on = defs[+$(k).data('i')].view === this.view;
+				$(k).toggleClass('is-on', on);
+				if ($(k).is('[aria-pressed]')) $(k).attr('aria-pressed', String(on));
+			});
+			this.render_board();
+			this.count_up(this.$root.find('#pod-board'));
 		});
 		this.render_funnel_bars(open);
 		this.render_funnel_units(open);
@@ -830,7 +943,8 @@ class PathwaysOverallDashboard {
 		const tile = (it) => {
 			const first = it.cards[0];
 			const pair = it.layout === 'pair';
-			const [title] = POD_TILES[first.key] || [first.label];
+			// A pair cut to one half (e.g. CV Shortlist without CV Regret) is titled by that card.
+			const [title] = it.split ? [first.label] : (POD_TILES[first.key] || [first.label]);
 			const vals = it.cards.map(c => c.value || 0);
 			const total = vals.reduce((a, b) => a + b, 0);
 			const desc = it.cards.map(c => (pair ? `${__(c.label)}: ` : '') + (c.desc || '')).join('\n\n')
@@ -860,7 +974,37 @@ class PathwaysOverallDashboard {
 			});
 			return rows;
 		};
-		$el.html((this.data.board || []).map(g => `
+		// The top card picked decides which cards show (POD_VIEWS).
+		const view = this.view || 'all';
+		const keep = POD_VIEWS[view] ? new Set(POD_VIEWS[view]) : null;
+		const groups = (this.data.board || []).map(g => ({ ...g, items: !keep ? g.items : g.items.map(it => {
+			const cards = it.cards.filter(c => keep.has(c.key));
+			if (!cards.length) return null;
+			return cards.length === it.cards.length ? it : { layout: 'single', split: true, cards };
+		}).filter(Boolean) })).filter(g => g.items.length);
+		const top = (this.top_by_view || {})[view];
+		const bar = top ? `<div class="pod-view-bar">
+				<span class="pod-view-title">${this.esc(top.label)}</span>
+				<span class="pod-view-n">${this.n(top.v)}${top.share !== null && top.share !== undefined && view !== 'all'
+					? ` · ${!top.share && top.v ? '&lt;0.1' : top.share}% ${this.esc(__('of total registrations'))}` : ''}</span>
+				${top.v ? `<button class="btn btn-xs btn-default pod-view-list">${__('View list')}</button>` : ''}
+				${view !== 'all' ? `<button class="btn btn-xs btn-default pod-view-all">${__('Show all cards')}</button>` : ''}
+			</div>` : '';
+		const bind_bar = () => {
+			$el.find('.pod-view-list').on('click', () => {
+				if (top && this.open_top) this.open_top(top.k, top.label, { units: top.units });
+			});
+			$el.find('.pod-view-all').on('click', () => {
+				this.$root.find('#pod-cards .pod-kpi[data-k="registrations"]').trigger('click');
+			});
+		};
+		if (POD_STEP_VIEWS[view]) {
+			$el.html(bar + this.steps_html(view));
+			bind_bar();
+			this.bind_steps($el, view);
+			return;
+		}
+		$el.html(bar + groups.map(g => `
 			<section class="pod-bgroup">
 				<div class="pod-group-title">${this.esc(__(g.title))}</div>
 				${rows_of(g.items).map(row => {
@@ -872,12 +1016,199 @@ class PathwaysOverallDashboard {
 			const c = this.cards_by_key[String($(el).data('card'))];
 			if (c) this.drill_card(c);
 		});
+		bind_bar();
+	}
+
+	// Reject view: every rejected applicant in exactly one step (server
+	// REJECT_GROUPS, so the steps add up to Total Reject), as step cards in
+	// pipeline order plus a step × unit table. Every number opens its list.
+	steps_html(view) {
+		const t = POD_STEP_VIEWS[view];
+		const groups = (this.data.step_groups || {})[view] || [];
+		const total = groups.reduce((s, g) => s + (g.value || 0), 0);
+		const regs = this.sum('registrations');
+		const pct = (v, of) => !of ? 0 : (v && this.pct(v, of) === 0 ? '<0.1' : this.pct(v, of));
+		const units = this.data.units_in_scope || [];
+		if (!total) return `<div class="pod-empty">${t.empty}</div>`;
+		const card = (g, i) => {
+			const desc = `${g.desc}\n\n${__('Counts Application Status')}:\n`
+				+ (g.statuses.length ? g.statuses.map(([s, n]) => `${s}: ${this.n(n)}`).join('\n') : __('none in this period'))
+				+ `\n\n${pct(g.value, total)}% ${t.of_all} · ${__('{0}% of total registrations', [pct(g.value, regs)])}`;
+			return `<div class="pod-tile pod-rej ${g.value ? 'is-click' : 'is-empty'}" style="--i:${i}" data-rg="${this.esc(g.key)}"
+					${g.value ? 'role="button" tabindex="0"' : ''}>
+				<div class="pod-tile-head">
+					<span class="pod-rej-step">${String(i + 1).padStart(2, '0')}</span>
+					<span class="pod-tile-title">${this.esc(__(g.label))}</span>
+					${this.info_html(desc)}
+				</div>
+				<div class="pod-half-value">${this.count_html(g.value)}<span class="pod-share" title="${this.esc(t.of_all)}">${pct(g.value, total)}%</span></div>
+				<div class="pod-half-hint">${this.esc(__(g.hint || t.of_all))}</div>
+			</div>`;
+		};
+		const cell = (g, u, v) => v
+			? `<a class="pod-num" data-rg="${this.esc(g.key)}" data-prog="${this.esc(u.program)}" data-unit="${this.esc(u.unit)}">${this.n(v)}</a>`
+			: '<span class="pod-zero">0</span>';
+		const uval = (g, p) => ((g.by_unit || []).find(x => x.program === p) || {}).value || 0;
+		const utot = (p) => groups.reduce((s, g) => s + uval(g, p), 0);
+		// Two sections: the Select / Reject result of each round, then the rest.
+		// Numbering runs on across both, in pipeline order.
+		const idx = new Map(groups.map((g, i) => [g.key, i]));
+		const sections = ['result', 'process'].map(sec => {
+			const list = groups.filter(g => (g.section || 'process') === sec);
+			if (!list.length) return '';
+			const cols = sec === 'result' ? list.length : t.cols;
+			return `<section class="pod-bgroup">
+				<div class="pod-group-title">${t.sections[sec]}</div>
+				<div class="pod-rej-grid" style="--cols:${Math.min(cols, 6)}">${list.map(g => card(g, idx.get(g.key))).join('')}</div>
+			</section>`;
+		}).join('');
+		// Where every number comes from: card → unit → form + field → status values (count).
+		const src_rows = groups.filter(g => g.value).map((g, gi) => (g.sources || []).map((src, si) => `<tr>
+				${si === 0 ? `<td rowspan="${g.sources.length}" class="pod-src-card"><span class="pod-rej-step">${String(idx.get(g.key) + 1).padStart(2, '0')}</span><b>${this.esc(__(g.label))}</b>
+					<div class="pod-muted">${this.n(g.value)} ${__('applicants')}</div></td>` : ''}
+				<td class="nw">${this.esc(src.unit)}</td>
+				<td class="nw"><span class="pod-muted">${this.esc(src.doctype)}</span> · <code>${this.esc(src.field)}</code></td>
+				<td>${src.statuses.length
+					? src.statuses.map(([st, n]) => `<span class="pod-src-chip ${n ? '' : 'is-zero'}">${this.esc(st)} <b>${this.n(n)}</b></span>`).join('')
+					: `<span class="pod-muted">${__('This form has no such status, so nothing is counted here')}</span>`}</td>
+				<td class="is-num">${this.n(src.statuses.reduce((a, x) => a + x[1], 0))}</td>
+			</tr>`).join('')).join('');
+		return sections + `
+			<section class="pod-bgroup">
+				<div class="pod-group-title">${t.by_unit}</div>
+				<div class="pod-rej-table-wrap">
+					<table class="pod-table pod-rej-table">
+						<thead><tr><th>${__('Step')}</th>${units.map(u => `<th class="is-num">${this.esc(u.unit)}</th>`).join('')}
+							<th class="is-num">${__('Total')}</th><th class="is-num">${t.pct_col}</th></tr></thead>
+						<tbody>${groups.map((g, i) => `<tr class="${g.value ? '' : 'is-zero-row'}">
+							<td><span class="pod-rej-step">${String(i + 1).padStart(2, '0')}</span>${this.esc(__(g.label))}</td>
+							${units.map(u => `<td class="is-num">${cell(g, u, uval(g, u.program))}</td>`).join('')}
+							<td class="is-num">${g.value ? `<a class="pod-num" data-rg="${this.esc(g.key)}">${this.n(g.value)}</a>` : '<span class="pod-zero">0</span>'}</td>
+							<td class="is-num pod-muted">${pct(g.value, total)}%</td></tr>`).join('')}</tbody>
+						<tfoot><tr><td>${t.total}</td>${units.map(u => `<td class="is-num">${this.n(utot(u.program))}</td>`).join('')}
+							<td class="is-num">${this.n(total)}</td><td class="is-num">100%</td></tr></tfoot>
+					</table>
+				</div>
+			</section>
+			<section class="pod-bgroup">
+				<div class="pod-group-title">${__('How each card is counted — status values used, by unit and field')}</div>
+				<div class="pod-rej-table-wrap">
+					<table class="pod-table pod-rej-table pod-src-table">
+						<thead><tr><th>${__('Card')}</th><th>${__('Unit')}</th><th>${__('Form · field')}</th>
+							<th>${__('Application Status values counted (applicants)')}</th><th class="is-num">${__('Count')}</th></tr></thead>
+						<tbody>${src_rows}</tbody>
+					</table>
+				</div>
+			</section>`;
+	}
+
+	bind_steps($el, view) {
+		const t = POD_STEP_VIEWS[view];
+		const groups = Object.fromEntries(((this.data.step_groups || {})[view] || []).map(g => [g.key, g]));
+		const open = (key, prog, unit) => {
+			const g = groups[key];
+			if (!g) return;
+			this.drill('registrations', `${t.title} · ${__(g.label)}${unit ? ` · ${unit}` : ''}`,
+				{ step_group: `${view}:${key}`, units: g.by_unit, unit_on: prog || '' });
+		};
+		this.bind_click($el.find('.pod-rej.is-click'), (el) => open(String($(el).data('rg'))));
+		$el.find('.pod-rej-table .pod-num').on('click', (e) => {
+			const $a = $(e.currentTarget);
+			open(String($a.data('rg')), $a.data('prog') ? String($a.data('prog')) : '', $a.data('unit') ? String($a.data('unit')) : '');
+		});
+	}
+
+	// ── Ask AI (chat over the dashboard numbers; server: ai_chat.py) ──────────
+	bind_ai($c) {
+		this.ai_history = [];
+		const $panel = $c.find('#pod-ai');
+		const $q = $c.find('#pod-ai-q');
+		const open = () => {
+			$panel.prop('hidden', false);
+			if (!this.ai_history.length) this.ai_render();
+			setTimeout(() => $q.trigger('focus'), 50);
+		};
+		$c.find('#pod-ai-open').on('click', () => ($panel.prop('hidden') ? open() : $panel.prop('hidden', true)));
+		$c.find('#pod-ai-close').on('click', () => $panel.prop('hidden', true));
+		$c.find('#pod-ai-clear').on('click', () => { this.ai_history = []; this.ai_render(); $q.trigger('focus'); });
+		$c.find('#pod-ai-send').on('click', () => this.ai_send());
+		$q.on('keydown', (e) => {
+			if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.ai_send(); }
+			if (e.key === 'Escape') $panel.prop('hidden', true);
+		});
+		$c.find('#pod-ai-log').on('click', '.pod-ai-chip', (e) => {
+			$q.val($(e.currentTarget).text());
+			this.ai_send();
+		});
+	}
+
+	// Model text is escaped before markdown, so it can never inject HTML.
+	ai_md(text) {
+		const safe = String(text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+		return frappe.markdown ? frappe.markdown(safe) : `<p>${safe.replace(/\n/g, '<br>')}</p>`;
+	}
+
+	ai_render(pending) {
+		const $log = this.$root.find('#pod-ai-log');
+		const tool_names = { get_dashboard_summary: __('Dashboard summary'), get_step_breakdown: __('Select / Reject steps'),
+			get_status_counts: __('Status counts'), get_analytics: __('Analytics'),
+			offline: __('Dashboard numbers (free offline mode, no AI)') };
+		const used = (steps) => (steps || []).length
+			? `<div class="pod-ai-used">${__('Looked up')}: ${(steps || []).map(s => this.esc(
+				(tool_names[s.tool] || s.tool) + (s.input && (s.input.view || s.input.section) ? ` (${s.input.view || s.input.section})` : ''))).join(', ')}</div>` : '';
+		if (!this.ai_history.length && !pending) {
+			const ideas = [__('How many Test Select are there in each unit?'), __('Which step rejects the most applicants?'),
+				__('Compare Recruiter Round Reject across units'), __('Top 5 job openings by number of applicants'),
+				__('Offer Sent by unit this year'), __('Where do most applicants come from?'), __('Help')];
+			$log.html(`<div class="pod-ai-empty">
+				<p>${__('Ask about the hiring numbers — name a card, step or status, a unit and a period (e.g. "Test Reject in Health last month"). The answer uses the dates and units applied on the dashboard unless you name others.')}</p>
+				<div class="pod-ai-chips">${ideas.map(i => `<button class="pod-ai-chip">${this.esc(i)}</button>`).join('')}</div>
+			</div>`);
+			return;
+		}
+		$log.html(this.ai_history.map(m => m.role === 'user'
+			? `<div class="pod-ai-msg is-user">${this.esc(m.content)}</div>`
+			: `<div class="pod-ai-msg is-ai ${m.error ? 'is-error' : ''}">${this.ai_md(m.content)}${used(m.steps)}</div>`).join('')
+			+ (pending ? `<div class="pod-ai-msg is-ai is-pending"><span class="pod-ai-dots"><i></i><i></i><i></i></span> ${__('Looking up the numbers…')}</div>` : ''));
+		$log.scrollTop($log[0].scrollHeight);
+	}
+
+	ai_send() {
+		const $q = this.$root.find('#pod-ai-q');
+		const q = String($q.val() || '').trim();
+		if (!q || this.ai_busy) return;
+		const history = this.ai_history.filter(m => !m.error).map(m => ({ role: m.role, content: m.content }));
+		this.ai_history.push({ role: 'user', content: q });
+		$q.val('');
+		this.ai_busy = true;
+		this.$root.find('#pod-ai-send').prop('disabled', true);
+		this.ai_render(true);
+		const f = this.filters || this.current_filters();
+		const filters = { from_date: f.from_date || null, to_date: f.to_date || null };
+		['units', 'subunits', 'locations', 'job_codes', 'job_openings', 'roles'].forEach(k => { filters[k] = f[k] || []; });
+		frappe.call({
+			method: 'ms_calendar.ms_calendar.page.pathways_overall_dashboard.ai_chat.ask',
+			args: { question: q, history: JSON.stringify(history), filters: JSON.stringify(filters) },
+			callback: (r) => {
+				const m = r.message || {};
+				this.ai_history.push(m.error
+					? { role: 'assistant', content: m.message || __('Something went wrong.'), error: true }
+					: { role: 'assistant', content: m.answer || '', steps: m.steps });
+			},
+			error: () => this.ai_history.push({ role: 'assistant', content: __('The request failed. Please try again.'), error: true }),
+			always: () => {
+				this.ai_busy = false;
+				this.$root.find('#pod-ai-send').prop('disabled', false);
+				this.ai_render();
+				$q.trigger('focus');
+			}
+		});
 	}
 
 	// "Card guide": every card's definition in one place.
 	open_guide() {
 		const esc = (v) => this.esc(v);
-		const head = this.card_defs();
+		const head = this.top_defs();
 		const d = new frappe.ui.Dialog({ title: __('Card guide — what each number means'), size: 'extra-large' });
 		d.$wrapper.find('.modal-dialog').addClass('pod-modal-wide');
 		d.$wrapper.find('.modal-dialog').addClass('modal-dialog-centered');
@@ -1223,6 +1554,7 @@ class PathwaysOverallDashboard {
 		if (extra.stage) base.stage = extra.stage;
 		if (extra.status !== undefined) base.status = extra.status;
 		if (extra.card) base.card = extra.card;
+		if (extra.step_group) base.step_group = extra.step_group;
 		['pipe', 'days_min', 'days_max'].forEach(k => { if (extra[k] !== undefined && extra[k] !== '') base[k] = extra[k]; });
 		// One Analytics value (source / gender / age group …) — the server filters on the same expression it grouped by.
 		if (extra.dim) { base.dim = extra.dim; base.dim_value = extra.dim_value === undefined ? '' : extra.dim_value; }
@@ -1520,14 +1852,33 @@ class PathwaysOverallDashboard {
 	// filters: Sort by, Programme, Stage and Status. Each is a single choice,
 	// so it applies at once. Options only offer what the top filters allow,
 	// and Status lists the statuses actually present (with counts).
+	// Timeline tab cards: the Dashboard's top cards + New Applicant. A click
+	// shows that group in the timeline list below (click again = everyone).
+	render_tl_cards(tl) {
+		const $el = this.$root.find('#pod-tl-cards');
+		const regs = this.sum('registrations');
+		const n_new = this.stage_total('New');
+		const defs = this.top_defs().concat([{ k: 'stage:New', view: 'new', tone: 'neutral', label: __('New Applicant'), v: n_new,
+			share: regs ? this.pct(n_new, regs) : null, share_of: __('of total registrations'),
+			desc: __('Nobody has screened the CV yet. Click to list them below.') }]);
+		$el.html(`<div class="pod-headline is-six">${defs.map((d, i) => this.card_html(d, i, tl.view)).join('')}</div>`);
+		this.bind_click($el.find('.pod-kpi.is-click'), (el) => {
+			const d = defs[+$(el).data('i')];
+			tl.view = d.view === tl.view ? 'all' : d.view;
+			tl.status = '';
+			this.render_tl_list();
+		});
+	}
+
 	render_tl_list() {
 		this.tl_dirty = false;
 		const $tools = this.$root.find('#pod-tl-tools');
 		const f = this.filters || {};
 		const progs = (this.data.units_in_scope || []).map(u => u.program);
 		const stages = (f.stages || []).length ? f.stages : (this.data.stages || []);
-		const tl = this.tl_state = Object.assign({ sort: 'created:desc', program: '', stage: '', status: '', pipe: '', days: '' },
+		const tl = this.tl_state = Object.assign({ sort: 'created:desc', program: '', stage: '', status: '', pipe: '', days: '', view: 'all' },
 			this.tl_state || {});
+		this.render_tl_cards(tl);
 		if (tl.program && !progs.includes(tl.program)) tl.program = '';
 		if (tl.stage && !stages.includes(tl.stage)) tl.stage = '';
 		// A blank status is sent as "(blank)" ('' means "all statuses").
@@ -1546,7 +1897,7 @@ class PathwaysOverallDashboard {
 			['name:asc', __('Name A → Z')], ['name:desc', __('Name Z → A')], ['status:asc', __('Status A → Z')],
 			['program:asc', __('Programme')], ['role:asc', __('Role A → Z')], ['location:asc', __('Location A → Z')]];
 		const opt = (v, l, sel) => `<option value="${this.esc(v)}" ${v === sel ? 'selected' : ''}>${this.esc(l)}</option>`;
-		const active = ['program', 'stage', 'status', 'pipe', 'days'].filter(k => tl[k]).length;
+		const active = ['program', 'stage', 'status', 'pipe', 'days'].filter(k => tl[k]).length + (tl.view !== 'all' ? 1 : 0);
 		$tools.html(`
 			<label class="pod-tl-tool"><span>${__('Sort by')}</span>
 				<select data-k="sort">${sorts.map(([v, l]) => opt(v, l, tl.sort)).join('')}</select></label>
@@ -1570,11 +1921,21 @@ class PathwaysOverallDashboard {
 			this.render_tl_list();
 		});
 		$tools.find('.pod-tl-clear').on('click', () => {
-			Object.assign(tl, { program: '', stage: '', status: '', pipe: '', days: '' });
+			Object.assign(tl, { program: '', stage: '', status: '', pipe: '', days: '', view: 'all' });
 			this.render_tl_list();
 		});
 
 		const extra = {};
+		// The card picked above the table (Timeline cards).
+		let kind = 'registrations';
+		const vw = POD_TL_VIEWS[tl.view];
+		if (vw && vw.stages) {
+			const page = (this.filters || {}).stages || [];
+			extra.stages = page.length ? vw.stages.filter(x => page.includes(x)) : vw.stages;
+			// Nothing left after the page's Stage filter → ask for a stage outside it (= no rows).
+			if (!extra.stages.length) { extra.stages = page; extra.stage = vw.stages[0]; }
+		}
+		if (vw && vw.card) { kind = 'card'; extra.card = vw.card; }
 		if (tl.program) extra.programs = [tl.program];
 		if (tl.stage) extra.stage = tl.stage;
 		if (tl.status !== '') extra.status = tl.status;
@@ -1600,7 +1961,7 @@ class PathwaysOverallDashboard {
 			{ key: 'days', label: __('In pipeline'), nw: true,
 				render: (r) => r.days === '' ? '' : `<b class="pod-days ${+r.days > 30 && r.stage !== 'Not selected' ? 'is-long' : ''}">${this.esc(__('{0} days', [this.n(r.days)]))}</b>` }
 		];
-		this.server_table($el, 'registrations', extra, { columns: cols, title: 'applicants', page_size: 50,
+		this.server_table($el, kind, extra, { columns: cols, title: 'applicants', page_size: 50,
 			sort_by, sort_dir, search, empty: __('No applicants match these filters.') });
 		$el.find('.pod-st-search').val(search);
 		// Here a name opens the timeline, not the detail popup (the page-wide
@@ -2014,10 +2375,110 @@ class PathwaysOverallDashboard {
 	// how complete the underlying data is. One server call (cached 10 min,
 	// Refresh bypasses it), made only while this tab is open. Every number
 	// with a list behind it opens that list (same drilldown as everywhere).
+	// Second batch of the management review (server: analytics_extra.py) — loads after the main charts.
+	load_analytics_extra($a) {
+		const my = this.an_x_seq = (this.an_x_seq || 0) + 1;
+		frappe.call({
+			method: 'ms_calendar.ms_calendar.page.pathways_overall_dashboard.analytics_extra.get_analytics_extra',
+			args: this.args(this.filters || this.current_filters(), { refresh: this.an_x_refresh ? 1 : 0 }),
+			callback: (r) => { if (my === this.an_x_seq && r.message) this.draw_analytics_extra($a, r.message); },
+			error: () => $a.find('#pod-an-x-div, #pod-an-x-dist, #pod-an-x-com').html(`<div class="pod-empty">${__('Could not load this section.')}</div>`)
+		});
+		this.an_x_refresh = false;
+	}
+
+	draw_analytics_extra($a, x) {
+		const esc = (v) => this.esc(v);
+		const n = (v) => this.n(v);
+		const pc = (a, b) => (b ? `${this.pct(a, b)}%` : '<span class="pod-muted">—</span>');
+		const empty = (t) => `<div class="pod-empty">${esc(t)}</div>`;
+
+		// diversity by unit
+		const dv = x.diversity || [];
+		$a.find('#pod-an-x-div').html(!dv.length ? empty(__('No units in scope.')) : `<div class="pod-table-scroll"><table class="pod-table">
+			<thead><tr><th>${__('Unit')}</th><th>${__('Applicants')}</th><th>${__('Women')}</th><th>${__('Women at offer')}</th>
+				<th>${__('Home states')}</th><th>${__('Smaller districts')}</th></tr></thead>
+			<tbody>${dv.map(u => {
+				const w1 = u.gender_known ? u.women / u.gender_known : null;
+				const w2 = u.offers_gender_known ? u.offers_women / u.offers_gender_known : null;
+				const trend = w1 !== null && w2 !== null ? (w2 >= w1 ? '<span class="pod-an-up">▲</span>' : '<span class="pod-an-down">▼</span>') : '';
+				return `<tr><td><b>${esc(u.unit)}</b></td><td>${n(u.reg)}</td>
+					<td>${u.gender_known ? pc(u.women, u.gender_known) : `<span class="pod-muted">${__('not recorded')}</span>`}</td>
+					<td>${u.offers_gender_known ? `${pc(u.offers_women, u.offers_gender_known)} ${trend}` : '<span class="pod-muted">—</span>'}
+						<small class="pod-muted">${u.offers ? esc(__('of {0} offers', [n(u.offers)])) : ''}</small></td>
+					<td>${u.states === null ? `<span class="pod-muted">${__('not recorded')}</span>` : n(u.states)}</td>
+					<td title="${esc(u.district_known ? __('{0} of {1} applicants with a home district', [n(u.smaller_districts), n(u.district_known)]) : '')}">${u.smaller_districts === null
+						? `<span class="pod-muted">${__('not recorded')}</span>` : pc(u.smaller_districts, u.district_known)}</td></tr>`;
+			}).join('')}</tbody></table></div>`);
+
+		// home district type
+		const ds = x.districts || {};
+		const known = (ds.rows || []).filter(r => r.key);
+		const known_tot = known.reduce((a, r) => a + r.reg, 0);
+		const not_given = (ds.rows || []).find(r => !r.key) || { reg: 0 };
+		$a.find('#pod-an-x-dist').html(!(ds.captured_units || []).length ? empty(__('No unit in scope records the home district.'))
+			: !known_tot ? empty(__('Home district is not filled in for these applicants.')) : `<div class="pod-table-scroll"><table class="pod-table">
+			<thead><tr><th>${__('District type')}</th><th>${__('Applicants')}</th><th>${__('Share')}</th><th>${__('CV shortlisted')}</th><th>${__('Offers')}</th><th>${__('Joined')}</th></tr></thead>
+			<tbody>${known.map(r => `<tr><td><b>${esc(__(r.label))}</b></td><td>${n(r.reg)}</td><td>${pc(r.reg, known_tot)}</td>
+				<td>${n(r.reach_cv)} <small class="pod-muted">${r.reg ? this.pct(r.reach_cv, r.reg) + '%' : ''}</small></td>
+				<td>${n(r.reach_offer)}</td><td>${n(r.reach_joined)}</td></tr>`).join('')}</tbody></table></div>
+			<div class="pod-an-note pod-muted">${esc(__('{0} of {1} applicants ({2}) have a home district recorded — {3}.',
+				[n(known_tot), n(known_tot + not_given.reg), this.pct(known_tot, known_tot + not_given.reg) + '%', (ds.captured_units || []).join(', ')]))}</div>`);
+
+		// interviewer comment themes
+		const c = x.comments || {};
+		const bo = c.by_outcome || {};
+		if (!c.total) {
+			$a.find('#pod-an-x-com').html(empty(__('No interviewer comments recorded on the feedback forms for these applicants.')));
+			return;
+		}
+		const themes = (c.themes || []).filter(t => t.n).sort((a, b) => b.n - a.n);
+		// Comparing selects with rejects only means something with enough comments on both sides.
+		const enough = (bo.Select || 0) >= 10 && (bo.Reject || 0) >= 10;
+		const diff = (t) => (!enough || t.pct_select === null || t.pct_reject === null ? null : t.pct_select - t.pct_reject);
+		const row = (t) => {
+			const d = diff(t);
+			return `<tr><td><b>${esc(__(t.label))}</b></td><td>${n(t.n)} <small class="pod-muted">${this.pct(t.n, c.total)}%</small></td>
+				<td>${t.pct_select === null ? '—' : `${t.pct_select}%`}</td><td>${t.pct_reject === null ? '—' : `${t.pct_reject}%`}</td>
+				<td>${d === null ? '<span class="pod-muted">—</span>' : d >= 5 ? `<span class="pod-an-up">${esc(__('more in selects'))}</span>`
+					: d <= -5 ? `<span class="pod-an-down">${esc(__('more in rejects'))}</span>` : `<span class="pod-muted">${esc(__('similar'))}</span>`}</td></tr>`;
+		};
+		const looks_for = themes.filter(t => t.key !== 'concern' && (diff(t) || 0) >= 5).slice(0, 3).map(t => __(t.label));
+		const words = c.words || [];
+		$a.find('#pod-an-x-com').html(`
+			<div class="pod-tl-kpis">
+				${[[__('Comments analysed'), n(c.total), Object.entries(c.per_unit || {}).map(([u, v]) => `${u} ${n(v)}`).join(' · ')],
+					[__('On selected applicants'), n(bo.Select || 0), pc(bo.Select || 0, c.total) + ' ' + __('of comments')],
+					[__('On rejected applicants'), n(bo.Reject || 0), pc(bo.Reject || 0, c.total) + ' ' + __('of comments')],
+					[__('What managers look for'), looks_for.length ? esc(looks_for.join(', ')) : '—',
+						looks_for.length ? __('mentioned more often for selected applicants')
+							: enough ? __('no theme stands out yet') : __('needs at least 10 comments on both selected and rejected applicants')]]
+					.map(([l, v, sub]) => `<div class="pod-tl-kpi" style="--c:${POD_TONES.info}"><div class="pod-tl-kpi-top"><span>${esc(l)}</span></div>
+						<b>${v}</b><small>${sub}</small></div>`).join('')}
+			</div>
+			<div class="pod-grid-2">
+				<div class="pod-tl-chart"><div class="pod-tl-chart-head"><div><div class="pod-tl-chart-title">${esc(__('Themes in the comments'))}
+					${this.info_html(__('Each comment is checked for words that belong to a theme (e.g. Communication: communicate, articulate, fluent, English…). % = share of comments on selected / rejected applicants that mention the theme. A theme mentioned much more for selected applicants is what panels reward; "Concerns raised" more often for rejects shows what they turn down. Keyword-based, not AI — read it as a pointer for HR, not a verdict.'))}</div>
+					<div class="pod-panel-sub">${esc(__('Share of comments mentioning each theme, for selected vs rejected applicants'))}</div></div></div>
+					${themes.length ? `<div class="pod-table-scroll"><table class="pod-table"><thead><tr><th>${__('Theme')}</th><th>${__('Comments')}</th>
+						<th>${__('Selected')}</th><th>${__('Rejected')}</th><th>${__('Pattern')}</th></tr></thead><tbody>${themes.map(row).join('')}</tbody></table></div>`
+						: empty(__('No known themes found in these comments.'))}
+				</div>
+				<div class="pod-tl-chart"><div class="pod-tl-chart-head"><div><div class="pod-tl-chart-title">${esc(__('Most used words'))}
+					${this.info_html(__('Words used in the most comments (common words and anything that looks like a name are left out).'))}</div>
+					<div class="pod-panel-sub">${esc(__('Number of comments using the word'))}</div></div></div>
+					${words.length ? `<div class="pod-an-words">${words.map(w => `<span class="pod-an-word" title="${esc(__('{0} comments · {1} on selects · {2} on rejects', [n(w.n), n(w.Select), n(w.Reject)]))}">${esc(w.word)} <b>${n(w.n)}</b></span>`).join('')}</div>`
+						: empty(__('Not enough comments yet.'))}
+				</div>
+			</div>
+			<div class="pod-an-note pod-muted">${esc(__('Free keyword analysis on this server — no comment text leaves the system. A deeper AI reading of the comments (patterns in what managers look for, in their own words) can be switched on later with a paid AI key, the same one the Ask AI chat uses.'))}</div>`);
+	}
+
 	render_analytics() {
 		this.an_dirty = false;
 		const refresh = !!this.an_refresh;
 		this.an_refresh = false;
+		if (refresh) this.an_x_refresh = true;
 		const $a = this.$root.find('#pod-an');
 		if (!$a.children().length) $a.html(`<div class="pod-empty">${__('Loading analytics…')}</div>`);
 		$a.addClass('pod-st-loading');
@@ -2059,7 +2520,7 @@ class PathwaysOverallDashboard {
 						${sub ? `<div class="pod-panel-sub">${esc(sub)}</div>` : ''}</div>
 					${tools}
 				</div>${body}</div>`;
-		const group = (title, lead) => `<div class="pod-group-title">${esc(title)}</div>
+		const group = (title, lead, id = '') => `<div class="pod-group-title" ${id ? `id="pod-an-g-${id}"` : ''}>${esc(title)}</div>
 			${lead ? `<div class="pod-an-lead">${esc(lead)}</div>` : ''}`;
 		const empty = (t) => `<div class="pod-empty">${esc(t || __('No data for these filters.'))}</div>`;
 		const legend = (items) => `<div class="pod-legend">${items.map(x =>
@@ -2292,15 +2753,75 @@ class PathwaysOverallDashboard {
 				<td>${r.pct === null ? '<span class="pod-muted">—</span>' : `<span class="pod-an-inbar ${r.pct < 50 ? 'is-low' : ''}"><i style="width:${r.pct}%"></i></span><b>${r.pct}%</b> <span class="pod-muted">${esc(__('{0} of {1}', [n(r.filled), n(r.total)]))}</span>`}</td>
 				<td class="pod-muted" title="${esc(r.note)}">${esc(r.note)}</td></tr>`).join('')}</tbody></table></div>`;
 
+		// ── Management review (2026-11-24): offer acceptance by unit ─────
+		const acc_u = {};
+		jds.forEach(j => {
+			const u = acc_u[j.unit] = acc_u[j.unit] || { unit: j.unit, program: j.program, offers: 0, accepted: 0, declined: 0 };
+			u.offers += j.reach_offer || 0; u.accepted += j.reach_accepted || 0; u.declined += j.declined || 0;
+		});
+		const acc_rows = Object.values(acc_u).filter(u => u.offers).sort((a, b) => b.offers - a.offers);
+		const acc_tbl = !acc_rows.length ? empty(__('No offers made within these filters.')) : `<div class="pod-table-scroll"><table class="pod-table">
+			<thead><tr><th>${__('Unit')}</th><th>${__('Offers made')}</th><th>${__('Accepted')}</th><th>${__('Declined / not joined')}</th>
+				<th>${__('Still deciding')}</th><th>${__('Acceptance')}</th></tr></thead>
+			<tbody>${acc_rows.map(u => {
+				const decided = u.accepted + u.declined;
+				return `<tr><td><b>${esc(u.unit)}</b></td>
+					<td><a class="pod-an-num" ${dd('card', `${__('Offers')} · ${u.unit}`, { card: 'reach_offer', programs: [u.program] })}>${n(u.offers)}</a></td>
+					<td><a class="pod-an-num" ${dd('card', `${__('Accepted')} · ${u.unit}`, { card: 'reach_accepted', programs: [u.program] })}>${n(u.accepted)}</a></td>
+					<td>${n(u.declined)}</td><td>${n(Math.max(0, u.offers - decided))}</td>
+					<td>${decided ? `<b>${this.pct(u.accepted, decided)}%</b>` : '<span class="pod-muted">—</span>'}</td></tr>`;
+			}).join('')}</tbody></table></div>`;
+
+		// ── where time could be saved (from the step + feedback numbers) ──
+		const own_label = Object.fromEntries((s.owners || []).map(o => [o.key, __(o.label)]));
+		const slow = (s.steps || []).filter(x => x.n && x.total_days).sort((a, b) => (b.total_days || 0) - (a.total_days || 0)).slice(0, 3);
+		const fb_late = (s.turnaround || []).filter(t => t.n && t.median !== null && t.median > 2);
+		const fb_pending = (s.turnaround || []).reduce((a, t) => a + (t.pending || 0), 0);
+		const tips = [];
+		slow.forEach(x => tips.push(__('<b>{0}</b>: {1} applicant-days of waiting in total — {2} stays, {3} on average each — owned by {4}.',
+			[esc(__(x.label)), esc(n(x.total_days)), esc(n(x.n)), esc(days(x.avg)), esc(own_label[x.owner] || x.owner)])));
+		fb_late.forEach(t => tips.push(__('<b>{0}</b>: feedback takes a median of {1} after the interview (target: within 2 days).',
+			[esc(t.unit), esc(days(t.median))])));
+		if (fb_pending) tips.push(__('<b>{0}</b> interviews have no feedback form yet — chasing these shortens the interview stage directly.', [esc(n(fb_pending))]));
+		const save_box = tips.length ? `<ul class="pod-an-tips">${tips.map(t => `<li>${t}</li>`).join('')}</ul>`
+			: empty(__('Not enough recorded status changes yet to point at a slow step.'));
+
+		// ── review checklist: every point of the management review and where it is answered ──
+		const RV = { done: __('Built'), new: __('New'), data: __('Needs data'), free: __('Free version'), review: __('To review') };
+		const review = [
+			['review', __('Box titles make sense to users'), __('Every card has an ⓘ and the Card guide; titles still to be checked with users'), ''],
+			['done', __('(i) Time at each stage, and application → acceptance for each successful candidate'), __('Time taken'), 'time'],
+			['done', __('(ii) Conversion rate at each stage'), __('Conversion'), 'conversion'],
+			['done', __('(iii) Conversion by unit'), __('Conversion'), 'conversion'],
+			['new', __('(iv) Offer → acceptance for each job description and each unit'), __('Job descriptions (by JD and, new, by unit)'), 'jd'],
+			[decl.length ? 'done' : 'data', __('(v) Why applicants declined the offer'), __('Reasons — fill "Decline Reason" when marking Offer Declined'), 'reasons'],
+			['done', __('(vi) Sources and influencers (referrers)'), __('Sources & referrals'), 'sources'],
+			['new', __('(viii) Diversity: gender, education, home state, urban / rural'), __('Diversity & inclusion (home district type is new; few forms record the district)'), 'diversity'],
+			['done', __('(ix) Application density per job over time; most / fewest applications'), __('Job descriptions'), 'jd'],
+			['done', __('(x) Success rate by interviewer'), __('Interviewers'), 'interviewers'],
+			['new', __('(xi) Which unit does more for diversity and inclusion'), __('Diversity & inclusion → Diversity by unit'), 'diversity'],
+			['new', __('(xii) HR vs unit time, and where it can be made faster'), __('Time taken → Where time could be saved'), 'time'],
+			['free', __('Anonymised analysis of interviewer comments'), __('Interviewer comments (keyword themes; AI analysis needs a paid API key)'), 'comments']
+		];
+		const review_box = `<details class="pod-an-review"><summary>${esc(__('Management review — where each point is answered ({0} points)', [review.length]))}</summary>
+			<table class="pod-table"><thead><tr><th>${__('Point')}</th><th>${__('Where on this tab')}</th><th>${__('Status')}</th></tr></thead>
+			<tbody>${review.map(([st, pt, where, id]) => `<tr><td>${esc(pt)}</td>
+				<td>${id ? `<a class="pod-an-goto" data-goto="${id}">${esc(where)}</a>` : esc(where)}</td>
+				<td><span class="pod-an-st is-${st}">${esc(RV[st])}</span></td></tr>`).join('')}</tbody></table></details>`;
+
 		const updated = String(s.generated_at || '').slice(11, 16);
 		$a.html(`
 			<div class="pod-an-head pod-muted">${esc(__('Every chart follows the filters above · click any number or bar for its list · numbers cached up to 10 minutes (Refresh for fresh ones) · updated {0}', [updated]))}</div>
 
-			${group(__('Conversion'), __('How many applicants move on from each step, and how that differs between units.'))}
+			${review_box}
+
+			${group(__('Conversion'), __('How many applicants move on from each step, and how that differs between units.'), 'conversion')}
 			${box(__('Step-by-step conversion, by unit'), __('Number reaching each step; small % = share of the step before; darker = more moved on'), conv,
 				__('Each step counts everyone who got at least that far, even if rejected later, so the numbers only narrow left to right. The % under a number is the share of the step before who reached it — compare a column across units to see where one unit loses more applicants.'))}
 
-			${group(__('Job descriptions'), __('Which openings draw applications, and how their offers turn out.'))}
+			${group(__('Job descriptions'), __('Which openings draw applications, and how their offers turn out.'), 'jd')}
+			${box(__('Offer acceptance by unit'), __('Offers made, accepted and declined per unit'), acc_tbl,
+				__('Acceptance = accepted (including everyone now onboarding or joined) ÷ (accepted + declined / not joined). "Still deciding" = offers with no answer yet, left out of the rate.'))}
 			${box(__('Applications, offers and acceptance by job description'), __('Every job code / role in scope · click a column to sort, a number for its list'),
 				`<div class="pod-an-tools"><input type="search" class="pod-an-jdsearch" placeholder="${esc(__('Filter by role, job code or unit…'))}" aria-label="${esc(__('Filter job descriptions'))}"></div><div class="pod-table-scroll pod-short" id="pod-an-jd"></div>`,
 				__('Acceptance = offers accepted (including everyone now onboarding or joined) ÷ (accepted + declined / not joined). Offers still awaiting a reply are left out of it. Months = calendar months in which this job received applications.'))}
@@ -2310,7 +2831,7 @@ class PathwaysOverallDashboard {
 			</div>
 			${box(__('Applications per month'), __('The 10 most-applied job descriptions · darker = more applications that month'), heat_tbl)}
 
-			${group(__('Time taken'), __('How long each part of the process takes, and who the waiting is on.'))}
+			${group(__('Time taken'), __('How long each part of the process takes, and who the waiting is on.'), 'time')}
 			${time_kpis}
 			${box(__('Days from application to each step, by unit'), __('Median days · n = applicants with a recorded change'), to_tbl,
 				__('From the application date to the day the Application Status first reached that step. Reaching a later step counts as having reached the earlier ones by then.'))}
@@ -2321,19 +2842,29 @@ class PathwaysOverallDashboard {
 				${box(__('Who the waiting is on'), __('Share of all recorded days applicants spent waiting'), owner_box,
 					__('All completed stays added up per owner. HR team = screening, test, recruiter round, documents, offer letter, onboarding. Interview panel (unit) = functional and leadership rounds. Approvers = compensation approval. Candidate = deciding on the offer. This split is a starting assumption — tell us if a step belongs to someone else.'))}
 			</div>
+			${box(__('Where time could be saved'), __('Read from the numbers on this tab — the biggest waits first'), save_box,
+				__('The steps with the most applicant-days of waiting, feedback that takes more than 2 days, and interviews still without feedback. A starting point for a conversation with HR and the units, not a verdict.'))}
 			${box(__('Feedback turnaround'), __('Days from the interview to the first feedback form submitted after it'), ta_tbl,
 				__('For every interview held (not cancelled): the days until the applicant\'s first feedback form dated on or after the interview day. "No feedback yet" = no form since that interview; click it for the list.'))}
 			${box(__('Successful candidates'), __('Everyone who accepted an offer · days from application · click a name for their profile'),
 				`<div class="pod-table-scroll pod-short" id="pod-an-succ"></div>`,
 				__('Days come from the status change history; "—" means the change was not recorded.'))}
 
-			${group(__('Sources & referrals'), __('Where applicants heard about the opening, and which sources and employees bring people who get through.'))}
+			${group(__('Sources & referrals'), __('Where applicants heard about the opening, and which sources and employees bring people who get through.'), 'sources')}
 			${box(__('Source quality'), __('Applicants per source and how far they get'), src_tbl,
 				__('Offer rate = offers made per 1,000 applicants from that source, so small and large sources compare fairly.'))}
 			${box(__('Employee referrers'), (s.referrer_count || 0) > refs.length ? __('Top {0} of {1} employees who referred someone', [refs.length, s.referrer_count]) : __('Employees named as the referrer'), ref_tbl,
 				__('From "If yes — employee name" on the registration (Field). The people who bring in applicants who get shortlisted and hired are your strongest influencers.'))}
 
-			${group(__('Diversity & inclusion'), __('Who applies, and whether that mix holds as applicants move through the process.'))}
+			${group(__('Diversity & inclusion'), __('Who applies, and whether that mix holds as applicants move through the process.'), 'diversity')}
+			<div class="pod-grid-2">
+				${box(__('Diversity by unit'), __('Which unit reaches a wider mix of applicants, and keeps it through to the offer'),
+					`<div id="pod-an-x-div">${empty(__('Loading…'))}</div>`,
+					__('Women = share of applicants with gender filled in. "At offer" = the same share among applicants made an offer — a unit whose share holds or rises is doing more for gender balance. Home states = how many states its applicants come from. Smaller districts = share of applicants whose home district is not a metro or large city (only where the form records the district).'))}
+				${box(__('Home district type (urban / rural)'), __('Applicants by the kind of district they come from'),
+					`<div id="pod-an-x-dist">${empty(__('Loading…'))}</div>`,
+					__('No form asks "urban or rural" directly, so this groups the home district: Metro (Tier 1: Mumbai, Delhi, Bengaluru Urban, Chennai, Kolkata, Hyderabad, Pune, Ahmedabad), Large city (Tier 2, about 100 big-city districts) and Other districts (smaller towns and rural areas). Field: Native District · Health: City / District. Grants and Scholarship do not record a district.'))}
+			</div>
 			<div class="pod-grid-2">
 				${box(__('Gender at each step'), __('Share of women, men and other at each step (gender filled in)'), g_box, '',
 					legend(gkeys.map(k => ({ label: __(k), color: GEN[k] }))))}
@@ -2348,22 +2879,31 @@ class PathwaysOverallDashboard {
 					__('Field: Native State · Health: State / Union territory · Scholarship: State of residence. Grants does not capture it.'))}
 			</div>
 
-			${group(__('Interviewers'), __('How outcomes vary between interviewers — names hidden by default.'))}
+			${group(__('Interviewers'), __('How outcomes vary between interviewers — names hidden by default.'), 'interviewers')}
 			${box(__('Interviewer outcomes'), iv_avg === null ? '' : __('Average select rate across all interviewers: {0}%', [Math.round(iv_avg * 10) / 10]),
 				`<div class="pod-table-scroll pod-short" id="pod-an-iv"></div>`,
 				__('From the result on each feedback form, per panelist. Select rate = Select ÷ (Select + Reject + On hold). Interviewers see different candidates and rounds, so read a big difference as a prompt for a calibration conversation, not a verdict; fewer than 5 decisions is too few to compare.'),
 				`<label class="pod-an-toggle"><input type="checkbox" class="pod-an-names"> ${__('Show names')}</label>`)}
 
-			${group(__('Reasons'), __('What is recorded about why applicants decline or are turned down.'))}
+			${group(__('Interviewer comments'), __('What interviewers write about applicants — anonymised: only themes and common words are shown, never a comment, an applicant or an interviewer.'), 'comments')}
+			<div id="pod-an-x-com">${empty(__('Loading…'))}</div>
+
+			${group(__('Reasons'), __('What is recorded about why applicants decline or are turned down.'), 'reasons')}
 			<div class="pod-grid-2">
 				${box(__('Why offers were declined'), __('Decline reason recorded on the registration'),
 					hbars(decl, { empty: __('No decline reasons recorded yet. Filling "Decline Reason" when marking Offer Declined makes this chart work (compensation, location, another offer…).') }))}
 				${box(__('Recorded rejection reasons'), __('"Reasons for reject" / "Reason for regret" on the registration'), hbars(rej, { empty: __('No rejection reasons recorded for these applicants.') }))}
 			</div>
 
-			${group(__('Data coverage'), __('How complete the data behind these charts is — the gaps to close for better analytics.'))}
+			${group(__('Data coverage'), __('How complete the data behind these charts is — the gaps to close for better analytics.'), 'coverage')}
 			${box(__('What is captured, and how much is filled in'), __('For the applicants in scope'), cov_tbl)}
 		`);
+
+		$a.find('.pod-an-goto').on('click', (e) => {
+			const el = $a.find(`#pod-an-g-${$(e.currentTarget).data('goto')}`)[0];
+			if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		});
+		this.load_analytics_extra($a);
 
 		// job descriptions table (client-side sort + filter over all rows)
 		const jd_cols = [
@@ -3223,6 +3763,22 @@ const POD_CSS = `
 .pod-an .pod-group-title { margin:20px 2px 2px; }
 .pod-an-head { font-size:12px; color:var(--muted); margin:0 2px 2px; }
 .pod-an-lead { font-size:12.5px; color:var(--text-2); margin:0 2px 10px; }
+.pod-an-review { background:var(--bg); border:1px solid var(--border); border-radius:8px; margin:4px 0 6px; }
+.pod-an-review > summary { cursor:pointer; padding:10px 14px; font-size:13px; font-weight:650; color:var(--text); }
+.pod-an-review[open] > summary { border-bottom:1px solid var(--border-soft); }
+.pod-an-review .pod-table td { white-space:normal !important; max-width:none !important; vertical-align:middle; }
+.pod-an-goto { cursor:pointer; color:var(--link); }
+.pod-an-st { display:inline-block; padding:1px 8px; border-radius:999px; font-size:11px; font-weight:600; border:1px solid var(--border); white-space:nowrap; }
+.pod-an-st.is-done { color:#2F7D4F; border-color:#B9DCC6; background:#F1F8F3; }
+.pod-an-st.is-new { color:#1F5FA6; border-color:#BCD3EE; background:#F1F6FC; }
+.pod-an-st.is-data, .pod-an-st.is-review { color:#9A5A12; border-color:#EBD3B2; background:#FCF6EE; }
+.pod-an-st.is-free { color:#5B4BA0; border-color:#D5CFEE; background:#F6F4FC; }
+.pod-an-tips { margin:4px 0 0; padding-left:18px; font-size:13px; line-height:1.6; color:var(--text); }
+.pod-an-up { color:#2F7D4F; font-weight:600; } .pod-an-down { color:#B83232; font-weight:600; }
+.pod-an-note { font-size:12px; margin:8px 2px 0; }
+.pod-an-words { display:flex; flex-wrap:wrap; gap:6px; }
+.pod-an-word { border:1px solid var(--border); border-radius:999px; padding:2px 9px; font-size:12px; color:var(--text-2); background:var(--bg); }
+.pod-an-word b { color:var(--text); margin-left:2px; font-variant-numeric:tabular-nums; }
 .pod-an-bars .pod-bar-row { grid-template-columns:minmax(110px, 36%) minmax(0,1fr) auto; padding:5px 4px; }
 .pod-an-bars .pod-bar-label { overflow:hidden; text-overflow:ellipsis; }
 .pod-an-bars .pod-bar-val { font-variant-numeric:tabular-nums; }
@@ -3267,4 +3823,84 @@ const POD_CSS = `
 	.pod-an-bars .pod-bar-row { grid-template-columns:minmax(80px, 40%) minmax(0,1fr); }
 	.pod-an-bars .pod-bar-val { grid-column:1 / -1; text-align:left; }
 }
+/* Top row = 5 cards (2026-11-24); the picked card filters the board below. */
+.pod-headline.is-five { grid-template-columns:repeat(5, minmax(0,1fr)); }
+.pod-headline.is-six { grid-template-columns:repeat(6, minmax(0,1fr)); }
+.pod-tl-cards { margin-bottom:14px; }
+.pod-headline.is-six .pod-kpi.is-on { border-color:var(--c); box-shadow:inset 0 3px 0 var(--c); }
+.pod-headline.is-five .pod-kpi.is-on { border-color:var(--c); box-shadow:inset 0 3px 0 var(--c); }
+.pod-view-bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 14px; background:var(--bg);
+	border:1px solid var(--border); border-radius:8px; }
+.pod-view-title { font-size:14px; font-weight:650; color:var(--text); }
+.pod-view-n { font-size:13px; color:var(--text-2); font-variant-numeric:tabular-nums; margin-right:auto; }
+/* Reject view: step cards + step × unit table. */
+.pod-rej-grid { display:grid; grid-template-columns:repeat(var(--cols, 5), minmax(0,1fr)); gap:12px; }
+.pod-rej { min-height:108px; }
+.pod-rej.is-click { cursor:pointer; }
+.pod-rej.is-click:hover, .pod-rej.is-click:focus-visible { border-color:#9FB3C8; outline:none; }
+.pod-rej.is-empty .pod-half-value, .pod-rej.is-empty .pod-tile-title { color:var(--muted); }
+.pod-rej .pod-tile-head { min-height:36px; align-items:flex-start; }
+.pod-rej .pod-tile-head .pod-tile-title { line-height:18px; }
+.pod-rej .pod-half-value { margin-top:2px; }
+.pod-rej .pod-half-hint { line-height:16px; min-height:16px; white-space:normal; }
+.pod-rej-step { display:inline-flex; align-items:center; justify-content:center; min-width:24px; height:20px; padding:0 5px;
+	margin-right:8px; border-radius:4px; background:var(--bg-soft); border:1px solid var(--border); color:var(--muted);
+	font-size:11px; font-weight:600; font-variant-numeric:tabular-nums; }
+.pod-rej-table-wrap { background:var(--bg); border:1px solid var(--border); border-radius:8px; overflow:auto; }
+.pod-rej-table th.is-num, .pod-rej-table td.is-num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.pod-rej-table td { vertical-align:middle; padding:8px 12px; }
+.pod-rej-table th { padding:9px 12px; }
+.pod-rej-table tr.is-zero-row td { color:var(--muted); }
+.pod-rej-table tfoot td { font-weight:700; background:var(--bg-soft); border-top:1px solid var(--border); border-bottom:0; }
+.pod-rej-table .pod-num { color:var(--link); }
+.pod-src-table td { vertical-align:top; white-space:normal !important; max-width:none !important; overflow:visible !important;
+	text-overflow:clip !important; }
+.pod-src-table td.nw { white-space:nowrap !important; }
+.pod-src-table td.pod-src-card { min-width:220px; background:var(--bg-soft); border-right:1px solid var(--border-soft); }
+.pod-src-table td.pod-src-card .pod-muted { font-size:12px; margin:2px 0 0 32px; }
+.pod-src-table code { font-size:11.5px; color:var(--text-2); background:var(--bg-soft); padding:1px 5px; border-radius:4px; }
+.pod-src-chip { display:inline-block; margin:0 6px 4px 0; padding:2px 8px; border:1px solid var(--border); border-radius:999px;
+	font-size:12px; color:var(--text-2); background:var(--bg); white-space:nowrap; }
+.pod-src-chip b { color:var(--text); font-variant-numeric:tabular-nums; margin-left:2px; }
+.pod-src-chip.is-zero { color:var(--muted); border-style:dashed; }
+/* Ask AI side panel */
+.pod-ai { position:fixed; top:64px; right:16px; bottom:16px; width:min(440px, calc(100vw - 32px)); z-index:1030;
+	display:flex; flex-direction:column; background:var(--bg); border:1px solid var(--border); border-radius:10px;
+	box-shadow:0 8px 28px rgba(16,24,40,.16); }
+.pod-ai[hidden] { display:none; }
+.pod-ai-head { display:flex; align-items:flex-start; gap:8px; padding:12px 14px; border-bottom:1px solid var(--border-soft); }
+.pod-ai-head > div { flex:1; min-width:0; }
+.pod-ai-title { font-size:15px; font-weight:700; color:var(--text); }
+.pod-ai-sub { font-size:11.5px; color:var(--muted); line-height:15px; margin-top:2px; }
+.pod-ai-log { flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px; background:var(--bg-soft); }
+.pod-ai-msg { max-width:92%; padding:9px 12px; border-radius:10px; font-size:13px; line-height:1.5; color:var(--text);
+	overflow-wrap:anywhere; }
+.pod-ai-msg.is-user { align-self:flex-end; background:var(--head); color:#fff; white-space:pre-wrap; }
+.pod-ai-msg.is-ai { align-self:flex-start; background:var(--bg); border:1px solid var(--border); }
+.pod-ai-msg.is-error { border-color:#E8B4B4; color:#8A2C2C; }
+.pod-ai-msg.is-pending { color:var(--muted); }
+.pod-ai-msg p { margin:0 0 6px; } .pod-ai-msg p:last-child { margin-bottom:0; }
+.pod-ai-msg ul, .pod-ai-msg ol { margin:0 0 6px; padding-left:18px; }
+.pod-ai-msg table { border-collapse:collapse; margin:6px 0; font-size:12px; width:100%; }
+.pod-ai-msg th, .pod-ai-msg td { border:1px solid var(--border); padding:4px 7px; text-align:left; }
+.pod-ai-msg th { background:var(--bg-soft); font-weight:600; }
+.pod-ai-used { margin-top:6px; padding-top:6px; border-top:1px dashed var(--border); font-size:11px; color:var(--muted); }
+.pod-ai-empty p { font-size:12.5px; color:var(--text-2); margin:0 0 10px; }
+.pod-ai-chips { display:flex; flex-wrap:wrap; gap:6px; }
+.pod-ai-chip { border:1px solid var(--border); background:var(--bg); color:var(--text-2); border-radius:999px; padding:4px 10px;
+	font-size:12px; cursor:pointer; text-align:left; }
+.pod-ai-chip:hover { border-color:#9FB3C8; color:var(--text); }
+.pod-ai-input { display:flex; gap:8px; align-items:flex-end; padding:10px 12px; border-top:1px solid var(--border-soft); }
+.pod-ai-input textarea { flex:1; resize:none; border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-size:13px;
+	background:var(--bg); color:var(--text); outline:none; max-height:120px; }
+.pod-ai-input textarea:focus { border-color:var(--brand); }
+.pod-ai-dots { display:inline-flex; gap:3px; vertical-align:middle; }
+.pod-ai-dots i { width:5px; height:5px; border-radius:50%; background:var(--muted); animation:pod-ai-dot 1s infinite ease-in-out; }
+.pod-ai-dots i:nth-child(2) { animation-delay:.15s; } .pod-ai-dots i:nth-child(3) { animation-delay:.3s; }
+@keyframes pod-ai-dot { 0%, 80%, 100% { opacity:.25; } 40% { opacity:1; } }
+@media (prefers-reduced-motion: reduce) { .pod-ai-dots i { animation:none; opacity:.6; } }
+.pod-src-chip.is-zero b { color:var(--muted); }
+@container podpane (max-width: 1200px) { .pod-headline.is-five, .pod-headline.is-six { grid-template-columns:repeat(3, minmax(0,1fr)); }
+	.pod-rej-grid { grid-template-columns:repeat(3, minmax(0,1fr)) !important; } }
+@container podpane (max-width: 560px) { .pod-headline.is-five, .pod-headline.is-six, .pod-rej-grid { grid-template-columns:minmax(0,1fr) !important; } }
 `;
