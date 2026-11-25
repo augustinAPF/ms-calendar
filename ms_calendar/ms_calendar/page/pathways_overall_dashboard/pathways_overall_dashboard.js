@@ -93,6 +93,7 @@ const POD_TILES = {
 // Which board cards each top card shows when clicked (all = every card).
 // Select and Reject have their own step-wise view (POD_STEP_VIEWS).
 const POD_VIEWS = {
+	interviews: ['recruiter', 'functional', 'leadership', 'iv_today', 'iv_next7', 'fb_done', 'fb_pending'],
 	offer: ['doc_collection', 'fitment', 'comp_approved', 'comp_due', 'offer_sent', 'offer_not_sent',
 		'offer_accepted', 'offer_declined'],
 	joined: ['addendum_accepted', 'addendum_declined', 'prejoin_done', 'prejoin_pending', 'it_sent', 'it_not_sent',
@@ -228,9 +229,10 @@ class PathwaysOverallDashboard {
 			<div class="pod-root">
 				<div class="pod-tabs" role="tablist">
 					<button class="pod-tab is-on" data-tab="dash" role="tab" aria-selected="true">${__('Dashboard')}</button>
+					<button class="pod-tab" data-tab="analytics" role="tab" aria-selected="false">${__('Analytics')}</button>
 					<button class="pod-tab" data-tab="timeline" role="tab" aria-selected="false">${__('Timeline')}</button>
 					<button class="pod-tab" data-tab="funnel" role="tab" aria-selected="false">${__('Hiring Funnel')}</button>
-					<button class="pod-tab" data-tab="analytics" role="tab" aria-selected="false">${__('Analytics')}</button>
+					<button class="pod-tab pod-tab-guide" data-tab="guide" role="tab" aria-selected="false">${__('Guide')}</button>
 				</div>
 				<div class="pod-filters">
 					<div class="pod-topbar">
@@ -374,6 +376,10 @@ class PathwaysOverallDashboard {
 
 				<div class="pod-pane" data-pane="analytics" hidden>
 					<div class="pod-an" id="pod-an"></div>
+				</div>
+
+				<div class="pod-pane" data-pane="guide" hidden>
+					<div class="pod-guide-tab" id="pod-guide-tab"></div>
 				</div>
 
 				<div class="pod-pane" data-pane="dash">
@@ -808,12 +814,53 @@ class PathwaysOverallDashboard {
 			});
 	}
 
+	// 6th top card (2026-11-25): Interviews & Feedback. The number counts interviews
+	// (not people), so it has no "% of registrations"; the line under it gives the
+	// feedback still pending. Clicking it shows the interview + feedback cards and
+	// a per-unit table of interviews, upcoming, cancelled, feedback and pending.
+	iv_top_def() {
+		const f = this.data.funnel || [];
+		const sum = (k) => f.reduce((a, r) => a + (r[k] || 0), 0);
+		const has = f.some(r => r.interviews !== null && r.interviews !== undefined);
+		const pending = sum('pending');
+		return { k: 'interviews', view: 'interviews', tone: 'info', label: __('Interviews & Feedback'),
+			v: has ? sum('interviews') : null, share: null,
+			sub: has ? __('{0} with no feedback form yet', [this.n(pending)]) : __('not tracked for these units'),
+			units: f.filter(r => r.interviews !== null && r.interviews !== undefined)
+				.map(r => ({ program: r.program, unit: this.unit_of(r.program), value: r.interviews })),
+			desc: __('Interviews scheduled for applicants in the selected period (cancelled ones left out), from the Interview Schedules. "No feedback form yet" = interviews already held with no feedback form submitted after them (different from the Feedback Pending card, which goes by Application Status). Click to see the interview rounds, today / next 7 days, feedback, and a table per unit.') };
+	}
+
+	iv_units_html() {
+		const f = (this.data.funnel || []).filter(r => r.interviews !== null && r.interviews !== undefined);
+		if (!f.length) return '';
+		const cols = [['interviews', 'interviews', __('Interviews')], ['interviewed', 'interviews', __('People interviewed')],
+			['upcoming', 'upcoming', __('Upcoming (7 days)')], ['cancelled', 'cancelled', __('Cancelled')],
+			['feedback', 'feedback', __('Feedback forms')], ['pending', 'pending', __('No feedback form yet')]];
+		const cell = (r, [k, kind, label]) => {
+			const v = r[k];
+			if (v === null || v === undefined) return '<td class="is-num"><span class="pod-muted">—</span></td>';
+			return `<td class="is-num">${v ? `<a class="pod-num pod-iv-num ${k === 'pending' ? 'is-red' : ''}" data-kind="${kind}" data-prog="${this.esc(r.program)}"
+				data-l="${this.esc(`${label} · ${this.unit_of(r.program)}`)}">${this.n(v)}</a>` : '<span class="pod-zero">0</span>'}</td>`;
+		};
+		const tot = (k) => f.reduce((a, r) => a + (r[k] || 0), 0);
+		return `<section class="pod-bgroup">
+			<div class="pod-group-title">${__('Interviews & feedback by unit')}</div>
+			<div class="pod-rej-table-wrap"><table class="pod-table pod-rej-table">
+				<thead><tr><th>${__('Unit')}</th>${cols.map(c => `<th class="is-num">${this.esc(c[2])}</th>`).join('')}</tr></thead>
+				<tbody>${f.map(r => `<tr><td><b>${this.esc(this.unit_of(r.program))}</b></td>${cols.map(c => cell(r, c)).join('')}</tr>`).join('')}</tbody>
+				<tfoot><tr><td>${__('All units')}</td>${cols.map(([k]) => `<td class="is-num">${this.n(tot(k))}</td>`).join('')}</tr></tfoot>
+			</table></div>
+			<div class="pod-view-hint">${__('Interviews and Upcoming count interview slots; People interviewed counts applicants. No feedback form yet = interviews already held with no feedback form submitted after them — the Feedback Pending card above goes by Application Status instead.')}</div>
+		</section>`;
+	}
+
 	render_cards() {
 		const $el = this.$root.find('#pod-cards');
-		const defs = this.top_defs();
-		this.view = this.view || 'all';
+		const defs = this.top_defs().concat([this.iv_top_def()]);
+		this.view = this.view || 'none';
 		this.top_by_view = Object.fromEntries(defs.map(d => [d.view, d]));
-		$el.html(`<div class="pod-headline is-five">${defs.map((d, i) => this.card_html(d, i)).join('')}</div>`);
+		$el.html(`<div class="pod-headline is-six">${defs.map((d, i) => this.card_html(d, i)).join('')}</div>`);
 		// Every list opens in the popup, which starts with one card per unit.
 		const open = (k, label, extra = {}) => {
 			if (k.startsWith('card:')) this.drill('card', label, Object.assign({ card: k.slice(5) }, extra));
@@ -831,7 +878,7 @@ class PathwaysOverallDashboard {
 		// A top card picks which cards the board shows (click again = all).
 		this.bind_click($el.find('.pod-kpi.is-click'), (el) => {
 			const d = defs[+$(el).data('i')];
-			this.view = d.view === this.view ? 'all' : d.view;
+			this.view = d.view === this.view ? 'none' : d.view;
 			$el.find('.pod-kpi').each((_, k) => {
 				const on = defs[+$(k).data('i')].view === this.view;
 				$(k).toggleClass('is-on', on);
@@ -974,8 +1021,14 @@ class PathwaysOverallDashboard {
 			});
 			return rows;
 		};
-		// The top card picked decides which cards show (POD_VIEWS).
-		const view = this.view || 'all';
+		// The top card picked decides which cards show (POD_VIEWS). Nothing picked
+		// (first load) = only the top cards, plus a one-line hint (2026-11-25).
+		const view = this.view || 'none';
+		if (view === 'none') {
+			// First page = the five top cards only (the user removed the overview panels, 2026-11-25).
+			$el.html(`<div class="pod-view-hint">${__('Select a card above to see its details, cards and lists.')}</div>`);
+			return;
+		}
 		const keep = POD_VIEWS[view] ? new Set(POD_VIEWS[view]) : null;
 		const groups = (this.data.board || []).map(g => ({ ...g, items: !keep ? g.items : g.items.map(it => {
 			const cards = it.cards.filter(c => keep.has(c.key));
@@ -988,14 +1041,15 @@ class PathwaysOverallDashboard {
 				<span class="pod-view-n">${this.n(top.v)}${top.share !== null && top.share !== undefined && view !== 'all'
 					? ` · ${!top.share && top.v ? '&lt;0.1' : top.share}% ${this.esc(__('of total registrations'))}` : ''}</span>
 				${top.v ? `<button class="btn btn-xs btn-default pod-view-list">${__('View list')}</button>` : ''}
-				${view !== 'all' ? `<button class="btn btn-xs btn-default pod-view-all">${__('Show all cards')}</button>` : ''}
+				<button class="btn btn-xs btn-default pod-view-all" title="${this.esc(__('Hide these cards'))}">${__('Close')}</button>
 			</div>` : '';
 		const bind_bar = () => {
 			$el.find('.pod-view-list').on('click', () => {
 				if (top && this.open_top) this.open_top(top.k, top.label, { units: top.units });
 			});
 			$el.find('.pod-view-all').on('click', () => {
-				this.$root.find('#pod-cards .pod-kpi[data-k="registrations"]').trigger('click');
+				// Clicking the picked card again closes it (back to only the top cards).
+				this.$root.find('#pod-cards .pod-kpi.is-on').first().trigger('click');
 			});
 		};
 		if (POD_STEP_VIEWS[view]) {
@@ -1011,7 +1065,11 @@ class PathwaysOverallDashboard {
 					const cols = row.reduce((a, it) => a + (it.layout === 'pair' ? 2 : 1), 0);
 					return `<div class="pod-row" style="--cols:${cols}">${row.map(tile).join('')}</div>`;
 				}).join('')}
-			</section>`).join(''));
+			</section>`).join('') + (view === 'interviews' ? this.iv_units_html() : ''));
+		$el.find('.pod-iv-num').on('click', (e) => {
+			const $a = $(e.currentTarget);
+			this.drill(String($a.data('kind')), String($a.data('l')), { programs: [String($a.data('prog'))] });
+		});
 		this.bind_click($el.find('.pod-half.is-click'), (el) => {
 			const c = this.cards_by_key[String($(el).data('card'))];
 			if (c) this.drill_card(c);
@@ -1062,17 +1120,6 @@ class PathwaysOverallDashboard {
 				<div class="pod-rej-grid" style="--cols:${Math.min(cols, 6)}">${list.map(g => card(g, idx.get(g.key))).join('')}</div>
 			</section>`;
 		}).join('');
-		// Where every number comes from: card → unit → form + field → status values (count).
-		const src_rows = groups.filter(g => g.value).map((g, gi) => (g.sources || []).map((src, si) => `<tr>
-				${si === 0 ? `<td rowspan="${g.sources.length}" class="pod-src-card"><span class="pod-rej-step">${String(idx.get(g.key) + 1).padStart(2, '0')}</span><b>${this.esc(__(g.label))}</b>
-					<div class="pod-muted">${this.n(g.value)} ${__('applicants')}</div></td>` : ''}
-				<td class="nw">${this.esc(src.unit)}</td>
-				<td class="nw"><span class="pod-muted">${this.esc(src.doctype)}</span> · <code>${this.esc(src.field)}</code></td>
-				<td>${src.statuses.length
-					? src.statuses.map(([st, n]) => `<span class="pod-src-chip ${n ? '' : 'is-zero'}">${this.esc(st)} <b>${this.n(n)}</b></span>`).join('')
-					: `<span class="pod-muted">${__('This form has no such status, so nothing is counted here')}</span>`}</td>
-				<td class="is-num">${this.n(src.statuses.reduce((a, x) => a + x[1], 0))}</td>
-			</tr>`).join('')).join('');
 		return sections + `
 			<section class="pod-bgroup">
 				<div class="pod-group-title">${t.by_unit}</div>
@@ -1087,16 +1134,6 @@ class PathwaysOverallDashboard {
 							<td class="is-num pod-muted">${pct(g.value, total)}%</td></tr>`).join('')}</tbody>
 						<tfoot><tr><td>${t.total}</td>${units.map(u => `<td class="is-num">${this.n(utot(u.program))}</td>`).join('')}
 							<td class="is-num">${this.n(total)}</td><td class="is-num">100%</td></tr></tfoot>
-					</table>
-				</div>
-			</section>
-			<section class="pod-bgroup">
-				<div class="pod-group-title">${__('How each card is counted — status values used, by unit and field')}</div>
-				<div class="pod-rej-table-wrap">
-					<table class="pod-table pod-rej-table pod-src-table">
-						<thead><tr><th>${__('Card')}</th><th>${__('Unit')}</th><th>${__('Form · field')}</th>
-							<th>${__('Application Status values counted (applicants)')}</th><th class="is-num">${__('Count')}</th></tr></thead>
-						<tbody>${src_rows}</tbody>
 					</table>
 				</div>
 			</section>`;
@@ -1831,6 +1868,103 @@ class PathwaysOverallDashboard {
 	}
 
 	// ── Timeline tab ───────────────────────────────────────────────────────
+	// ── Guide tab: how to use this dashboard ───────────────────────────────
+	render_guide_tab() {
+		const $g = this.$root.find('#pod-guide-tab');
+		if ($g.children().length) return;
+		const esc = (v) => this.esc(v);
+		// One section = title, short lead, term → meaning rows, optional action.
+		const S = [
+			{ id: 'dashboard', title: __('Dashboard'), go: 'dash', lead: __('The headline numbers and where every applicant is right now.'), rows: [
+				[__('Five top cards'), __('Total Applicants, Total Select, Total Reject, Total Offer process, Total Joined. Applicants = New + Select + Reject.')],
+				[__('Click a top card'), __('The cards below change to that group. Select and Reject show every round (CV, Test, Recruiter, Functional, Final) with a unit table and the exact statuses counted. Click it again, or Close, to hide them — at first only the top cards show.')],
+				[__('View list'), __('Opens everyone in the chosen card, with one box per unit at the top.')],
+				[__('Board cards'), __('Where applicants are now: screening, interviews, feedback, compensation & offer, onboarding. "Action" marks work waiting on the team.')]] },
+			{ id: 'analytics', title: __('Analytics'), go: 'analytics', lead: __('Trends and comparisons for management review.'), rows: [
+				[__('Management review'), __('The list at the top shows every review point and jumps to where it is answered.')],
+				[__('Conversion'), __('How many reach each step, by unit; offer acceptance by job and by unit.')],
+				[__('Time taken'), __('Days to each step, time spent per step, who the wait is on, and where time could be saved.')],
+				[__('People & process'), __('Sources and referrers, gender / education / age / home state / district type, interviewer select rates, interviewer comment themes (anonymised), decline and rejection reasons.')]] },
+			{ id: 'timeline', title: __('Timeline'), go: 'timeline', lead: __('Every applicant\'s journey, start to end.'), rows: [
+				[__('Six cards'), __('Click one to list that group below: Select, Reject, Offer process, Joined or New.')],
+				[__('List tools'), __('Sort, programme, stage, status, still in pipeline / ended, and days in pipeline narrow the list further.')],
+				[__('Click a name'), __('Opens the applicant\'s timeline: registration, every status change, interviews and feedback, in date order.')]] },
+			{ id: 'funnel', title: __('Hiring Funnel'), go: 'funnel', lead: __('How many applicants make it through each step.'), rows: [
+				[__('Funnel bars'), __('Registrations → CV shortlisted → leadership round → offer accepted → joined, with the share kept at each step.')],
+				[__('Detail tables'), __('Funnel by unit, interviews, feedback forms and all registrations — sort, search and export to CSV.')]] },
+			{ id: 'filters', title: __('Filters'), lead: __('The bar at the top of every tab except this one.'), rows: [
+				[__('Applied from / To'), __('Application date range. The page opens on This year; the date buttons apply at once.')],
+				[__('Units … Stage'), __('Tick one or more, or leave empty for all. Units narrow the Sub-unit, Job code and Job opening lists.')],
+				[__('Job opening'), __('Matches applicants by the Job Opening link, the job code, or role + unit.')],
+				[__('Apply / Reset'), __('Nothing changes until you press Apply. Reset clears every filter. Choices are remembered on this computer.')]] },
+			{ id: 'ai', title: __('Ask AI'), lead: __('Ask about the numbers in plain words.'), action: `<button class="btn btn-primary btn-sm pod-gd-ai">${esc(__('Open Ask AI'))}</button>`, rows: [
+				[__('Examples'), __('"How many Test Select in each unit?" · "Which step rejects the most?" · "Offer Sent in Health last month".')],
+				[__('Scope'), __('Uses the filters above unless the question names other dates or units. Each answer ends with what it looked up.')],
+				[__('Privacy'), __('Only counts are sent to the AI — never names, emails, phone numbers or interviewer comments.')]] },
+			{ id: 'numbers', title: __('Reading the numbers'), lead: __('What the percentages and markers mean.'), rows: [
+				[__('% on a card'), __('Share of Total Applicants in the selected period, unless the card says otherwise (step cards show the share of all Select / Reject).')],
+				[__('Now vs reached'), __('Board and step cards count where applicants are now; the funnel counts everyone who got at least that far, even if rejected later.')],
+				[__('— / not recorded'), __('That unit\'s form does not capture it.')],
+				[__('Refresh'), __('Numbers are kept for up to 90 seconds (Analytics 10 minutes). Refresh fetches fresh ones.')]] }
+		];
+		const STAGES = [
+			['New', __('Nobody has screened the CV yet.')],
+			['In process', __('In the test or an interview round.')],
+			['On hold', __('Kept on hold at any step.')],
+			['Offer / Selected', __('Documents, fitment, compensation, offer, onboarding or joined.')],
+			['Not selected', __('Any reject, regret, no show, offer declined, not joined, duplicate or blocklisted.')]
+		];
+		const steps = [
+			[__('Choose the period'), __('Date buttons or Applied from / To.')],
+			[__('Narrow it down'), __('Units, role, job opening … then Apply.')],
+			[__('Read the cards'), __('Hover ⓘ for exactly what a card counts.')],
+			[__('Open the list'), __('Click any number to see the applicants.')]
+		];
+		const nav = S.map(x => ({ id: x.id, title: x.title })).concat([{ id: 'stages', title: __('Stages') }]);
+		const section = (x, i) => `
+			<section class="pod-gd-sec" id="pod-gd-${x.id}">
+				<div class="pod-gd-head">
+					<div><span class="pod-gd-num">${String(i + 1).padStart(2, '0')}</span><h3>${esc(x.title)}</h3>
+						<p>${esc(x.lead)}</p></div>
+					${x.go ? `<a class="pod-gd-go" data-go="${x.go}">${esc(__('Open {0}', [x.title]))} →</a>` : (x.action || '')}
+				</div>
+				<dl class="pod-gd-dl">${x.rows.map(([t, d]) => `<dt>${esc(t)}</dt><dd>${esc(d)}</dd>`).join('')}</dl>
+			</section>`;
+		$g.html(`
+			<header class="pod-gd-hero">
+				<div>
+					<div class="pod-gd-eyebrow">${esc(__('User guide'))}</div>
+					<h2>${esc(__('Pathways Overall Dashboard'))}</h2>
+					<p>${esc(__('One view of recruitment across all units. Every number comes from the Application Status on each unit\'s registration form, and only for the applicants you are allowed to see.'))}</p>
+				</div>
+				<div class="pod-gd-units">${['Field', 'Health', 'Grants', 'Azim Premji Scholarship'].map(u => `<span>${esc(u)}</span>`).join('')}</div>
+			</header>
+			<ol class="pod-gd-steps">${steps.map(([t, d], i) => `<li><span>${i + 1}</span><div><b>${esc(t)}</b><small>${esc(d)}</small></div></li>`).join('')}</ol>
+			<div class="pod-gd-body">
+				<nav class="pod-gd-nav" aria-label="${esc(__('On this page'))}">
+					<div class="pod-gd-nav-title">${esc(__('On this page'))}</div>
+					${nav.map(n => `<a data-to="${n.id}">${esc(n.title)}</a>`).join('')}
+					<button class="btn btn-default btn-xs pod-gd-cards" title="${esc(__('What every card on the dashboard counts'))}">${esc(__('Card guide'))}</button>
+				</nav>
+				<div class="pod-gd-main">
+					${S.map(section).join('')}
+					<section class="pod-gd-sec" id="pod-gd-stages">
+						<div class="pod-gd-head"><div><span class="pod-gd-num">${String(S.length + 1).padStart(2, '0')}</span><h3>${esc(__('Stages'))}</h3>
+							<p>${esc(__('Every Application Status belongs to one stage. The Stage filter and the pills in every list use these.'))}</p></div></div>
+						<table class="pod-table pod-gd-stage-tbl"><thead><tr><th>${esc(__('Stage'))}</th><th>${esc(__('Means'))}</th></tr></thead>
+							<tbody>${STAGES.map(([st, d]) => `<tr><td>${this.stage_pill(__(st))}</td><td>${esc(d)}</td></tr>`).join('')}</tbody></table>
+					</section>
+				</div>
+			</div>`);
+		$g.find('.pod-gd-go').on('click', (e) => this.show_tab(String($(e.currentTarget).data('go'))));
+		$g.find('.pod-gd-ai').on('click', () => { this.show_tab('dash'); this.$root.find('#pod-ai-open').trigger('click'); });
+		$g.find('.pod-gd-cards').on('click', () => { if (this.data) this.open_guide(); });
+		$g.find('.pod-gd-nav a').on('click', (e) => {
+			const el = $g.find(`#pod-gd-${$(e.currentTarget).data('to')}`)[0];
+			if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		});
+	}
+
 	show_tab(tab) {
 		this.tab = tab;
 		const $c = this.$root;
@@ -1839,6 +1973,9 @@ class PathwaysOverallDashboard {
 			$(b).toggleClass('is-on', on).attr('aria-selected', on ? 'true' : 'false');
 		});
 		$c.find('.pod-pane').each((_, p) => { p.hidden = $(p).data('pane') !== tab; });
+		// The Guide has nothing to filter, so the filter bar steps aside there.
+		$c.find('.pod-filters').prop('hidden', tab === 'guide');
+		if (tab === 'guide') this.render_guide_tab();
 		if (tab === 'timeline' && this.tl_dirty && this.data) this.render_tl_list();
 		if (tab === 'funnel' && this.fun_dirty && this.data) this.render_funnel_tab();
 		if (tab === 'analytics' && this.an_dirty && this.data) this.render_analytics();
@@ -3779,6 +3916,66 @@ const POD_CSS = `
 .pod-an-words { display:flex; flex-wrap:wrap; gap:6px; }
 .pod-an-word { border:1px solid var(--border); border-radius:999px; padding:2px 9px; font-size:12px; color:var(--text-2); background:var(--bg); }
 .pod-an-word b { color:var(--text); margin-left:2px; font-variant-numeric:tabular-nums; }
+/* Top of the page easier to see (2026-11-25): tabs in a white bar, active tab filled;
+   filter labels, date presets and inputs a little larger / darker. */
+.pod-tabs { display:inline-flex; gap:4px; padding:4px; margin-bottom:14px; background:var(--bg); border:1px solid var(--border);
+	border-radius:10px; box-shadow:var(--shadow); }
+.pod-tab { font-size:14px; font-weight:650; color:var(--text-2); padding:8px 20px; border:0; border-radius:7px; margin:0;
+	transition:background-color .15s ease, color .15s ease; }
+.pod-tab:hover { background:var(--bg-soft); color:var(--text); }
+.pod-tab.is-on { background:var(--brand); color:#fff; }
+.pod-tab.is-on:hover { background:var(--brand); color:#fff; }
+/* Guide tab — documentation layout */
+.pod-gd-hero { display:flex; justify-content:space-between; align-items:flex-end; gap:20px; flex-wrap:wrap; background:var(--bg);
+	border:1px solid var(--border); border-left:4px solid var(--brand); border-radius:10px; padding:20px 24px; margin-bottom:12px; }
+.pod-gd-eyebrow { font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--brand); }
+.pod-gd-hero h2 { font-size:20px; font-weight:700; color:var(--text); margin:4px 0 6px; }
+.pod-gd-hero p { font-size:13.5px; color:var(--text-2); margin:0; max-width:760px; line-height:1.55; }
+.pod-gd-units { display:flex; flex-wrap:wrap; gap:6px; }
+.pod-gd-units span { font-size:12px; font-weight:600; color:var(--text-2); border:1px solid var(--border); background:var(--bg-soft);
+	border-radius:6px; padding:3px 10px; }
+.pod-gd-steps { list-style:none; display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:0; margin:0 0 16px; padding:0;
+	background:var(--bg); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+.pod-gd-steps li { display:flex; align-items:center; gap:12px; padding:14px 18px; border-right:1px solid var(--border-soft); }
+.pod-gd-steps li:last-child { border-right:0; }
+.pod-gd-steps li > span { flex:none; width:28px; height:28px; border-radius:50%; border:2px solid var(--brand); color:var(--brand);
+	font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center; }
+.pod-gd-steps b { display:block; font-size:13.5px; color:var(--text); }
+.pod-gd-steps small { display:block; font-size:12px; color:var(--muted); margin-top:2px; }
+.pod-gd-body { display:grid; grid-template-columns:200px minmax(0,1fr); gap:18px; align-items:start; }
+.pod-gd-nav { position:sticky; top:72px; display:flex; flex-direction:column; gap:2px; background:var(--bg); border:1px solid var(--border);
+	border-radius:10px; padding:12px; }
+.pod-gd-nav-title { font-size:11px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--muted); padding:0 8px 6px; }
+.pod-gd-nav a { font-size:13px; color:var(--text-2); padding:6px 8px; border-radius:6px; cursor:pointer; text-decoration:none; }
+.pod-gd-nav a:hover { background:var(--bg-soft); color:var(--text); }
+.pod-gd-nav .btn { margin-top:10px; }
+.pod-gd-main { display:flex; flex-direction:column; gap:12px; }
+.pod-gd-sec { background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:18px 22px; scroll-margin-top:72px; }
+.pod-gd-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:12px; }
+.pod-gd-num { display:inline-block; font-size:11px; font-weight:700; color:var(--muted); font-variant-numeric:tabular-nums; margin-right:8px; }
+.pod-gd-head h3 { display:inline; font-size:15.5px; font-weight:700; color:var(--text); margin:0; }
+.pod-gd-head p { font-size:13px; color:var(--muted); margin:4px 0 0; }
+.pod-gd-go { flex:none; font-size:13px; font-weight:600; color:var(--link); cursor:pointer; text-decoration:none; white-space:nowrap; }
+.pod-gd-go:hover { text-decoration:underline; }
+.pod-gd-dl { display:grid; grid-template-columns:190px minmax(0,1fr); margin:0; border-top:1px solid var(--border-soft); }
+.pod-gd-dl dt, .pod-gd-dl dd { padding:9px 0; border-bottom:1px solid var(--border-soft); margin:0; font-size:13px; line-height:1.55; }
+.pod-gd-dl dt { font-weight:650; color:var(--text); padding-right:16px; }
+.pod-gd-dl dd { color:var(--text-2); }
+.pod-gd-dl dt:nth-last-of-type(1), .pod-gd-dl dd:last-of-type { border-bottom:0; }
+.pod-gd-stage-tbl td { white-space:normal !important; max-width:none !important; vertical-align:middle; }
+.pod-gd-stage-tbl td:first-child { width:190px; }
+@container podpane (max-width: 1100px) { .pod-gd-steps { grid-template-columns:repeat(2, minmax(0,1fr)); }
+	.pod-gd-steps li:nth-child(2) { border-right:0; } .pod-gd-steps li:nth-child(-n+2) { border-bottom:1px solid var(--border-soft); } }
+@container podpane (max-width: 860px) { .pod-gd-body { grid-template-columns:minmax(0,1fr); } .pod-gd-nav { position:static; } }
+@container podpane (max-width: 620px) { .pod-gd-steps { grid-template-columns:minmax(0,1fr); } .pod-gd-steps li { border-right:0; }
+	.pod-gd-dl { grid-template-columns:minmax(0,1fr); } .pod-gd-dl dt { border-bottom:0; padding-bottom:0; } }
+.pod-f label { font-size:11.5px; color:var(--text-2); }
+.pod-preset { font-size:12.5px; padding:4px 13px; color:var(--text); border-color:#C9D3DE; }
+.pod-topbar-right { font-size:12.5px; color:var(--text-2); }
+.pod-f input[type=date], .pod-ms-box { border-color:#C9D3DE; }
+.pod-f input[type=date] { font-size:13px; }
+:root[data-theme="dark"] .pod-preset, :root[data-theme="dark"] .pod-f input[type=date], :root[data-theme="dark"] .pod-ms-box { border-color:var(--border); }
+@media (prefers-reduced-motion: reduce) { .pod-tab { transition:none; } }
 .pod-an-bars .pod-bar-row { grid-template-columns:minmax(110px, 36%) minmax(0,1fr) auto; padding:5px 4px; }
 .pod-an-bars .pod-bar-label { overflow:hidden; text-overflow:ellipsis; }
 .pod-an-bars .pod-bar-val { font-variant-numeric:tabular-nums; }
@@ -3833,6 +4030,30 @@ const POD_CSS = `
 	border:1px solid var(--border); border-radius:8px; }
 .pod-view-title { font-size:14px; font-weight:650; color:var(--text); }
 .pod-view-n { font-size:13px; color:var(--text-2); font-variant-numeric:tabular-nums; margin-right:auto; }
+.pod-view-hint { margin:2px 2px 0; font-size:12.5px; color:var(--muted); }
+/* Top cards — report style (2026-11-25): flat, bordered, small caps label, large tabular number. */
+.pod-root .pod-headline.is-five, .pod-root .pod-headline.is-six { gap:14px; }
+.pod-root .pod-headline.is-five .pod-kpi, .pod-root .pod-headline.is-six .pod-kpi {
+	min-height:132px; padding:18px 20px 16px; gap:0; border-radius:10px; border:1px solid #DCE3EB; background:var(--bg);
+	box-shadow:0 1px 2px rgba(16,24,40,.04); transition:border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+.pod-root .pod-headline.is-five .pod-kpi.is-click:hover, .pod-root .pod-headline.is-six .pod-kpi.is-click:hover {
+	border-color:#A9BBCD; box-shadow:0 6px 16px rgba(16,24,40,.07); transform:translateY(-1px); }
+.pod-root .pod-headline.is-five .pod-kpi-label, .pod-root .pod-headline.is-six .pod-kpi-label {
+	font-size:11.5px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; color:var(--text-2); }
+.pod-root .pod-headline.is-five .pod-kpi-label .pod-dot, .pod-root .pod-headline.is-six .pod-kpi-label .pod-dot { width:7px; height:7px; margin-right:7px; }
+.pod-root .pod-headline.is-five .pod-kpi-value, .pod-root .pod-headline.is-six .pod-kpi-value {
+	margin-top:auto; padding-top:14px; font-size:34px; font-weight:700; line-height:1.05; letter-spacing:-.02em;
+	font-variant-numeric:tabular-nums; color:#14273A; align-items:baseline; gap:10px; }
+.pod-root .pod-headline.is-five .pod-kpi-value .pod-share, .pod-root .pod-headline.is-six .pod-kpi-value .pod-share {
+	font-size:12px; font-weight:600; letter-spacing:0; color:var(--text-2); background:var(--bg-soft); border:1px solid var(--border);
+	border-radius:4px; padding:1px 7px; transform:translateY(-4px); }
+.pod-root .pod-headline.is-five .pod-kpi-sub, .pod-root .pod-headline.is-six .pod-kpi-sub {
+	margin-top:8px; padding-top:8px; border-top:1px solid var(--border-soft); font-size:12px; color:var(--muted); }
+.pod-root .pod-headline.is-five .pod-kpi.is-on, .pod-root .pod-headline.is-six .pod-kpi.is-on {
+	border-color:var(--c); box-shadow:0 0 0 1px var(--c); background:color-mix(in srgb, var(--c) 4%, var(--bg)); transform:none; }
+:root[data-theme="dark"] .pod-root .pod-headline.is-five .pod-kpi, :root[data-theme="dark"] .pod-root .pod-headline.is-six .pod-kpi { border-color:var(--border); }
+:root[data-theme="dark"] .pod-root .pod-headline.is-five .pod-kpi-value, :root[data-theme="dark"] .pod-root .pod-headline.is-six .pod-kpi-value { color:var(--text); }
+@media (prefers-reduced-motion: reduce) { .pod-root .pod-headline .pod-kpi { transition:none; transform:none !important; } }
 /* Reject view: step cards + step × unit table. */
 .pod-rej-grid { display:grid; grid-template-columns:repeat(var(--cols, 5), minmax(0,1fr)); gap:12px; }
 .pod-rej { min-height:108px; }

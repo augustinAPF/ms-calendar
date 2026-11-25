@@ -6,9 +6,13 @@ reuse this dashboard's own functions (same permission-scoped SQL, same
 filters). The tools return COUNTS ONLY: no applicant names, emails, phone
 numbers, referrer emails or interviewer names are ever sent to the AI.
 
-Setup (site_config.json of the site):
-    "anthropic_api_key": "sk-ant-..."          required
-    "pathways_ai_model": "claude-opus-5-5"     optional (this is the default)
+Setup (site_config.json of the site) — ONE of:
+    "anthropic_api_key": "sk-ant-..."          Anthropic directly (model claude-opus-5-5)
+    "openrouter_api_key": "sk-or-v1-..."       via OpenRouter (model anthropic/claude-opus-5.5)
+Optional:
+    "pathways_ai_model": "..."                 another model id for that provider
+    "pathways_ai_mode": "offline"              force the free keyword mode
+With no key the chat runs in the free offline mode (ask_offline.py).
 """
 
 import json
@@ -19,6 +23,8 @@ from frappe.utils import cint, nowdate
 from ms_calendar.ms_calendar.page.pathways_overall_dashboard import pathways_overall_dashboard as pod
 
 DEFAULT_MODEL = "claude-opus-5-5"
+OPENROUTER_MODEL = "anthropic/claude-opus-5.5"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api"   # OpenRouter's Anthropic-compatible Messages endpoint
 MAX_TOOL_ROUNDS = 8           # tool calls per question before we stop the loop
 MAX_HISTORY_TURNS = 10        # earlier question/answer pairs sent back for context
 QUESTIONS_PER_HOUR = 40       # per user
@@ -148,8 +154,8 @@ def ask(question, history=None, filters=None):
     page_filters = _clean_filters(_loads(filters) or {})
 
     # No (real) key, or offline forced → the free keyword mode; no AI service is called.
-    api_key = (frappe.conf.get("anthropic_api_key") or "").strip()
-    if frappe.conf.get("pathways_ai_mode") == "offline" or not _looks_like_key(api_key):
+    provider = _provider()
+    if frappe.conf.get("pathways_ai_mode") == "offline" or not provider:
         from ms_calendar.ms_calendar.page.pathways_overall_dashboard import ask_offline
 
         answer, steps = ask_offline.answer(question, page_filters)
@@ -165,7 +171,7 @@ def ask(question, history=None, filters=None):
         f"Question: {question}")})
 
     try:
-        answer, steps, usage = _run(api_key, messages, page_filters)
+        answer, steps, usage = _run(provider, messages, page_filters)
     except Exception as e:  # noqa: BLE001 — turn every SDK failure into a readable message
         return {"error": "ai_error", "message": _error_message(e)}
 
@@ -174,31 +180,49 @@ def ask(question, history=None, filters=None):
     return {"answer": answer, "steps": steps, "mode": "ai"}
 
 
-def _looks_like_key(key):
-    """A real Anthropic key, not empty and not the example text from the setup instructions."""
-    return key.startswith("sk-ant-") and len(key) > 40 and "PASTE" not in key.upper()
+def _looks_like_key(key, prefix="sk-ant-"):
+    """A real key, not empty and not the example text from the setup instructions."""
+    return key.startswith(prefix) and len(key) > 40 and "PASTE" not in key.upper()
 
 
-def _run(api_key, messages, page_filters):
+def _provider():
+    """("anthropic" | "openrouter", key) from the site config, or None when no real key is set."""
+    ant = (frappe.conf.get("anthropic_api_key") or "").strip()
+    if _looks_like_key(ant):
+        return ("anthropic", ant)
+    ork = (frappe.conf.get("openrouter_api_key") or "").strip()
+    for k in (ork, ant):                       # an OpenRouter key pasted into either setting
+        if _looks_like_key(k, "sk-or-"):
+            return ("openrouter", k)
+    return None
+
+
+def _run(provider, messages, page_filters):
     import anthropic
 
-    client = anthropic.Anthropic(api_key=api_key, timeout=110.0, max_retries=1)
-    model = frappe.conf.get("pathways_ai_model") or DEFAULT_MODEL
+    kind, key = provider
+    common = dict(max_tokens=16000, system=SYSTEM_PROMPT, tools=TOOLS,
+                  output_config={"effort": "medium"}, cache_control={"type": "ephemeral"})
+    if kind == "openrouter":
+        # OpenRouter speaks the Anthropic Messages API; the key goes in as a bearer token.
+        client = anthropic.Anthropic(api_key=None, auth_token=key, base_url=OPENROUTER_BASE_URL,
+                                     timeout=110.0, max_retries=1)
+        model = frappe.conf.get("pathways_ai_model") or OPENROUTER_MODEL
+
+        def create():
+            return client.messages.create(model=model, messages=messages, **common)
+    else:
+        client = anthropic.Anthropic(api_key=key, timeout=110.0, max_retries=1)
+        model = frappe.conf.get("pathways_ai_model") or DEFAULT_MODEL
+
+        def create():
+            # On a safety decline the API re-runs the request on a fallback model by itself.
+            return client.beta.messages.create(model=model, messages=messages, **common,
+                                               betas=["server-side-fallback-2026-07-01"], fallbacks="default")
     steps, usage = [], {"input": 0, "output": 0, "cache_read": 0}
 
     for _ in range(MAX_TOOL_ROUNDS + 1):
-        response = client.beta.messages.create(
-            model=model,
-            max_tokens=16000,
-            system=SYSTEM_PROMPT,
-            tools=TOOLS,
-            messages=messages,
-            output_config={"effort": "medium"},
-            cache_control={"type": "ephemeral"},
-            # On a safety decline the API re-runs the request on a fallback model by itself.
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
-        )
+        response = create()
         u = response.usage
         usage["input"] += u.input_tokens or 0
         usage["output"] += u.output_tokens or 0
@@ -417,7 +441,11 @@ def _error_message(e):
     import anthropic
 
     if isinstance(e, anthropic.AuthenticationError):
-        return "The AI key on this site is not valid. Ask an administrator to check `anthropic_api_key`."
+        return ("The AI key on this site is not valid. Ask an administrator to check "
+                "`anthropic_api_key` / `openrouter_api_key`.")
+    if isinstance(e, anthropic.APIStatusError) and e.status_code == 402:
+        return ("The AI account has no credit left (or the key's spending limit is reached). "
+                "Add credit on OpenRouter / Anthropic, then ask again.")
     if isinstance(e, anthropic.PermissionDeniedError):
         return "The AI key on this site is not allowed to use this model."
     if isinstance(e, anthropic.RateLimitError):
