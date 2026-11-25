@@ -113,7 +113,8 @@ GRADES = (
 	("cgpa", "CGPA (10-point)", 10, lambda x: x * 9.5),
 	("gpa", "GPA (4-point)", 4, lambda x: x / 4 * 100),
 )
-GRADED_COURSES = (("ug", "UG"), ("pg", "PG"))
+# (prefix, label, optional) — PG grading is optional; if filled it is still checked.
+GRADED_COURSES = (("ug", "UG", False), ("pg", "PG", True))
 RESUME_EXTENSIONS = (".pdf", ".doc", ".docx")
 ASSOCIATE_EXPERIENCE = ("Fresher", "1 year", "2 years")
 ASSOCIATE_FELLOW = "Associate Fellow (0-2 years)"
@@ -213,12 +214,12 @@ def _validate_conditional_fields(doc):
 def _validate_grading(doc):
 	"""Percentage / CGPA / GPA: exactly one per course on new applications
 	(older ones predate these boxes), and the equivalent percentage kept in step."""
-	for prefix, course in GRADED_COURSES:
+	for prefix, course, optional in GRADED_COURSES:
 		if not doc.meta.has_field(f"{prefix}_equivalent_percentage"):
 			continue
 		filled = [g for g in GRADES if flt(doc.get(f"{prefix}_{g[0]}"))]
 		if not filled:
-			if doc.is_new():
+			if doc.is_new() and not optional:
 				frappe.throw(
 					_("Grading System of the {0} course: please fill in your Percentage, CGPA or GPA.").format(course)
 				)
@@ -770,6 +771,40 @@ STAGE_MESSAGES = {
 	"Offer Accepted": "You have accepted the offer. Welcome to the Fellowship!",
 	"Offer Declined": "You have declined the offer.",
 }
+# The status page shows ONE line, only one of FOUR stages (user, 2026-11-23):
+# Application Received / Recruiter Round / Functional Round / Final Round —
+# never the upcoming rounds, no extra message.
+_AR, _RR, _FR, _FN = "Application Received", "Recruiter Round", "Functional Round", "Final Round"
+STAGE_TITLES = {
+	"New Applicant": _AR,
+	"On Hold": _AR,
+	"CV Shortlist": _AR,
+	"Recruiter Round": _RR,
+	"Recruiter Round Select": _RR,
+	"Application Form Received": _RR,
+	"Functional Round": _FR,
+	"Round 2 Scheduled": _FR,
+	"Functional Round Select": _FR,
+	"Shortlist - R2": _FR,
+	"On hold - R2": _FR,
+	"Documents Received": _FN,
+	"Documents Verified": _FN,
+	"Salary Fitment Done": _FN,
+	"Offer Released": _FN,
+	"Offer Accepted": _FN,
+	"Offer Declined": _FN,
+	"Final Round": _FN,
+	"Final Round Select": _FN,
+	"Final Round Reject": _FN,
+	"Shortlist - R3": _FN,
+	"On hold - R3": _FN,
+	"Round 3 Scheduled": _FN,
+	"Shortlist - R4": _FN,
+	"On hold - R4": _FN,
+	"Round 4 Scheduled": _FN,
+	"Document Collection": _FN,
+	"Reference Check": _FN,
+}
 
 
 @frappe.whitelist(allow_guest=True, methods=["POST"])
@@ -795,6 +830,8 @@ def get_application_status(application_id, email):
 				"full_name": row.full_name,
 				"applied_on": formatdate(row.application_date, "dd MMM yyyy"),
 				"closed": True,
+				"title": "Your application is closed",
+				"tone": "closed",
 				"message": "Thank you for your interest. We are unable to proceed with your application at the moment.",
 				"stages": [s for s, _ in STATUS_STAGES],
 				"current": -1,
@@ -802,13 +839,17 @@ def get_application_status(application_id, email):
 		status = "New Applicant"
 
 	current = next((i for i, (_s, statuses) in enumerate(STATUS_STAGES) if status in statuses), 0)
+	stage = STAGE_TITLES.get(status, _AR)
+	title, tone = (stage if stage == _AR else f"You\u2019re in the {stage}"), "info"
 	return {
 		"found": True,
 		"name": row.name,
 		"full_name": row.full_name,
 		"applied_on": formatdate(row.application_date, "dd MMM yyyy"),
 		"closed": False,
-		"message": STAGE_MESSAGES.get(status, ""),
+		"title": title,
+		"tone": tone,
+		"message": STAGE_MESSAGES.get(status) or "We have received your application and are reviewing it.",
 		"stages": [s for s, _ in STATUS_STAGES],
 		"current": current,
 	}
