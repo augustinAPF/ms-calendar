@@ -22,6 +22,7 @@
 // read. Every value rendered into HTML goes through esc().
 
 const POD_API = 'ms_calendar.ms_calendar.page.pathways_overall_dashboard.pathways_overall_dashboard.';
+const POD_HC_API = 'ms_calendar.ms_calendar.page.pathways_overall_dashboard.headcount.';
 const POD_STORE_KEY = 'pod-filters-v2';
 // Multi-select filters (all sent as JSON lists, all remembered between visits).
 // No Programme filter (the user asked): Units covers the same split — each
@@ -93,27 +94,32 @@ const POD_TILES = {
 // Which board cards each top card shows when clicked (all = every card).
 // Select and Reject have their own step-wise view (POD_STEP_VIEWS).
 const POD_VIEWS = {
+	new: ['new'],
 	interviews: ['recruiter', 'functional', 'leadership', 'iv_today', 'iv_next7', 'fb_done', 'fb_pending'],
 	offer: ['doc_collection', 'fitment', 'comp_approved', 'comp_due', 'offer_sent', 'offer_not_sent',
-		'offer_accepted', 'offer_declined'],
-	joined: ['addendum_accepted', 'addendum_declined', 'prejoin_done', 'prejoin_pending', 'it_sent', 'it_not_sent',
-		'joined', 'not_joined', 'erp_created', 'erp_not_created']
+		'offer_accepted', 'addendum_accepted', 'prejoin_done', 'prejoin_pending', 'it_sent', 'it_not_sent'],
+	joined: ['joined', 'erp_created', 'erp_not_created']
 };
 // Timeline tab cards → which applicants the list below shows.
 const POD_TL_VIEWS = {
 	all: {},
-	select: { stages: ['In process', 'On hold', 'Offer / Selected'] },
-	reject: { stages: ['Not selected'] },
-	new: { stages: ['New'] },
-	offer: { card: 'offer_process' },
-	joined: { card: 'reach_joined' }
+	new: { step_group: 'tally:new' },
+	select: { step_group: 'tally:select' },
+	process: { step_group: 'tally:process' },
+	offer: { step_group: 'tally:offer' },
+	joined: { step_group: 'tally:joined' },
+	reject: { step_group: 'tally:reject' }
 };
 // Top cards that open a step-wise view (server STEP_SETS) instead of filtering the board.
 const POD_STEP_VIEWS = {
-	select: { cols: 6, title: __('Selected'), by_unit: __('Selected by step and unit'),
-		sections: { result: __('Select at each round — all units'), process: __('Still in process — no result yet, or a later stage') },
-		of_all: __('of all selected'), pct_col: __('% of selected'), total: __('Total selected'),
+	select: { cols: 5, title: __('Select'), by_unit: __('Select by round and unit'),
+		sections: { result: __('Selected at each round — next step not started yet'), process: '' },
+		of_all: __('of Select'), pct_col: __('% of Select'), total: __('Total Select'),
 		empty: __('No selected applicants for these filters.') },
+	process: { cols: 6, title: __('In Process'), by_unit: __('In Process by step and unit'),
+		sections: { result: '', process: __('In a round or step — no result yet') },
+		of_all: __('of In Process'), pct_col: __('% of In Process'), total: __('Total In Process'),
+		empty: __('No applicants in process for these filters.'), hide_empty: true },
 	reject: { cols: 5, title: __('Rejected'), by_unit: __('Rejected by step and unit'),
 		sections: { result: __('Reject at each round — all units'), process: __('Other rejects') },
 		of_all: __('of all rejects'), pct_col: __('% of rejects'), total: __('Total rejected'),
@@ -229,6 +235,7 @@ class PathwaysOverallDashboard {
 			<div class="pod-root">
 				<div class="pod-tabs" role="tablist">
 					<button class="pod-tab is-on" data-tab="dash" role="tab" aria-selected="true">${__('Dashboard')}</button>
+					<button class="pod-tab" data-tab="headcount" role="tab" aria-selected="false" hidden>${__('Headcount')}</button>
 					<button class="pod-tab" data-tab="analytics" role="tab" aria-selected="false">${__('Analytics')}</button>
 					<button class="pod-tab" data-tab="timeline" role="tab" aria-selected="false">${__('Timeline')}</button>
 					<button class="pod-tab" data-tab="funnel" role="tab" aria-selected="false">${__('Hiring Funnel')}</button>
@@ -376,6 +383,10 @@ class PathwaysOverallDashboard {
 
 				<div class="pod-pane" data-pane="analytics" hidden>
 					<div class="pod-an" id="pod-an"></div>
+				</div>
+
+				<div class="pod-pane" data-pane="headcount" hidden>
+					<div class="pod-hc-tab" id="pod-hc-tab"></div>
 				</div>
 
 				<div class="pod-pane" data-pane="guide" hidden>
@@ -569,7 +580,7 @@ class PathwaysOverallDashboard {
 			args: this.args(filters, { refresh: refresh ? 1 : 0 }),
 			callback: (r) => {
 				// Refresh also bypasses the Analytics tab's 10-minute cache (now, or when it is next opened).
-				if (refresh) this.an_refresh = true;
+				if (refresh) this.an_refresh = this.hc_refresh = true;
 				this.data = r.message || {};
 				this.filters = Object.assign({}, filters, this.data.filters || {});
 				this.save_filters(this.filters);
@@ -625,6 +636,15 @@ class PathwaysOverallDashboard {
 		if (this.tab === 'timeline') this.render_tl_list();
 		this.an_dirty = true;
 		if (this.tab === 'analytics') this.render_analytics();
+		// Headcount tab: shown only to users who can read the plans of at least one unit.
+		// It ignores the page filters, so it reloads only on Refresh (or the first time it opens).
+		const has_hc = !!this.data.headcount;
+		this.$root.find('.pod-tab[data-tab="headcount"]').prop('hidden', !has_hc);
+		if (!has_hc && this.tab === 'headcount') this.show_tab('dash');
+		if (this.hc_refresh) {
+			this.hc_dirty = true;
+			if (this.tab === 'headcount') this.render_hc_tab();
+		}
 	}
 
 	render_funnel_tab() {
@@ -692,40 +712,60 @@ class PathwaysOverallDashboard {
 		return defs;
 	}
 
-	// Top row (2026-11-24): 5 cards. Clicking one shows only its cards on the
-	// board below (POD_VIEWS); "View list" above the board opens the list.
-	// Applicants = New + Select + Reject.
+	// Top row (2026-11-26): Total Applicants = 100%, then six cards that do not
+	// overlap and add up to it — New, Select, Reject, In Process, Offer Process,
+	// Joined (server STEP_SETS["tally"]: every status in exactly one of them).
+	// The %s use largest-remainder rounding so the six always show 100.0 in all.
+	// Clicking a card shows its cards / steps on the board below.
 	top_defs() {
 		const regs = this.sum('registrations');
-		const fc = Object.fromEntries((this.data.funnel_cards || []).map(c => [c.key, c]));
-		const share = (v) => regs ? this.pct(v || 0, regs) : null;
-		const of_reg = __('of total registrations');
-		const stage_units = (...st) => this.headline_units(f => st.reduce((s, x) => s + ((f.stages || {})[x] || 0), 0));
-		const sel_st = ['In process', 'On hold', 'Offer / Selected'];
-		const sel = sel_st.reduce((s, x) => s + this.stage_total(x), 0);
-		const rej = this.stage_total('Not selected');
+		const of_reg = __('of total applicants');
+		const groups = Object.fromEntries(((this.data.step_groups || {}).tally || []).map(g => [g.key, g]));
+		// Order asked for (2026-11-26): Total, New, Select, Reject, In Process, Offer Process, Joined.
+		const order = ['new', 'select', 'reject', 'process', 'offer', 'joined'];
+		const shares = this.tally_shares(order.map(k => (groups[k] || {}).value || 0), regs);
 		const where = this.reject_breakdown();
+		const rej = (groups.reject || {}).value || 0;
+		const META = {
+			new: { view: 'new', tone: 'neutral', label: __('Total New Applicants'), tip: __('Click to show the New Applicant card.') },
+			select: { view: 'select', tone: 'good', label: __('Total Select'), tip: __('Click to see the round each one was selected at.') },
+			process: { view: 'process', tone: 'info', label: __('Total In Process'), tip: __('Click to see the round each one is in, with the interviews and feedback.') },
+			offer: { view: 'offer', tone: 'good', label: __('Total Offer Process'), tip: __('Click to show the offer cards.') },
+			joined: { view: 'joined', tone: 'good', label: __('Total Joined'), tip: __('Click to show the joining cards.') },
+			reject: { view: 'reject', tone: 'bad', label: __('Total Reject'), tip: __('Click to see where they dropped out.') }
+		};
 		const defs = [
 			{ k: 'registrations', view: 'all', tone: 'info', label: __('Total Applicants'), v: regs,
-				share: regs ? 100 : null, share_of: of_reg, sub: __('in the selected period'),
+				share: regs ? 100 : null, share_of: of_reg, sub: __('= the six cards added up'),
 				units: this.headline_units(f => f.registrations),
-				desc: __('Every registration whose application date is in the selected range, after all the filters above. Click to show all cards.') },
-			{ k: 'stages:' + sel_st.join('|'), view: 'select', tone: 'good', label: __('Total Select'), v: sel,
-				share: share(sel), share_of: of_reg, units: stage_units(...sel_st),
-				desc: __('Moved past CV screening and not rejected: in the test or an interview round, on hold, in the offer process or joined. Click to show the select cards.') },
-			{ k: 'stage:Not selected', view: 'reject', tone: 'bad', label: __('Total Reject'), v: rej,
-				share: share(rej), share_of: of_reg, units: stage_units('Not selected'),
-				desc: __('Everyone whose journey ended without selection: any Reject / Regret / No Show status, Not Selected, Offer declined, Not joined, Duplicated or Blocklisted. Click to show the reject cards.')
-					+ (where.length ? '\n\n' + __('Where they dropped out') + ':\n' + where.map(w => `${w.label}: ${this.n(w.n)} (${this.pct(w.n, rej)}%)`).join('\n') : '') },
+				desc: __('Every registration whose application date is in the selected range, after all the filters above. New + Select + Reject + In Process + Offer Process + Joined split exactly these applicants — each one is counted in one card only, so they add up to this number (100%). Click to show all cards.') }
 		];
-		[['offer_process', 'offer', __('Click to show the offer cards.')],
-			['reach_joined', 'joined', __('Click to show the onboarding and joining cards.')]].forEach(([key, view, tip]) => {
-			const c = fc[key];
-			if (!c) return;
-			defs.push({ k: 'card:' + key, view, tone: 'good', label: key === 'reach_joined' ? __('Total Joined') : __(c.label),
-				v: c.value, units: c.by_unit, share: share(c.value), share_of: of_reg, desc: `${c.desc} ${tip}` });
+		order.forEach((k, i) => {
+			const g = groups[k];
+			if (!g) return;
+			const m = META[k];
+			const iv = k === 'process' ? this.iv_top_def() : null;
+			const iv_on = iv && iv.v !== null && iv.v !== undefined;
+			defs.push({ k: 'tally:' + k, view: m.view, tone: m.tone, label: m.label, v: g.value,
+				share: regs ? shares[i] : null, share_of: of_reg,
+				// In Process carries the interview numbers (no separate Interviews card).
+				sub: iv_on ? __('{0} interviews · {1} no feedback yet', [this.n(iv.v), this.n(this.sum('pending'))]) : __(g.hint),
+				units: (g.by_unit || []).map(u => ({ program: u.program, unit: u.unit, value: u.value })),
+				desc: `${__(g.desc)} ${m.tip}` + (iv_on ? '\n\n' + __('Interviews: {0} scheduled for these applicants (cancelled left out); {1} already held with no feedback form yet. Click to see the rounds, today / next 7 days, feedback and the table per unit.', [this.n(iv.v), this.n(this.sum('pending'))]) : '') + (k === 'reject' && where.length
+					? '\n\n' + __('Where they dropped out') + ':\n' + where.map(w => `${w.label}: ${this.n(w.n)} (${this.pct(w.n, rej)}%)`).join('\n') : '') });
 		});
 		return defs;
+	}
+
+	// Shares in % (one decimal) that add up to exactly 100.0: floor every share,
+	// then give the leftover tenths to the largest remainders.
+	tally_shares(values, total) {
+		if (!total) return values.map(() => 0);
+		const raw = values.map(v => (v * 1000) / total);
+		const fl = raw.map(Math.floor);
+		let left = 1000 - fl.reduce((a, b) => a + b, 0);
+		raw.map((r, i) => [r - fl[i], i]).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0 && values[i]) { fl[i]++; left--; } });
+		return fl.map(x => (x / 10).toFixed(1));   // "6.0", "72.4" — same look on every card
 	}
 
 	// Rejected applicants grouped by the step they dropped out at, from the
@@ -789,13 +829,14 @@ class PathwaysOverallDashboard {
 	// popup (which opens with one card per unit).
 	card_html(d, i, active = this.view) {
 		const col = POD_TONES[d.tone] || POD_TONES.neutral;
-		const click = d.v ? 'is-click' : '';
+		// `always`: clickable even at 0 (Headcount Plan — the view is where a plan gets created).
+		const click = d.v || d.always ? 'is-click' : '';
 		const has_share = d.share !== null && d.share !== undefined;
 		const desc = [d.desc, has_share && d.share_of ? `${d.share}% = ${d.share_of}` : '', d.hint ? `${d.hint}` : '']
 			.filter(Boolean).join('\n\n');
 		return `
 			<div class="pod-kpi ${click} ${d.aside ? 'is-aside' : ''} ${d.view && d.view === active ? 'is-on' : ''}" style="--c:${col};--i:${i}" data-i="${i}" data-k="${this.esc(d.k)}" data-l="${this.esc(d.label)}"
-				${d.v ? `role="button" tabindex="0"${d.view ? ` aria-pressed="${d.view === active}"` : ''}` : ''}>
+				${d.v || d.always ? `role="button" tabindex="0"${d.view ? ` aria-pressed="${d.view === active}"` : ''}` : ''}>
 				<div class="pod-kpi-top">
 					<span class="pod-kpi-label">${d.tone !== 'info' ? `<i class="pod-dot" style="--c:${col}"></i>` : ''}${this.esc(d.label)}</span>
 					${this.info_html(desc)}
@@ -855,15 +896,575 @@ class PathwaysOverallDashboard {
 		</section>`;
 	}
 
+	// ── Headcount tab (2026-11-26; server: headcount.py) ────────────────────
+	// Department-wise Headcount Plans for one financial year, next to the
+	// offers / declines / joining so far. Own filters (year, units,
+	// departments) — the page filters don't apply here. Layout: filters →
+	// six cards → "Plan vs joined" chart + "Biggest gaps" → the unit /
+	// department table. Every count opens its applicant list.
+	render_hc_tab() {
+		const $t = this.$root.find('#pod-hc-tab');
+		if (!this.hc_ms) {
+			$t.html(`
+				<div class="pod-hc-filters">
+					<div class="pod-topbar">
+						<div class="pod-hc-title">${__('Headcount plan')}
+							<span class="pod-muted" id="pod-hc-period"></span></div>
+						<div class="pod-topbar-right">
+							<span class="pod-muted" id="pod-hc-updated"></span>
+							<button class="btn btn-default btn-xs" id="pod-hc-plans">${__('All plans')}</button>
+							<button class="btn btn-default btn-xs" id="pod-hc-new" hidden>+ ${__('New plan')}</button>
+							<button class="btn btn-default btn-xs" id="pod-hc-refresh" title="${__('Fetch fresh numbers')}">⟳ ${__('Refresh')}</button>
+						</div>
+					</div>
+					<div class="pod-filter-row">
+						<div class="pod-f"><label>${__('Financial year')}</label><select class="pod-hc-fy" id="pod-hc-fy"></select></div>
+						<div class="pod-f"><label>${__('Units')}</label><div class="pod-ms" id="pod-hc-ms-units" data-placeholder="${__('All units')}"></div></div>
+						<div class="pod-f"><label>${__('Departments')}</label><div class="pod-ms" id="pod-hc-ms-depts" data-placeholder="${__('All departments')}"></div></div>
+						<div class="pod-f pod-f-btns">
+							<button class="btn btn-primary btn-sm" id="pod-hc-apply">${__('Apply')}</button>
+							<button class="btn btn-default btn-sm" id="pod-hc-reset">${__('Reset')}</button>
+						</div>
+					</div>
+				</div>
+				<div id="pod-hc-body"><div class="pod-empty">${__('Loading the headcount plan…')}</div></div>`);
+			this.hc_ms = {
+				units: this.make_multiselect($t.find('#pod-hc-ms-units'), { on_change: () => this.hc_cascade() }),
+				depts: this.make_multiselect($t.find('#pod-hc-ms-depts'))
+			};
+			this.hc_state = { fy: (this.data.headcount || {}).fy || '', units: [], depts: [] };
+			this.hc_view = 'all';
+			this.hc_closed = new Set();
+			const apply = () => {
+				this.hc_state.units = this.hc_ms.units.val();
+				this.hc_state.depts = this.hc_ms.depts.val();
+				this.load_hc();
+			};
+			$t.find('#pod-hc-apply').on('click', apply);
+			// A single value: one pick means the user is done choosing, so the year applies at once.
+			$t.find('#pod-hc-fy').on('change', (e) => { this.hc_state.fy = e.currentTarget.value; apply(); });
+			$t.find('#pod-hc-reset').on('click', () => {
+				this.hc_ms.units.clear(); this.hc_ms.depts.clear();
+				this.hc_state = { fy: (this.data.headcount || {}).fy || '', units: [], depts: [] };
+				this.hc_view = 'all';
+				this.load_hc();
+			});
+			$t.find('#pod-hc-refresh').on('click', () => this.load_hc(true));
+			$t.find('#pod-hc-plans').on('click', () => frappe.set_route('List', 'Headcount Plan', { financial_year: this.hc_state.fy }));
+			$t.find('#pod-hc-new').on('click', () => frappe.new_doc('Headcount Plan', { financial_year: this.hc_state.fy }));
+		}
+		const refresh = !!this.hc_refresh;
+		this.hc_refresh = false;
+		this.load_hc(refresh);
+	}
+
+	// Department options follow the chosen units (pruning only — departments stay pickable on their own).
+	hc_cascade() {
+		const h = this.hc;
+		if (!h) return;
+		const units = this.hc_ms.units.val();
+		const opts = (h.options.depts || []).filter(([, u]) => !units.length || units.includes(u))
+			.map(([d, u]) => ({ value: d, label: units.length === 1 ? d : `${d} · ${u}` }));
+		const keep = this.hc_ms.depts.val().filter(v => opts.some(o => o.value === v));
+		this.hc_ms.depts.setOptions(opts);
+		this.hc_ms.depts.setVal(keep);
+	}
+
+	load_hc(refresh = false) {
+		const $t = this.$root.find('#pod-hc-tab');
+		const s = this.hc_state;
+		this.hc_dirty = false;
+		$t.find('#pod-hc-apply').prop('disabled', true).text(__('Loading…'));
+		$t.addClass('pod-loading');
+		frappe.call({
+			method: POD_HC_API + 'get_headcount',
+			args: { fy: s.fy, units: JSON.stringify(s.units || []), depts: JSON.stringify(s.depts || []), refresh: refresh ? 1 : 0 },
+			callback: (r) => {
+				const h = r.message;
+				if (!h) return;
+				this.hc = h;
+				s.fy = h.fy;
+				$t.find('#pod-hc-fy').html(h.years.map(y => `<option value="${this.esc(y)}" ${y === h.fy ? 'selected' : ''}>${this.esc(y)}</option>`).join(''));
+				$t.find('#pod-hc-period').text(`${this.fmt_date(h.from_date)} – ${this.fmt_date(h.to_date)}`);
+				$t.find('#pod-hc-updated').text(`${__('Updated')} ${String(h.generated_at || '').slice(11, 16)}`);
+				$t.find('#pod-hc-new').prop('hidden', !h.can_create);
+				this.hc_ms.units.setOptions(h.options.units || []);
+				this.hc_ms.units.setVal(h.filters.units);
+				this.hc_cascade();
+				this.hc_ms.depts.setVal(h.filters.depts.filter(d => (h.options.depts || []).some(([x]) => x === d)));
+				this.draw_hc();
+			},
+			error: () => $t.find('#pod-hc-body').html(`<div class="pod-empty">${__('Could not load the headcount plan.')}</div>`),
+			always: () => {
+				$t.find('#pod-hc-apply').prop('disabled', false).text(__('Apply'));
+				$t.removeClass('pod-loading');
+			}
+		});
+	}
+
+	draw_hc() {
+		const h = this.hc;
+		const t = h.total;
+		const $b = this.$root.find('#pod-hc-body');
+		const share = (a, b) => (b ? this.pct(a || 0, b) : null);
+		const plan_only = t.plan_only_units.length
+			? __('{0} show the plan only — their applicants are not on this dashboard yet.', [t.plan_only_units.join(', ')]) : '';
+		const vs_plan = __('of the plan (units with applicant data)');
+		const cards = [
+			{ k: 'hc:plan', tone: 'info', label: __('Planned'), v: t.hc, share: null, always: true,
+				sub: __('{0} departments · {1} of {2} units planned', [this.n(t.depts), t.units_planned, h.units.length]),
+				desc: __('Sum of the Headcount Plan rows for {0}, for the units and departments chosen above.', [h.fy])
+					+ (t.units_no_plan.length ? '\n\n' + __('No plan yet: {0}', [t.units_no_plan.join(', ')]) : '') },
+			{ k: 'hc:offers', tone: 'info', label: __('Offers YTD'), v: t.offers, share: share(t.offers, t.hc_tracked), share_of: vs_plan,
+				sub: __('reached the offer stage'),
+				desc: __('Applicants with an application date in {0} who reached the offer stage (offer sent, accepted, declined, onboarding or joined). Click to see them.', [h.fy]) + (plan_only ? '\n\n' + plan_only : '') },
+			{ k: 'hc:joined', tone: 'good', label: __('Joined YTD'), v: t.joined, share: share(t.joined, t.hc_tracked), share_of: vs_plan,
+				sub: __('of the plan filled'),
+				desc: __('Applicants with an application date in {0} whose status is Joined (or the ERP ID stage). Click to see them.', [h.fy]) + (plan_only ? '\n\n' + plan_only : '') },
+			{ k: 'hc:declines', tone: 'bad', label: __('Declines YTD'), v: t.declines, share: share(t.declines, t.offers), share_of: __('of offers'),
+				sub: __('offer declined or did not join'),
+				desc: __('Applicants with an application date in {0} who declined the offer or did not join. The % is of Offers YTD. Click to see them.', [h.fy]) },
+			{ k: 'hc:open', view: 'behind', tone: 'action', label: __('Open positions'), v: t.open, share: share(t.open, t.hc_tracked), share_of: vs_plan,
+				sub: __('still to fill (plan − joined)'), always: true,
+				desc: __('For every department: planned headcount minus joined, never below 0 — so a department that joined more than planned does not hide the gap of another. Units without applicant data are left out. Click to list the departments that are behind.') },
+			{ k: 'hc:not_started', view: 'not_started', tone: 'action', label: __('Not started'), v: t.not_started, share: null, always: true,
+				sub: __('departments planned, no offer yet'),
+				desc: __('Departments with a planned headcount above 0 and no offer yet this year. Click to list them.') }
+		];
+		const views = { all: __('All departments'), not_started: __('Not started'), behind: __('Behind plan'), done: __('Filled / over plan') };
+		let guide_closed = false;
+		try { guide_closed = localStorage.getItem('pod_hc_guide') === 'closed'; } catch (e) { /* storage blocked */ }
+		const step = (n, title, text) => `<div class="pod-hc-step"><span class="pod-hc-step-n">${n}</span><div><b>${title}</b><p>${text}</p></div></div>`;
+		const tag = (label, tone, text) => `<li><span class="pod-pill" style="--c:${POD_TONES[tone]}">${label}</span>${text}</li>`;
+		// "Applicants by department" comes first on the tab (user, 2026-11-26).
+		$b.html(`
+			<section class="pod-panel" id="pod-hc-apps-panel">
+				<div class="pod-panel-head">
+					<div>
+						<div class="pod-panel-title">${__('Applicants by department')}
+							${this.info_html(__('For each department: its planned headcount, how many applied this year (Total Applicants), and where those applicants are now — split exactly like the top cards of the Dashboard tab, so the six card columns add up to Total Applicants. Pending = HC Plan − Total Joined for each department (never below 0): how many are still to be hired. Click any blue number to see the applicants.'))}</div>
+						<div class="pod-hc-apps-sub">${__('FY {0} · applications {1} – {2} · status as of today', [this.esc(h.fy), this.fmt_date(h.from_date), this.fmt_date(h.to_date)])}</div>
+					</div>
+					<div class="pod-hc-tools">
+						<button class="btn btn-xs btn-default" id="pod-hc-apps-expand">${this.hc_closed.size ? __('Expand all') : __('Collapse all')}</button>
+						<button class="btn btn-xs btn-default" id="pod-hc-apps-xlsx" title="${this.esc(__('This table as an Excel sheet (same year, units and departments)'))}">⬇ ${__('Download Excel')}</button>
+					</div>
+				</div>
+				<div class="pod-hc-sum" id="pod-hc-apps-sum"></div>
+				<div class="pod-hc-table-wrap" id="pod-hc-apps"></div>
+			</section>
+			<section class="pod-hc-guide ${guide_closed ? 'is-closed' : ''}">
+				<div class="pod-hc-guide-head">
+					<span class="pod-hc-guide-title">${__('How to read this page')}</span>
+					<span class="pod-muted pod-hc-guide-sum">${__('Plan {0} → offers → joined → what is still open', [this.esc(h.fy)])}</span>
+					<button class="btn btn-xs btn-default pod-hc-guide-toggle">${guide_closed ? __('Show') : __('Hide')}</button>
+				</div>
+				<div class="pod-hc-guide-body">
+					${step(1, __('Planned'), __('The number each unit plans to hire this year, typed per department in the <b>Headcount Plan</b> form. Change it with <b>Edit plan</b> in the table, or start one with <b>+ New plan</b>.'))}
+					${step(2, __('Offers · Joined · Declines (YTD)'), __('Applicants whose application date falls in {0} – {1}, by their status today. Offers = reached the offer stage; Joined = joined; Declines = declined the offer or did not join.', [this.fmt_date(h.from_date), this.fmt_date(h.to_date)]))}
+					${step(3, __('Open · % Filled'), __('Open = planned − joined for each department (never below 0), so one department joining extra does not hide another one\'s gap. % Filled = joined ÷ planned.'))}
+					<div class="pod-hc-step"><span class="pod-hc-step-n">4</span><div><b>${__('Status of each department')}</b>
+						<ul class="pod-hc-tags">
+							${tag(__('Not started'), 'action', __('planned, no offer yet'))}
+							${tag(__('In progress'), 'info', __('offers made, not filled'))}
+							${tag(__('Filled'), 'good', __('joined = planned'))}
+							${tag(__('Over plan'), 'bad', __('more joined than planned'))}
+							${tag(__('Plan only'), 'neutral', __('this unit\'s applicants are not on this dashboard yet'))}
+						</ul></div></div>
+				</div>
+				<div class="pod-hc-guide-foot">${__('Click any blue number to see the applicants behind it (sortable, CSV download). Roles come from Job Openings: a new role appears under its department automatically.')}</div>
+			</section>
+			<div class="pod-headline is-six pod-hc-cards">${cards.map((d, i) => this.card_html(d, i, this.hc_view)).join('')}</div>
+			<div class="pod-hc-grid">
+				<section class="pod-panel">
+					<div class="pod-panel-head"><div>
+						<div class="pod-panel-title">${h.units.length === 1 ? __('Plan vs joined by department') : __('Plan vs joined by unit')}
+							${this.info_html(__('The light bar is the planned headcount; the dark bar is how many joined. A dark bar longer than the light one = more joined than planned. Click a unit to narrow the tab to it; click a department to see who joined.'))}</div>
+					</div>
+					<div class="pod-hc-legend"><span><i class="pod-hc-sw is-plan"></i>${__('Planned')}</span><span><i class="pod-hc-sw is-join"></i>${__('Joined')}</span></div></div>
+					<div class="pod-hc-chart" id="pod-hc-chart"></div>
+				</section>
+				<section class="pod-panel">
+					<div class="pod-panel-head"><div>
+						<div class="pod-panel-title">${__('Biggest gaps')}
+							${this.info_html(__('Departments with the most positions still open (planned − joined), largest first. Click one to find it in the table below.'))}</div>
+					</div></div>
+					<div class="pod-hc-gaps" id="pod-hc-gaps"></div>
+				</section>
+			</div>
+			<section class="pod-panel" id="pod-hc-table-panel">
+				<div class="pod-panel-head">
+					<div class="pod-panel-title">${__('Plan by unit and department')}</div>
+					<div class="pod-hc-tools">
+						<div class="pod-hc-seg" role="group">${Object.entries(views).map(([k, l]) =>
+							`<button class="${this.hc_view === k ? 'is-on' : ''}" data-v="${k}">${l}</button>`).join('')}</div>
+						<button class="btn btn-xs btn-default" id="pod-hc-expand">${this.hc_closed.size ? __('Expand all') : __('Collapse all')}</button>
+						<button class="btn btn-xs btn-default" id="pod-hc-xlsx" title="${this.esc(__('This table as an Excel sheet (same year, units and departments)'))}">⬇ ${__('Download Excel')}</button>
+					</div>
+				</div>
+				<div class="pod-hc-table-wrap" id="pod-hc-table"></div>
+			</section>
+			<div class="pod-view-hint">${__('Offers / Declines / Joined count applicants whose application date is between {0} and {1}, by the Application Status they have now. Each applicant counts under the department on their registration; when that is empty, under the plan\'s only department, or the department their role is used under on Job Openings. Applicants whose department is not in the plan show as "Not in the plan".',
+				[this.fmt_date(h.from_date), this.fmt_date(h.to_date)])}</div>`);
+		$b.find('.pod-hc-guide-toggle').on('click', (e) => {
+			const $g = $b.find('.pod-hc-guide').toggleClass('is-closed');
+			const closed = $g.hasClass('is-closed');
+			$(e.currentTarget).text(closed ? __('Show') : __('Hide'));
+			try { localStorage.setItem('pod_hc_guide', closed ? 'closed' : 'open'); } catch (err) { /* storage blocked */ }
+		});
+		this.draw_hc_chart();
+		this.draw_hc_gaps();
+		this.draw_hc_table();
+		const $cards = $b.find('.pod-hc-cards');
+		this.bind_click($cards.find('.pod-kpi.is-click'), (el) => {
+			const d = cards[+$(el).data('i')];
+			const m = d.k.slice(3);
+			if (['offers', 'joined', 'declines'].includes(m)) { this.hc_drill(m, 'all'); return; }
+			this.hc_view = d.view && d.view !== this.hc_view ? d.view : 'all';
+			$cards.find('.pod-kpi').each((i, k) => $(k).toggleClass('is-on', cards[i].view === this.hc_view));
+			$b.find('.pod-hc-seg button').each((_, x) => $(x).toggleClass('is-on', $(x).data('v') === this.hc_view));
+			this.draw_hc_table();
+			if (this.hc_view !== 'all') $b.find('#pod-hc-table-panel')[0].scrollIntoView({ behavior: 'smooth', block: 'start' });
+		});
+		$b.find('.pod-hc-seg button').on('click', (e) => {
+			this.hc_view = String($(e.currentTarget).data('v'));
+			$b.find('.pod-hc-seg button').each((_, x) => $(x).toggleClass('is-on', $(x).data('v') === this.hc_view));
+			$cards.find('.pod-kpi').each((i, k) => $(k).toggleClass('is-on', !!cards[i].view && cards[i].view === this.hc_view));
+			this.draw_hc_table();
+		});
+		// Excel in the team's "Summary of <year>" layout — built on the server with the same
+		// filters and permission scope as this table (headcount.download_headcount_xlsx).
+		const xlsx = (sheet) => {
+			const q = new URLSearchParams({ fy: h.fy, units: JSON.stringify(h.filters.units || []), depts: JSON.stringify(h.filters.depts || []), sheet });
+			window.open(`/api/method/${POD_HC_API}download_headcount_xlsx?${q.toString()}`, '_blank', 'noopener');
+		};
+		$b.find('#pod-hc-xlsx').on('click', () => xlsx('summary'));
+		$b.find('#pod-hc-apps-xlsx').on('click', () => xlsx('applicants'));
+		this.draw_hc_apps();
+		// Both tables share one open / closed state, so their buttons stay in step.
+		$b.find('#pod-hc-expand, #pod-hc-apps-expand').on('click', () => {
+			if (this.hc_closed.size) this.hc_closed.clear();
+			else h.units.forEach(u => this.hc_closed.add(u.unit));
+			this.hc_sync_expand();
+			this.draw_hc_table();
+			this.draw_hc_apps();
+		});
+		this.count_up($cards);
+	}
+
+	// Both tables' Expand / Collapse buttons show the same label (one shared state).
+	hc_sync_expand() {
+		this.$root.find('#pod-hc-expand, #pod-hc-apps-expand').text(this.hc_closed.size ? __('Expand all') : __('Collapse all'));
+	}
+
+	// "Applicants by department" — first panel of the Headcount tab. Department | HC Plan |
+	// Total Applicants | the six top-row cards (same _tally split, so they add up to Total
+	// Applicants) | Pending (plan − joined). Units open / close together with the plan table.
+	draw_hc_apps() {
+		const h = this.hc;
+		const cols = h.tally_cols || [];
+		const keys = ['applicants', ...cols.map(c => c.key)];
+		const span = keys.length;
+		const $w = this.$root.find('#pod-hc-apps');
+		const t = h.total;
+		const pct = (v, tot) => (tot ? ` (${this.pct(v || 0, tot)}%)` : '');
+
+		// Summary strip: the table's own totals, read left to right.
+		const filled = t.hc_tracked ? this.pct(t.t_joined || 0, t.hc_tracked) : null;
+		const stat = (label, value, tip, cls = '') =>
+			`<div class="pod-hc-sum-i ${cls}" title="${this.esc(tip)}"><span>${label}</span><b>${value}</b></div>`;
+		this.$root.find('#pod-hc-apps-sum').html(
+			stat(__('Planned'), this.n(t.hc), __('Headcount Plan total for the units and departments chosen above.'))
+			+ stat(__('Total Applicants'), this.n(t.applicants || 0), __('Applied in FY {0} (units with applicant data).', [h.fy]))
+			+ stat(__('In Offer Process'), this.n(t.t_offer || 0), __('Documents, offer or onboarding — not joined yet.'))
+			+ stat(__('Joined'), this.n(t.t_joined || 0), __('Joined, or at the ERP ID stage.'))
+			+ stat(__('Pending to hire'), this.n(t.pending || 0), __('HC Plan − Joined per department, never below 0 (units with applicant data).'), 'is-pend')
+			+ stat(__('Filled'), filled === null ? '—' : `${filled}%`, __('Joined ÷ planned, for units with applicant data.')));
+
+		const num = (o, k, at) => {
+			const v = o[k] || 0;
+			const tip = k === 'applicants' ? '' : ` title="${this.esc(this.n(v) + pct(v, o.applicants))}"`;
+			return `<td class="is-num${k === 'applicants' ? ' pod-hc-apptot' : ''}">${v ? `<a class="pod-num pod-hc-anum" ${at} data-m="${k}"${tip}>${this.n(v)}</a>` : '<span class="pod-zero">0</span>'}</td>`;
+		};
+		// One merged, muted cell instead of a row of zeros / dashes.
+		const note = (text) => `<td class="pod-hc-note" colspan="${span}">${text}</td>`;
+		const applicants = (o, tracked, at, msg_untracked) => {
+			if (!tracked) return note(msg_untracked);
+			if (!o.applicants) return note(__('No applicants in FY {0}', [this.esc(h.fy)]));
+			return keys.map(k => num(o, k, at)).join('');
+		};
+		// Pending = HC Plan − Total Joined per department (never below 0); a unit = sum of its departments.
+		const pend = (o, tracked, has_hc) => {
+			if (!tracked || !has_hc || o.pending === null || o.pending === undefined) return '<td class="is-num pod-hc-pendcell"><span class="pod-muted">—</span></td>';
+			return `<td class="is-num pod-hc-pendcell" title="${this.esc(__('{0} planned − {1} joined', [this.n(o.hc || 0), this.n(o.t_joined || 0)]))}">${o.pending ? `<b class="pod-hc-pend">${this.n(o.pending)}</b>` : (o.hc ? `<span class="pod-hc-done" title="${this.esc(__('Plan filled'))}">✓ 0</span>` : '<span class="pod-zero">0</span>')}</td>`;
+		};
+		// HC Plan opens that unit's Headcount Plan (or starts one for this year when there is none).
+		const plan = (o, has_hc, u = null) => {
+			if (!has_hc) {
+				return u && !u.plan && h.can_create
+					? `<td class="is-num pod-hc-plan"><a class="pod-hc-planlink is-new" data-new="${this.esc(u.unit)}" title="${this.esc(__('Create the {0} Headcount Plan for {1}', [u.unit, h.fy]))}">+ ${__('Create')}</a></td>`
+					: '<td class="is-num pod-hc-plan"><span class="pod-muted">—</span></td>';
+			}
+			const v = o.hc ? this.n(o.hc) : '0';
+			return u && u.plan
+				? `<td class="is-num pod-hc-plan"><a class="pod-hc-planlink${o.hc ? '' : ' is-zero'}" data-plan="${this.esc(u.plan)}" title="${this.esc(__('Open Headcount Plan {0}', [u.plan]))}">${v}</a></td>`
+				: `<td class="is-num pod-hc-plan">${o.hc ? v : '<span class="pod-zero">0</span>'}</td>`;
+		};
+		// Roles of a department (from its plan row + Job Openings): first few, the rest on hover.
+		const roles = (list) => {
+			list = list || [];
+			if (!list.length) return '<td class="pod-hc-rolecell"><span class="pod-muted">—</span></td>';
+			const shown = list.slice(0, 3).map(r => this.esc(r)).join(', ');
+			const more = list.length > 3 ? ` <span class="pod-hc-more-roles">+${list.length - 3} ${__('more')}</span>` : '';
+			return `<td class="pod-hc-rolecell" title="${this.esc(list.join('\n'))}">${shown}${more}</td>`;
+		};
+
+		let body = '';
+		h.units.forEach((u) => {
+			const closed = this.hc_closed.has(u.unit);
+			const at = `data-part="all" data-u="${this.esc(u.unit)}"`;
+			body += `<tr class="pod-hc-unit" data-u="${this.esc(u.unit)}">
+				<td><span class="pod-hc-caret ${closed ? '' : 'is-open'}" aria-hidden="true">›</span><b>${this.esc(u.unit)}</b>
+					<span class="pod-muted pod-hc-cnt">${u.depts.length === 1 ? __('1 department') : __('{0} departments', [u.depts.length])}</span></td>
+				<td class="pod-hc-rolecell pod-muted">${(() => { const n = new Set(u.depts.flatMap(d => d.roles || [])).size; return n ? (n === 1 ? __('1 role') : __('{0} roles', [n])) : ''; })()}</td>
+				${plan(u, !!u.plan, u)}${applicants(u, u.tracked, at, __('Plan only — this unit\'s applicants are not on the dashboard yet'))}${pend(u, u.tracked, !!u.plan)}</tr>`;
+			if (closed) return;
+			u.depts.forEach(d => {
+				const dat = `data-part="dept" data-u="${this.esc(u.unit)}" data-d="${this.esc(d.dept)}"`;
+				body += `<tr class="pod-hc-dept"><td><div class="pod-hc-dname">${this.esc(d.dept)}</div></td>
+					${roles(d.roles)}${plan(d, true, u)}${applicants(d, u.tracked, dat, '')}${pend(d, u.tracked, true)}</tr>`;
+			});
+			if (u.none && u.none.applicants) {
+				body += `<tr class="pod-hc-dept pod-hc-none"><td><i>${__('Not in the plan')}</i>
+					${this.info_html(__("Applicants whose department is not one of this unit's plan departments, or whose department is empty and could not be placed by role."))}</td>
+					<td class="pod-hc-rolecell"></td>${plan(u.none, false)}${applicants(u.none, true, `data-part="none" data-u="${this.esc(u.unit)}"`, '')}${pend(u.none, true, false)}</tr>`;
+			}
+		});
+		if (!body) { $w.html(`<div class="pod-empty">${__('Nothing planned for these filters.')}</div>`); return; }
+		$w.html(`<table class="pod-table pod-hc-table pod-hc-apps">
+			<colgroup><col class="pod-hc-c-name"><col class="pod-hc-c-roles"><col>${keys.map(() => '<col>').join('')}<col></colgroup>
+			<thead>
+				<tr class="pod-hc-grp">
+					<th rowspan="2" class="pod-hc-th-name">${__('Unit / Department')}</th>
+					<th rowspan="2" class="pod-hc-th-name pod-hc-th-roles" title="${this.esc(__('Roles under each department: from its Headcount Plan row and the unit\'s Job Openings (a new role appears automatically).'))}">${__('Roles')}</th>
+					<th>${__('Plan')}</th>
+					<th colspan="${span}" class="pod-hc-grp-apps">${__('Applicants in FY {0} — by status today', [this.esc(h.fy)])}</th>
+					<th class="pod-hc-pendcell">${__('Hiring')}</th>
+				</tr>
+				<tr>
+					<th class="is-num">${__('HC Plan')}</th>
+					<th class="is-num pod-hc-apptot">${__('Total Applicants')}</th>
+					${cols.map(c => `<th class="is-num" title="${this.esc(__(c.desc))}">${this.esc(__(c.label))}</th>`).join('')}
+					<th class="is-num pod-hc-pendcell" title="${this.esc(__('HC Plan − Total Joined for each department (never below 0): how many are still to be hired. Units without applicant data are left out.'))}">${__('Pending')}<small>${__('to hire')}</small></th>
+				</tr>
+			</thead>
+			<tbody>${body}</tbody>
+			<tfoot><tr><td>${__('Total')}</td><td></td><td class="is-num">${this.n(t.hc)}</td>
+				${keys.map(k => `<td class="is-num${k === 'applicants' ? ' pod-hc-apptot' : ''}" title="${this.esc(k === 'applicants' ? '' : this.n(t[k] || 0) + pct(t[k], t.applicants))}">${this.n(t[k] || 0)}</td>`).join('')}
+				<td class="is-num pod-hc-pendcell"><b class="pod-hc-pend">${this.n(t.pending || 0)}</b></td></tr></tfoot>
+		</table>`);
+		$w.find('.pod-hc-unit').on('click', (e) => {
+			if ($(e.target).closest('a, .pod-info').length) return;
+			const u = String($(e.currentTarget).data('u'));
+			this.hc_closed.has(u) ? this.hc_closed.delete(u) : this.hc_closed.add(u);
+			this.hc_sync_expand();
+			this.draw_hc_table();
+			this.draw_hc_apps();
+		});
+		$w.find('.pod-hc-anum').on('click', (e) => {
+			const $a = $(e.currentTarget);
+			this.hc_drill(String($a.data('m')), String($a.data('part')), String($a.data('u')), $a.data('d') !== undefined ? String($a.data('d')) : null);
+		});
+		$w.find('.pod-hc-planlink').on('click', (e) => {
+			const $a = $(e.currentTarget);
+			if ($a.data('plan')) frappe.set_route('Form', 'Headcount Plan', String($a.data('plan')));
+			else frappe.new_doc('Headcount Plan', { financial_year: h.fy, unit: String($a.data('new')) });
+		});
+	}
+
+	// Bullet bars: planned (light track) with joined (dark bar) on one scale.
+	draw_hc_chart() {
+		const h = this.hc;
+		const one = h.units.length === 1 ? h.units[0] : null;
+		const rows = one
+			? one.depts.map(d => ({ label: d.dept, hc: d.hc, joined: d.joined, offers: d.offers, open: d.open, tracked: one.tracked, unit: one.unit, dept: d.dept }))
+			: h.units.map(u => ({ label: u.unit, hc: u.hc, joined: u.joined, offers: u.offers, open: u.open, tracked: u.tracked, unit: u.unit, has_plan: !!u.plan }));
+		const $c = this.$root.find('#pod-hc-chart');
+		if (!rows.length) { $c.html(`<div class="pod-empty">${__('Nothing planned for these filters.')}</div>`); return; }
+		const max = Math.max(1, ...rows.map(r => Math.max(r.hc || 0, r.tracked ? r.joined || 0 : 0)));
+		$c.html(rows.map((r, i) => {
+			const pw = ((r.hc || 0) / max) * 100;
+			const jw = r.tracked ? ((r.joined || 0) / max) * 100 : 0;
+			const right = !r.tracked ? `<span class="pod-muted">${r.hc ? this.n(r.hc) + ' · ' : ''}${__('plan only')}</span>`
+				: (r.hc ? `<b>${this.n(r.joined)}</b><span class="pod-muted"> / ${this.n(r.hc)}</span> <span class="pod-hc-pct ${r.joined > r.hc ? 'is-over' : ''}">${this.pct(r.joined, r.hc)}%</span>`
+					: `<b>${this.n(r.joined)}</b><span class="pod-muted"> · ${r.has_plan === false ? __('no plan') : __('no number')}</span>`);
+			return `<div class="pod-hc-bar ${(one && r.joined && r.tracked) || (!one) ? 'is-click' : ''}" data-i="${i}" role="button" tabindex="0">
+				<div class="pod-hc-bar-label" title="${this.esc(r.label)}">${this.esc(r.label)}</div>
+				<div class="pod-hc-track">${pw ? `<div class="pod-hc-planbar" style="width:${pw}%"></div>` : ''}${jw ? `<div class="pod-hc-joinbar" style="width:${Math.max(jw, 0.8)}%"></div>` : ''}</div>
+				<div class="pod-hc-bar-val">${right}</div>
+			</div>`;
+		}).join(''));
+		const $tip = this.$root.find('#pod-tip');
+		$c.find('.pod-hc-bar').on('mousemove', (e) => {
+			const r = rows[+$(e.currentTarget).data('i')];
+			$tip.html(`<b>${this.esc(r.label)}</b><br>${this.esc(__('Planned'))}: ${this.n(r.hc)}${r.tracked
+				? `<br>${this.esc(__('Offers YTD'))}: ${this.n(r.offers)}<br>${this.esc(__('Joined YTD'))}: ${this.n(r.joined)}<br>${this.esc(__('Open'))}: ${this.n(r.open)}`
+				: `<br><span class="pod-muted">${this.esc(__('Applicants not on this dashboard'))}</span>`}`)
+				.css({ display: 'block', left: e.clientX + 14, top: e.clientY + 14 });
+		}).on('mouseleave', () => $tip.hide());
+		this.bind_click($c.find('.pod-hc-bar.is-click'), (el) => {
+			$tip.hide();
+			const r = rows[+$(el).data('i')];
+			if (one) { this.hc_drill('joined', 'dept', r.unit, r.dept); return; }
+			// Drill into one unit: narrow the tab's own Units filter to it.
+			this.hc_ms.units.setVal([r.unit]);
+			this.hc_ms.depts.clear();
+			this.hc_state.units = [r.unit];
+			this.hc_state.depts = [];
+			this.load_hc();
+		});
+	}
+
+	draw_hc_gaps() {
+		const h = this.hc;
+		const $g = this.$root.find('#pod-hc-gaps');
+		const gaps = [];
+		h.units.forEach(u => u.tracked && u.depts.forEach(d => { if (d.open > 0) gaps.push({ u, d }); }));
+		gaps.sort((a, b) => b.d.open - a.d.open || a.d.dept.localeCompare(b.d.dept));
+		if (!gaps.length) {
+			$g.html(`<div class="pod-empty">${h.total.hc_tracked ? __('No open positions — every planned department has filled its number.') : __('No plan numbers yet for units with applicant data.')}</div>`);
+			return;
+		}
+		$g.html(gaps.slice(0, 8).map(({ u, d }, i) => `
+			<div class="pod-hc-gap" role="button" tabindex="0" data-u="${this.esc(u.unit)}" data-d="${this.esc(d.dept)}">
+				<span class="pod-rej-step">${String(i + 1).padStart(2, '0')}</span>
+				<span class="pod-hc-gap-name"><b>${this.esc(d.dept)}</b><small>${this.esc(u.unit)} · ${this.n(d.joined)} ${__('of')} ${this.n(d.hc)} ${__('joined')} · ${this.n(d.offers)} ${__('offers')}</small></span>
+				<span class="pod-hc-gap-n">${this.n(d.open)}<small>${__('open')}</small></span>
+			</div>`).join('') + (gaps.length > 8 ? `<div class="pod-hc-more pod-muted">${__('+ {0} more departments behind plan', [gaps.length - 8])}</div>` : ''));
+		this.bind_click($g.find('.pod-hc-gap'), (el) => {
+			const unit = String($(el).data('u')), dept = String($(el).data('d'));
+			this.hc_closed.delete(unit);
+			if (this.hc_view === 'not_started' || this.hc_view === 'done') this.hc_view = 'all';
+			this.draw_hc_table();
+			const $row = this.$root.find('#pod-hc-table tr.pod-hc-dept').filter((_, tr) => $(tr).data('u') === unit && $(tr).data('d') === dept).first();
+			if ($row.length) {
+				$row[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+				$row.addClass('is-flash');
+				setTimeout(() => $row.removeClass('is-flash'), 1600);
+			}
+		});
+	}
+
+	draw_hc_table() {
+		const h = this.hc;
+		const view = this.hc_view;
+		const mkeys = h.measures.map(m => m.key);
+		const STATUS = {
+			not_started: [__('Not started'), POD_TONES.action], in_progress: [__('In progress'), POD_TONES.info],
+			filled: [__('Filled'), POD_TONES.good], over: [__('Over plan'), POD_TONES.bad],
+			unplanned: [__('Not planned'), POD_TONES.action], zero: [__('No number'), POD_TONES.neutral],
+			plan_only: [__('Plan only'), POD_TONES.neutral]
+		};
+		const keep = (d) => view === 'all' || (view === 'not_started' && d.status === 'not_started')
+			|| (view === 'behind' && d.open > 0) || (view === 'done' && (d.status === 'filled' || d.status === 'over'));
+		const pill = (s) => STATUS[s] ? `<span class="pod-pill" style="--c:${STATUS[s][1]}">${this.esc(STATUS[s][0])}</span>` : '';
+		const num = (v, tracked, at) => {
+			if (!tracked) return `<span class="pod-muted" title="${this.esc(__('Applicants of this unit are not on this dashboard yet'))}">—</span>`;
+			return v ? `<a class="pod-num pod-hc-num" ${at}>${this.n(v)}</a>` : '<span class="pod-zero">0</span>';
+		};
+		const cells = (o, tracked, at, has_hc = true) => {
+			const fill = tracked && has_hc && o.hc ? `<span class="pod-hc-pct ${o.joined > o.hc ? 'is-over' : ''}">${this.pct(o.joined || 0, o.hc)}%</span>` : '<span class="pod-muted">—</span>';
+			return `<td class="is-num pod-hc-plan">${has_hc ? (o.hc ? this.n(o.hc) : '<span class="pod-zero">0</span>') : '<span class="pod-muted">—</span>'}</td>`
+				+ mkeys.map(m => `<td class="is-num">${num(o[m], tracked, `${at} data-m="${m}"`)}</td>`).join('')
+				+ `<td class="is-num">${tracked && has_hc && o.open !== null && o.open !== undefined ? (o.open ? `<b>${this.n(o.open)}</b>` : '<span class="pod-zero">0</span>') : '<span class="pod-muted">—</span>'}</td>`
+				+ `<td class="is-num">${fill}</td>`;
+		};
+		let body = '';
+		h.units.forEach((u) => {
+			const depts = u.depts.filter(keep);
+			if (view !== 'all' && !depts.length) return;
+			const closed = this.hc_closed.has(u.unit);
+			const link = u.plan ? `<a class="pod-hc-link" data-plan="${this.esc(u.plan)}">${__('Edit plan')}</a>`
+				: (h.can_create ? `<a class="pod-hc-link" data-new="${this.esc(u.unit)}">+ ${__('Create plan')}</a>` : '');
+			const ustatus = !u.plan ? `<span class="pod-pill" style="--c:${POD_TONES.neutral}">${__('No plan')}</span>` : (u.tracked ? '' : pill('plan_only'));
+			body += `<tr class="pod-hc-unit" data-u="${this.esc(u.unit)}">
+				<td><span class="pod-hc-caret ${closed ? '' : 'is-open'}" aria-hidden="true">›</span><b>${this.esc(u.unit)}</b>
+					<span class="pod-muted pod-hc-cnt">${u.depts.length === 1 ? __('1 department') : __('{0} departments', [u.depts.length])}</span>${link}</td>
+				<td>${ustatus}</td>${cells(u, u.tracked, `data-part="all" data-u="${this.esc(u.unit)}"`, !!u.plan)}</tr>`;
+			if (closed) return;
+			depts.forEach(d => {
+				body += `<tr class="pod-hc-dept" data-u="${this.esc(u.unit)}" data-d="${this.esc(d.dept)}">
+					<td><div class="pod-hc-dname">${this.esc(d.dept)}${d.remarks ? ` <span class="pod-muted pod-hc-rem" title="${this.esc(d.remarks)}">· ${this.esc(d.remarks)}</span>` : ''}</div>
+						${(d.roles || []).length ? `<div class="pod-hc-roles" title="${this.esc(d.roles.join('\n'))}">${this.esc(`${d.roles.length === 1 ? __('1 role') : `${d.roles.length} ${__('roles')}`}: ${d.roles.join(', ')}`)}</div>` : ''}</td>
+					<td>${pill(d.status)}</td>${cells(d, u.tracked, `data-part="dept" data-u="${this.esc(u.unit)}" data-d="${this.esc(d.dept)}"`)}</tr>`;
+			});
+			if (view === 'all' && u.none && mkeys.some(m => u.none[m])) {
+				body += `<tr class="pod-hc-dept pod-hc-none"><td><i>${__('Not in the plan')}</i>
+					${this.info_html(__("Applicants whose department is not one of this unit's plan departments, or whose department is empty and could not be placed by role."))}</td>
+					<td></td>${cells(u.none, true, `data-part="none" data-u="${this.esc(u.unit)}"`, false)}</tr>`;
+			}
+		});
+		const t = h.total;
+		const $w = this.$root.find('#pod-hc-table');
+		if (!body) { $w.html(`<div class="pod-empty">${__('No departments match "{0}".', [this.esc(this.$root.find('.pod-hc-seg .is-on').text())])}</div>`); return; }
+		$w.html(`<table class="pod-table pod-hc-table">
+			<thead><tr><th>${__('Unit / Department')}</th><th>${__('Status')}</th><th class="is-num">${__('HC Plan')}</th>
+				${h.measures.map(m => `<th class="is-num">${this.esc(__(m.label))}</th>`).join('')}
+				<th class="is-num">${__('Open')}</th><th class="is-num">${__('% Filled')}</th></tr></thead>
+			<tbody>${body}</tbody>
+			<tfoot><tr><td>${__('Total')}</td><td></td><td class="is-num">${this.n(t.hc)}</td>${mkeys.map(m => `<td class="is-num">${this.n(t[m])}</td>`).join('')}
+				<td class="is-num">${this.n(t.open)}</td><td class="is-num">${t.hc_tracked ? this.pct(t.joined, t.hc_tracked) + '%' : '—'}</td></tr></tfoot>
+		</table>`);
+		$w.find('.pod-hc-unit').on('click', (e) => {
+			if ($(e.target).closest('a, .pod-info').length) return;
+			const u = String($(e.currentTarget).data('u'));
+			this.hc_closed.has(u) ? this.hc_closed.delete(u) : this.hc_closed.add(u);
+			this.hc_sync_expand();
+			this.draw_hc_table();
+			this.draw_hc_apps();
+		});
+		$w.find('.pod-hc-link').on('click', (e) => {
+			const $a = $(e.currentTarget);
+			if ($a.data('plan')) frappe.set_route('Form', 'Headcount Plan', String($a.data('plan')));
+			else frappe.new_doc('Headcount Plan', { financial_year: h.fy, unit: String($a.data('new')) });
+		});
+		$w.find('.pod-hc-num').on('click', (e) => {
+			const $a = $(e.currentTarget);
+			const part = String($a.data('part'));
+			this.hc_drill(String($a.data('m')), part, String($a.data('u')), $a.data('d') !== undefined ? String($a.data('d')) : null);
+		});
+	}
+
+	// One headcount number → its applicants (popup with sort, search, CSV). Only the financial
+	// year and this plan line apply — the page filters are cleared for the list.
+	hc_drill(measure, part, unit = null, dept = null) {
+		const h = this.hc;
+		const ml = measure === 'applicants' ? __('Total Applicants')
+			: ([...h.measures, ...(h.tally_cols || [])].find(x => x.key === measure) || {}).label || measure;
+		const units = part === 'all' ? (unit ? [unit] : h.filters.units) : [unit];
+		const scope = h.units.filter(u => u.tracked && (!unit || u.unit === unit));
+		const where = part === 'all' ? (unit || (h.filters.units.length ? h.filters.units.join(', ') : __('All units')))
+			: part === 'none' ? `${unit} · ${__('Not in the plan')}` : `${unit} · ${dept}`;
+		this.drill('registrations', `${__(ml)} · ${where} · FY ${h.fy}`, Object.assign(
+			Object.fromEntries(POD_LIST_FILTERS.map(k => [k, []])),
+			{ programs: scope.map(u => u.program), from_date: h.from_date, to_date: h.to_date,
+				units: part === 'all' && !unit ? scope.map(u => ({ program: u.program, unit: u.unit, value: u[measure] })) : [],
+				hc: JSON.stringify({ fy: h.fy, measure, part, units, depts: part === 'all' ? h.filters.depts : [], dept }) }));
+	}
+
 	render_cards() {
 		const $el = this.$root.find('#pod-cards');
-		const defs = this.top_defs().concat([this.iv_top_def()]);
+		// Seven cards (2026-11-26): Total + the six that add up to it. The interview
+		// numbers live inside In Process (its sub-line and its view).
+		const defs = this.top_defs();
 		this.view = this.view || 'none';
+		if (this.view === 'interviews') this.view = 'process';
 		this.top_by_view = Object.fromEntries(defs.map(d => [d.view, d]));
-		$el.html(`<div class="pod-headline is-six">${defs.map((d, i) => this.card_html(d, i)).join('')}</div>`);
+		$el.html(`<div class="pod-headline is-six is-seven">${defs.map((d, i) => this.card_html(d, i)).join('')}</div>`);
 		// Every list opens in the popup, which starts with one card per unit.
 		const open = (k, label, extra = {}) => {
-			if (k.startsWith('card:')) this.drill('card', label, Object.assign({ card: k.slice(5) }, extra));
+			if (k.startsWith('tally:')) this.drill('registrations', label, Object.assign({ step_group: k }, extra));
+			else if (k.startsWith('card:')) this.drill('card', label, Object.assign({ card: k.slice(5) }, extra));
 			else if (k.startsWith('stage:')) this.drill('registrations', label, Object.assign({ stage: k.slice(6) }, extra));
 			else if (k.startsWith('stages:')) {
 				// Several stages: narrow the page's own Stage filter (if any) to them.
@@ -1029,17 +1630,38 @@ class PathwaysOverallDashboard {
 			$el.html(`<div class="pod-view-hint">${__('Select a card above to see its details, cards and lists.')}</div>`);
 			return;
 		}
-		const keep = POD_VIEWS[view] ? new Set(POD_VIEWS[view]) : null;
-		const groups = (this.data.board || []).map(g => ({ ...g, items: !keep ? g.items : g.items.map(it => {
-			const cards = it.cards.filter(c => keep.has(c.key));
-			if (!cards.length) return null;
-			return cards.length === it.cards.length ? it : { layout: 'single', split: true, cards };
-		}).filter(Boolean) })).filter(g => g.items.length);
+		const pick = (keys) => {
+			const keep = keys ? new Set(keys) : null;
+			return (this.data.board || []).map(g => ({ ...g, items: !keep ? g.items : g.items.map(it => {
+				const cards = it.cards.filter(c => keep.has(c.key));
+				if (!cards.length) return null;
+				return cards.length === it.cards.length ? it : { layout: 'single', split: true, cards };
+			}).filter(Boolean) })).filter(g => g.items.length);
+		};
+		const groups_html = (gs) => gs.map(g => `
+			<section class="pod-bgroup">
+				<div class="pod-group-title">${this.esc(__(g.title))}</div>
+				${rows_of(g.items).map(row => {
+					const cols = row.reduce((a, it) => a + (it.layout === 'pair' ? 2 : 1), 0);
+					return `<div class="pod-row" style="--cols:${cols}">${row.map(tile).join('')}</div>`;
+				}).join('')}
+			</section>`).join('');
+		const bind_cards = () => {
+			$el.find('.pod-iv-num').on('click', (e) => {
+				const $a = $(e.currentTarget);
+				this.drill(String($a.data('kind')), String($a.data('l')), { programs: [String($a.data('prog'))] });
+			});
+			this.bind_click($el.find('.pod-half.is-click'), (el) => {
+				const c = this.cards_by_key[String($(el).data('card'))];
+				if (c) this.drill_card(c);
+			});
+		};
+		const groups = pick(POD_VIEWS[view] || null);
 		const top = (this.top_by_view || {})[view];
 		const bar = top ? `<div class="pod-view-bar">
 				<span class="pod-view-title">${this.esc(top.label)}</span>
 				<span class="pod-view-n">${this.n(top.v)}${top.share !== null && top.share !== undefined && view !== 'all'
-					? ` · ${!top.share && top.v ? '&lt;0.1' : top.share}% ${this.esc(__('of total registrations'))}` : ''}</span>
+					? ` · ${!top.share && top.v ? '&lt;0.1' : top.share}% ${this.esc(__('of total applicants'))}` : ''}</span>
 				${top.v ? `<button class="btn btn-xs btn-default pod-view-list">${__('View list')}</button>` : ''}
 				<button class="btn btn-xs btn-default pod-view-all" title="${this.esc(__('Hide these cards'))}">${__('Close')}</button>
 			</div>` : '';
@@ -1053,27 +1675,18 @@ class PathwaysOverallDashboard {
 			});
 		};
 		if (POD_STEP_VIEWS[view]) {
-			$el.html(bar + this.steps_html(view));
+			// In Process also holds the interviews (2026-11-26: six top cards only — the
+			// Interviews & Feedback card was merged in): round cards, today / next 7 days,
+			// feedback, and the per-unit interview table under the steps.
+			const iv = view === 'process' ? groups_html(pick(POD_VIEWS.interviews)) + this.iv_units_html() : '';
+			$el.html(bar + this.steps_html(view) + iv);
 			bind_bar();
 			this.bind_steps($el, view);
+			bind_cards();
 			return;
 		}
-		$el.html(bar + groups.map(g => `
-			<section class="pod-bgroup">
-				<div class="pod-group-title">${this.esc(__(g.title))}</div>
-				${rows_of(g.items).map(row => {
-					const cols = row.reduce((a, it) => a + (it.layout === 'pair' ? 2 : 1), 0);
-					return `<div class="pod-row" style="--cols:${cols}">${row.map(tile).join('')}</div>`;
-				}).join('')}
-			</section>`).join('') + (view === 'interviews' ? this.iv_units_html() : ''));
-		$el.find('.pod-iv-num').on('click', (e) => {
-			const $a = $(e.currentTarget);
-			this.drill(String($a.data('kind')), String($a.data('l')), { programs: [String($a.data('prog'))] });
-		});
-		this.bind_click($el.find('.pod-half.is-click'), (el) => {
-			const c = this.cards_by_key[String($(el).data('card'))];
-			if (c) this.drill_card(c);
-		});
+		$el.html(bar + groups_html(groups) + (view === 'interviews' ? this.iv_units_html() : ''));
+		bind_cards();
 		bind_bar();
 	}
 
@@ -1082,7 +1695,9 @@ class PathwaysOverallDashboard {
 	// pipeline order plus a step × unit table. Every number opens its list.
 	steps_html(view) {
 		const t = POD_STEP_VIEWS[view];
-		const groups = (this.data.step_groups || {})[view] || [];
+		// In Process: the offer / onboarding / joined steps belong to their own cards now, so empty
+		// "still in process" steps are left out.
+		const groups = ((this.data.step_groups || {})[view] || []).filter(g => !(t.hide_empty && g.section === 'process' && !g.value));
 		const total = groups.reduce((s, g) => s + (g.value || 0), 0);
 		const regs = this.sum('registrations');
 		const pct = (v, of) => !of ? 0 : (v && this.pct(v, of) === 0 ? '<0.1' : this.pct(v, of));
@@ -1592,6 +2207,8 @@ class PathwaysOverallDashboard {
 		if (extra.status !== undefined) base.status = extra.status;
 		if (extra.card) base.card = extra.card;
 		if (extra.step_group) base.step_group = extra.step_group;
+		// One Headcount Plan number (unit / department / role + measure); the server rebuilds the rule from the plan.
+		if (extra.hc) base.hc = extra.hc;
 		['pipe', 'days_min', 'days_max'].forEach(k => { if (extra[k] !== undefined && extra[k] !== '') base[k] = extra[k]; });
 		// One Analytics value (source / gender / age group …) — the server filters on the same expression it grouped by.
 		if (extra.dim) { base.dim = extra.dim; base.dim_value = extra.dim_value === undefined ? '' : extra.dim_value; }
@@ -1876,7 +2493,7 @@ class PathwaysOverallDashboard {
 		// One section = title, short lead, term → meaning rows, optional action.
 		const S = [
 			{ id: 'dashboard', title: __('Dashboard'), go: 'dash', lead: __('The headline numbers and where every applicant is right now.'), rows: [
-				[__('Five top cards'), __('Total Applicants, Total Select, Total Reject, Total Offer process, Total Joined. Applicants = New + Select + Reject.')],
+				[__('Top cards'), __('Total Applicants (100%) = New + Select + Reject + In Process + Offer Process + Joined — each applicant is in one card only, so the six add up to 100%. Select = cleared a round, next step not started; In Process = in a round with no result yet. Interview and feedback numbers are inside In Process.')],
 				[__('Click a top card'), __('The cards below change to that group. Select and Reject show every round (CV, Test, Recruiter, Functional, Final) with a unit table and the exact statuses counted. Click it again, or Close, to hide them — at first only the top cards show.')],
 				[__('View list'), __('Opens everyone in the chosen card, with one box per unit at the top.')],
 				[__('Board cards'), __('Where applicants are now: screening, interviews, feedback, compensation & offer, onboarding. "Action" marks work waiting on the team.')]] },
@@ -1973,9 +2590,11 @@ class PathwaysOverallDashboard {
 			$(b).toggleClass('is-on', on).attr('aria-selected', on ? 'true' : 'false');
 		});
 		$c.find('.pod-pane').each((_, p) => { p.hidden = $(p).data('pane') !== tab; });
-		// The Guide has nothing to filter, so the filter bar steps aside there.
-		$c.find('.pod-filters').prop('hidden', tab === 'guide');
+		// The Guide has nothing to filter, and Headcount has its own filters (year / units /
+		// departments), so the page filter bar steps aside on both.
+		$c.find('.pod-filters').prop('hidden', tab === 'guide' || tab === 'headcount');
 		if (tab === 'guide') this.render_guide_tab();
+		if (tab === 'headcount' && this.data && (this.hc_dirty || !this.hc)) this.render_hc_tab();
 		if (tab === 'timeline' && this.tl_dirty && this.data) this.render_tl_list();
 		if (tab === 'funnel' && this.fun_dirty && this.data) this.render_funnel_tab();
 		if (tab === 'analytics' && this.an_dirty && this.data) this.render_analytics();
@@ -1989,16 +2608,12 @@ class PathwaysOverallDashboard {
 	// filters: Sort by, Programme, Stage and Status. Each is a single choice,
 	// so it applies at once. Options only offer what the top filters allow,
 	// and Status lists the statuses actually present (with counts).
-	// Timeline tab cards: the Dashboard's top cards + New Applicant. A click
+	// Timeline tab cards: the Dashboard's top cards (Total + the five that add up to it). A click
 	// shows that group in the timeline list below (click again = everyone).
 	render_tl_cards(tl) {
 		const $el = this.$root.find('#pod-tl-cards');
-		const regs = this.sum('registrations');
-		const n_new = this.stage_total('New');
-		const defs = this.top_defs().concat([{ k: 'stage:New', view: 'new', tone: 'neutral', label: __('New Applicant'), v: n_new,
-			share: regs ? this.pct(n_new, regs) : null, share_of: __('of total registrations'),
-			desc: __('Nobody has screened the CV yet. Click to list them below.') }]);
-		$el.html(`<div class="pod-headline is-six">${defs.map((d, i) => this.card_html(d, i, tl.view)).join('')}</div>`);
+		const defs = this.top_defs();   // Total + the six cards that add up to it
+		$el.html(`<div class="pod-headline is-six is-seven">${defs.map((d, i) => this.card_html(d, i, tl.view)).join('')}</div>`);
 		this.bind_click($el.find('.pod-kpi.is-click'), (el) => {
 			const d = defs[+$(el).data('i')];
 			tl.view = d.view === tl.view ? 'all' : d.view;
@@ -2073,6 +2688,7 @@ class PathwaysOverallDashboard {
 			if (!extra.stages.length) { extra.stages = page; extra.stage = vw.stages[0]; }
 		}
 		if (vw && vw.card) { kind = 'card'; extra.card = vw.card; }
+		if (vw && vw.step_group) extra.step_group = vw.step_group;
 		if (tl.program) extra.programs = [tl.program];
 		if (tl.stage) extra.stage = tl.stage;
 		if (tl.status !== '') extra.status = tl.status;
@@ -4124,4 +4740,134 @@ const POD_CSS = `
 @container podpane (max-width: 1200px) { .pod-headline.is-five, .pod-headline.is-six { grid-template-columns:repeat(3, minmax(0,1fr)); }
 	.pod-rej-grid { grid-template-columns:repeat(3, minmax(0,1fr)) !important; } }
 @container podpane (max-width: 560px) { .pod-headline.is-five, .pod-headline.is-six, .pod-rej-grid { grid-template-columns:minmax(0,1fr) !important; } }
+/* Top row (2026-11-26): 7 cards — Total, New, Select, Reject, In Process, Offer Process, Joined. */
+.pod-headline.is-six.is-seven { grid-template-columns:repeat(7, minmax(0,1fr)); }
+.pod-root .pod-headline.is-six.is-seven { gap:12px; }
+.pod-root .pod-headline.is-six.is-seven .pod-kpi { padding:16px 14px 14px; }
+.pod-root .pod-headline.is-six.is-seven .pod-kpi-label { font-size:10.5px; letter-spacing:.015em; }
+.pod-root .pod-headline.is-six.is-seven .pod-kpi-label .pod-dot { margin-right:5px; }
+.pod-root .pod-headline.is-six.is-seven .pod-kpi-value { font-size:28px; gap:6px; flex-wrap:nowrap; }
+.pod-root .pod-headline.is-six.is-seven .pod-kpi-value .pod-share { font-size:11px; padding:1px 5px; }
+.pod-root .pod-headline.is-six.is-seven .pod-kpi-sub { font-size:11.5px; }
+@container podpane (max-width: 1200px) { .pod-headline.is-six.is-seven { grid-template-columns:repeat(4, minmax(0,1fr)); } }
+@container podpane (max-width: 900px) { .pod-headline.is-six.is-seven { grid-template-columns:repeat(2, minmax(0,1fr)); } }
+@container podpane (max-width: 560px) { .pod-headline.is-six.is-seven { grid-template-columns:minmax(0,1fr); } }
+/* Headcount tab (2026-11-26): own filter bar, six cards, plan-vs-joined bars, biggest gaps, unit / department table. */
+.pod-hc-filters { background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:12px 16px 14px; margin-bottom:16px; box-shadow:var(--shadow); }
+.pod-hc-filters .pod-filter-row { grid-template-columns:150px minmax(180px, 1fr) minmax(220px, 1.4fr) auto; }
+.pod-hc-title { font-size:15px; font-weight:700; color:var(--text); display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+.pod-hc-title .pod-muted { font-size:12.5px; font-weight:500; font-variant-numeric:tabular-nums; }
+.pod-hc-fy { height:32px; border:1px solid var(--border); border-radius:8px; padding:0 8px; font-size:12.5px; background:var(--bg); color:var(--text); width:100%; }
+.pod-hc-cards { margin-bottom:16px; }
+.pod-hc-grid { display:grid; grid-template-columns:minmax(0, 1.5fr) minmax(0, 1fr); gap:16px; }
+.pod-hc-grid .pod-panel { margin-bottom:16px; }
+.pod-hc-legend { display:flex; gap:14px; font-size:12px; color:var(--text-2); }
+.pod-hc-legend span { display:inline-flex; align-items:center; gap:6px; }
+.pod-hc-sw { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.pod-hc-sw.is-plan, .pod-hc-planbar { background:#C9DDF7; }
+.pod-hc-sw.is-join, .pod-hc-joinbar { background:#256ABF; }
+.pod-hc-chart { padding:10px 16px 14px; }
+.pod-hc-bar { display:grid; grid-template-columns:minmax(120px, 30%) minmax(0, 1fr) 150px; gap:12px; align-items:center; padding:7px 6px; border-radius:6px; }
+.pod-hc-bar.is-click { cursor:pointer; }
+.pod-hc-bar.is-click:hover { background:var(--hover); }
+.pod-hc-bar-label { font-size:13px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pod-hc-track { position:relative; height:18px; }
+.pod-hc-planbar { position:absolute; left:0; top:0; height:18px; border-radius:0 4px 4px 0; }
+.pod-hc-joinbar { position:absolute; left:0; top:5px; height:8px; border-radius:0 4px 4px 0; box-shadow:0 0 0 2px var(--bg); }
+.pod-hc-bar-val { font-size:12.5px; text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.pod-hc-pct { display:inline-block; min-width:44px; margin-left:4px; padding:1px 6px; border:1px solid var(--border); border-radius:4px; font-size:11.5px; font-weight:600; color:var(--text-2); text-align:center; }
+.pod-hc-pct.is-over { color:#B83232; border-color:color-mix(in srgb, #B83232 40%, transparent); }
+.pod-hc-gaps { padding:6px 10px 10px; }
+.pod-hc-gap { display:grid; grid-template-columns:auto minmax(0, 1fr) auto; gap:12px; align-items:center; padding:9px 8px; border-bottom:1px solid var(--border-soft); cursor:pointer; border-radius:6px; }
+.pod-hc-gap:last-of-type { border-bottom:0; }
+.pod-hc-gap:hover { background:var(--hover); }
+.pod-hc-gap-name { min-width:0; display:flex; flex-direction:column; }
+.pod-hc-gap-name b { font-size:13px; color:var(--text); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pod-hc-gap-name small { font-size:11.5px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pod-hc-gap-n { font-size:20px; font-weight:700; color:#B7651B; font-variant-numeric:tabular-nums; text-align:right; line-height:1; }
+.pod-hc-gap-n small { display:block; font-size:10.5px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-top:3px; }
+.pod-hc-more { padding:8px; font-size:12px; }
+.pod-hc-tools { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.pod-hc-seg { display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+.pod-hc-seg button { border:0; background:var(--bg); color:var(--text-2); font-size:12px; font-weight:600; padding:5px 11px; cursor:pointer; }
+.pod-hc-seg button + button { border-left:1px solid var(--border); }
+.pod-hc-seg button.is-on { background:var(--head); color:#fff; }
+.pod-hc-table-wrap { overflow-x:auto; }
+.pod-hc-table td, .pod-hc-table th { white-space:nowrap; }
+.pod-hc-table td:first-child { max-width:none; }
+.pod-hc-table th.is-num, .pod-hc-table td.is-num { width:104px; text-align:right; }
+.pod-hc-unit td { background:var(--bg-soft); border-top:1px solid var(--border); font-size:13.5px; cursor:pointer; }
+.pod-hc-dept td:first-child { padding-left:38px; color:var(--text); }
+.pod-hc-dept.is-flash td { background:color-mix(in srgb, #B7651B 12%, var(--bg)); transition:background .3s ease; }
+.pod-hc-none td { color:var(--muted); font-size:12.5px; }
+.pod-hc-rem { font-size:11.5px; }
+.pod-hc-dname { color:var(--text); }
+.pod-hc-guide { background:var(--bg); border:1px solid var(--border); border-left:3px solid #2C5F8A; border-radius:10px; margin-bottom:16px; box-shadow:var(--shadow); }
+.pod-hc-guide-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:11px 16px; }
+.pod-hc-guide-title { font-size:14px; font-weight:700; color:var(--text); }
+.pod-hc-guide-sum { font-size:12.5px; margin-right:auto; }
+.pod-hc-guide-body { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:18px; padding:4px 16px 12px; border-top:1px solid var(--border-soft); padding-top:14px; }
+.pod-hc-guide-foot { padding:9px 16px 12px; font-size:12px; color:var(--muted); border-top:1px solid var(--border-soft); }
+.pod-hc-guide.is-closed .pod-hc-guide-body, .pod-hc-guide.is-closed .pod-hc-guide-foot { display:none; }
+.pod-hc-step { display:flex; gap:10px; align-items:flex-start; min-width:0; }
+.pod-hc-step-n { flex:none; width:22px; height:22px; border-radius:50%; background:var(--head); color:#fff; font-size:12px; font-weight:700; display:grid; place-items:center; }
+.pod-hc-step b { font-size:13px; color:var(--text); }
+.pod-hc-step p { margin:3px 0 0; font-size:12.5px; line-height:1.5; color:var(--text-2); }
+.pod-hc-tags { list-style:none; margin:5px 0 0; padding:0; display:grid; gap:5px; font-size:12px; color:var(--text-2); }
+.pod-hc-tags .pod-pill { margin-right:7px; }
+@container podpane (max-width: 1100px) { .pod-hc-guide-body { grid-template-columns:repeat(2, minmax(0,1fr)); } }
+@container podpane (max-width: 560px) { .pod-hc-guide-body { grid-template-columns:minmax(0,1fr); } }
+.pod-hc-table td .pod-hc-roles { margin-top:3px; max-width:680px; font-size:11.5px; line-height:1.45; color:var(--muted); white-space:normal; }
+.pod-hc-caret { display:inline-block; width:14px; margin-right:6px; color:var(--muted); font-weight:700; transition:transform .15s ease; }
+.pod-hc-caret.is-open { transform:rotate(90deg); }
+.pod-hc-cnt { margin-left:8px; font-weight:400; font-size:12px; }
+.pod-hc-link { margin-left:12px; font-size:12px; font-weight:600; color:#2C5F8A; cursor:pointer; }
+.pod-hc-link:hover { text-decoration:underline; }
+.pod-hc-plan { font-weight:600; color:var(--text); }
+/* Applicants by department (first panel of the Headcount tab) */
+#pod-hc-apps-panel { margin:0 0 16px; }
+.pod-hc-apps-sub { margin-top:3px; font-size:11.5px; color:var(--muted); }
+#pod-hc-apps-panel .pod-panel-title .pod-info { margin-left:0; }
+.pod-hc-sum { display:flex; flex-wrap:wrap; border-bottom:1px solid var(--border-soft); background:var(--bg-soft); }
+.pod-hc-sum-i { flex:1 1 140px; display:flex; flex-direction:column; gap:3px; padding:10px 16px; border-right:1px solid var(--border-soft); min-width:0; cursor:default; }
+.pod-hc-sum-i:last-child { border-right:0; }
+.pod-hc-sum-i span { font-size:10.5px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); white-space:nowrap; }
+.pod-hc-sum-i b { font-size:19px; font-weight:700; color:var(--text); font-variant-numeric:tabular-nums; line-height:1.1; }
+.pod-hc-sum-i.is-pend b { color:#B7651B; }
+.pod-hc-apps { table-layout:fixed; min-width:1060px; font-variant-numeric:tabular-nums; }
+.pod-hc-apps col.pod-hc-c-name { width:17%; }
+.pod-hc-apps col.pod-hc-c-roles { width:19%; }
+.pod-hc-apps td.pod-hc-rolecell { white-space:normal; font-size:11.5px; line-height:1.4; color:var(--text-2); }
+.pod-hc-apps .pod-hc-unit td.pod-hc-rolecell { color:var(--muted); font-size:11.5px; }
+.pod-hc-more-roles { color:var(--link); white-space:nowrap; cursor:help; }
+.pod-hc-apps .pod-hc-cnt { white-space:nowrap; }
+.pod-hc-apps td:first-child, .pod-hc-apps .pod-hc-dname { white-space:normal; }
+.pod-hc-planlink { color:var(--text); font-weight:600; cursor:pointer; text-decoration:underline dotted var(--muted); text-underline-offset:3px; }
+.pod-hc-planlink:hover { color:var(--link); text-decoration:underline solid; }
+.pod-hc-planlink.is-zero { color:var(--muted); font-weight:400; }
+.pod-hc-planlink.is-new { color:var(--link); font-weight:600; text-decoration:none; font-size:12px; }
+.pod-hc-apps th { cursor:default; }
+.pod-hc-apps th.is-num { width:auto; white-space:normal; line-height:1.25; vertical-align:bottom; padding:7px 10px 8px; }
+.pod-hc-apps thead tr.pod-hc-grp th { position:static; background:var(--head-2); font-size:10.5px; font-weight:600; letter-spacing:.06em;
+	text-transform:uppercase; text-align:center; padding:6px 10px; border-bottom:1px solid rgba(255,255,255,.16); }
+.pod-hc-apps thead tr.pod-hc-grp th.pod-hc-th-name { background:var(--head); text-align:left; vertical-align:bottom; font-size:11.5px;
+	letter-spacing:0; text-transform:none; padding:8px 12px; }
+.pod-hc-apps thead tr + tr th { position:static; }
+.pod-hc-apps th.pod-hc-apptot, .pod-hc-apps td.pod-hc-apptot { border-right:1px solid var(--border); }
+.pod-hc-apps thead th.pod-hc-apptot { border-right-color:rgba(255,255,255,.22); }
+.pod-hc-apps thead th.pod-hc-pendcell, .pod-hc-apps thead tr.pod-hc-grp th + th { border-left:1px solid rgba(255,255,255,.22); }
+.pod-hc-apps td.pod-hc-pendcell { border-left:1px solid var(--border); background:color-mix(in srgb, #B7651B 4%, transparent); }
+.pod-hc-apps th.pod-hc-pendcell small { display:block; font-weight:400; opacity:.75; font-size:10.5px; }
+.pod-hc-apps td { padding:8px 10px; vertical-align:middle; }
+.pod-hc-apps td.pod-hc-apptot .pod-num { font-weight:700; }
+.pod-hc-apps .pod-hc-unit td { font-size:13px; }
+.pod-hc-apps .pod-hc-dept td:first-child { padding-left:36px; }
+.pod-hc-apps td.pod-hc-note { color:var(--muted); font-size:11.5px; font-style:italic; text-align:center; border-right:1px solid var(--border-soft); }
+.pod-hc-apps tfoot td { background:var(--bg-soft); border-top:2px solid var(--border); border-bottom:0; padding:10px; }
+.pod-hc-pend { color:#B7651B; }
+.pod-hc-done { color:#2F7D4F; font-weight:600; }
+.pod-hc-table tfoot td { font-weight:700; }
+@container podpane (max-width: 1000px) { .pod-hc-grid { grid-template-columns:minmax(0,1fr); } .pod-hc-filters .pod-filter-row { grid-template-columns:repeat(2, minmax(0,1fr)); } }
+@container podpane (max-width: 560px) { .pod-hc-bar { grid-template-columns:minmax(0,1fr) 120px; } .pod-hc-track { grid-column:1 / -1; grid-row:2; } .pod-hc-filters .pod-filter-row { grid-template-columns:minmax(0,1fr); } }
+@media (prefers-reduced-motion: reduce) { .pod-hc-caret, .pod-hc-dept.is-flash td { transition:none; } }
 `;

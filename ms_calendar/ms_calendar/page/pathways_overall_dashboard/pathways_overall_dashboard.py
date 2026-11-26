@@ -128,7 +128,9 @@ _OFFER = {"offer", "offered", "offer accepted", "joined", "pre joining", "docume
           "it email not sent",
           "erp id created", "erp id not created"}
 _CLOSED = {"not selected", "offer declined", "document verification fail", "blocklisted",
-           "blocklist", "duplicated", "addendum declined", "not joined"}
+           "blocklist", "duplicated", "addendum declined", "not joined",
+           # cloud check 2026-11-26: these end the journey too (Field / Health options)
+           "application withdrawn", "offer revoked"}
 
 
 # Select / Reject views (2026-11-24). Every applicant in the top card falls in
@@ -208,7 +210,8 @@ _ROUND_ONE = ("functional", "subject", "education capacity", "technical", "demo"
 def _select_group(status):
     """Which step an open (not rejected, not new) status belongs to (keyword rules, like _stage)."""
     s = (status or "").strip().lower()
-    sel = "select" in s
+    # Health says "Shortlist - CV / R1 / R2 / R3" for a Select result (cloud check 2026-11-26).
+    sel = "select" in s or "shortlist" in s
     if "hold" in s:
         return "hold"
     if "cv" in s.split() or s.startswith("cv ") or "pre shortlist" in s:
@@ -443,6 +446,65 @@ STATUS["offer_process"] = _statuses(
     "doc_collection", "fitment", "comp_approved", "comp_due", "offer_sent", "offer_not_sent", "offer_accepted",
     "addendum_accepted", "prejoin_done", "prejoin_pending", "it_sent", "it_not_sent")
 TOP_CARDS = FUNNEL_CARDS + ["offer_process"]
+
+# Top-row tally (2026-11-26): every applicant sits in exactly ONE of
+# New / In process / Offer process / Joined / Reject, so the five cards add up
+# to Total Applicants (100%). Offer process / Joined use the same status lists
+# as the Offer process / Joined cards; "In process" is every other open status
+# (screening done, test, interview rounds, on hold, …).
+_TALLY_JOINED = {_status_key(x) for v in STATUS["reach_joined"].values() for x in v}
+_TALLY_OFFER = {_status_key(x) for v in STATUS["offer_process"].values() for x in v} - _TALLY_JOINED
+
+
+_SELECT_SECTION = {g[0]: g[4] for g in SELECT_GROUPS}
+
+
+def _tally(status):
+    st = _stage(status)
+    if st == "New":
+        return "new"
+    if st == "Not selected":
+        return "reject"
+    k = _status_key(status)
+    if k in _TALLY_JOINED:
+        return "joined"
+    if k in _TALLY_OFFER:
+        return "offer"
+    # Statuses on the offer path that a unit's STATUS lists don't name (e.g. Field
+    # "Pre-join Form" / "Pre-join Pending") still belong to Offer process / Joined.
+    g = _select_group(status)
+    if g == "joined":
+        return "joined"
+    if g in ("docs", "comp", "onboarding", "offer"):
+        return "offer"
+    # Open, before the offer: "select" = cleared a round (a Select result), "process" = no result yet.
+    return "select" if _SELECT_SECTION.get(_select_group(status)) == "result" else "process"
+
+
+# Order of the top row (user, 2026-11-26): Total, New, Select, Reject, In Process, Offer Process, Joined.
+TALLY_GROUPS = [
+    ("new", "New Applicants", "awaiting CV screening", "Registered; nobody has screened the CV yet.", "result"),
+    ("select", "Select", "cleared a round, next not started",
+     "Selected at a round and not moved on yet: CV Shortlist, Test Select, Recruiter / Functional / Final Round Select.",
+     "result"),
+    ("reject", "Reject", "journey ended without selection",
+     "Any Reject / Regret / No Show status, Not Selected, Offer declined, Not joined, Duplicated or Blocklisted.", "result"),
+    ("process", "In Process", "in a round, no result yet",
+     "In a test or interview round with no result yet, on hold, talent pool or another open status before the offer.",
+     "result"),
+    ("offer", "Offer Process", "documents → offer → onboarding",
+     "Document collection, fitment, compensation, offer sent / accepted, addendum, pre-joining or IT email — not joined yet.",
+     "result"),
+    ("joined", "Joined", "joined or ERP ID stage", "Joined, or at the ERP ID stage.", "result"),
+]
+STEP_SETS["tally"] = (TALLY_GROUPS, _tally, tuple(STAGES))
+# The Select and In Process cards open their steps: only the statuses the tally puts in that
+# card (offer process / joined have their own cards), so the steps add up to the card.
+_SEL_STAGES = STEP_SETS["select"][2]
+STEP_SETS["select"] = ([g for g in SELECT_GROUPS if g[4] == "result"],
+                       lambda st: _select_group(st) if _tally(st) == "select" else None, _SEL_STAGES)
+STEP_SETS["process"] = ([g for g in SELECT_GROUPS if g[4] == "process"],
+                        lambda st: _select_group(st) if _tally(st) == "process" else None, _SEL_STAGES)
 
 # Offer update charts (Timeline tab): everyone who has been made an offer,
 # split by where that offer stands now. The four groups don't overlap.
@@ -710,6 +772,7 @@ class _Prog:
         self.panel_from = self.panel_to = None
         self.pipe = None                  # "open" / "ended" (Timeline tab)
         self.dmin = self.dmax = None      # days-in-pipeline range (Timeline tab)
+        self.hc_cond = None               # one Headcount Plan line (headcount.apply_hc): (sql, params)
         self.key = cfg["key"]
         self.stages = f.stages
         fields = ["name", "creation", "modified", cfg["title"], cfg["email"], cfg["phone"], cfg["status"],
@@ -752,6 +815,10 @@ class _Prog:
             else:
                 conds.append(f"{col} IN %({pf}{fkey})s")
                 params[f"{pf}{fkey}"] = tuple(vals)
+        if self.hc_cond:
+            # Applicants counted under one Headcount Plan line (department / role rule in headcount.py).
+            conds.append(self.hc_cond[0])
+            params.update(self.hc_cond[1])
         if f.get("dim"):
             # One analytics value (source / gender / …); a form that doesn't capture it has no rows.
             expr = self.dim_expr(f.dim)
@@ -945,7 +1012,7 @@ def _progs(f):
 @frappe.whitelist()
 def get_dashboard_data(programs=None, from_date=None, to_date=None, stages=None, refresh=0, **kw):
     f = _parse_filters(programs, from_date, to_date, stages, **{k: kw.get(k) for k in FILTER_KEYS})
-    key = "pathways_overall:v11:" + hashlib.sha1(
+    key = "pathways_overall:v15:" + hashlib.sha1(
         frappe.as_json([frappe.session.user, f]).encode()).hexdigest()
     if not cint(refresh):
         hit = frappe.cache.get_value(key)
@@ -1072,7 +1139,10 @@ def get_dashboard_data(programs=None, from_date=None, to_date=None, stages=None,
         for r in status_rows:
             if r["stage"] not in stages:
                 continue
-            g = rg[classify(r["raw"])]
+            gk = classify(r["raw"])
+            if gk is None:          # outside this set (e.g. offer process / joined for "select")
+                continue
+            g = rg[gk]
             g["value"] += r["count"]
             g["units"][r["program"]] = g["units"].get(r["program"], 0) + r["count"]
             g["statuses"][r["status"]] = g["statuses"].get(r["status"], 0) + r["count"]
@@ -1124,10 +1194,22 @@ def get_dashboard_data(programs=None, from_date=None, to_date=None, stages=None,
         "has_status_log": any(c.get("status_log") and c["key"] in f.programs and _can_prog(c)
                               for c in PROGRAMS),
         "all_time_registrations": all_time,
+        # 7th top card: this year's Headcount Plan total (None = no access / DocType not on this site).
+        "headcount": _headcount_summary(),
         "generated_at": frappe.utils.now(),
     }
     frappe.cache.set_value(key, out, expires_in_sec=CACHE_SECONDS)
     return out
+
+
+def _headcount_summary():
+    try:
+        from ms_calendar.ms_calendar.page.pathways_overall_dashboard.headcount import headcount_summary
+        return headcount_summary()
+    except Exception:
+        # Never let the plan card break the dashboard (e.g. DocType not migrated yet).
+        frappe.log_error(title="Pathways dashboard: headcount summary failed")
+        return None
 
 
 OPTIONS_CACHE_SECONDS = 600
@@ -1405,7 +1487,7 @@ def _setup_progs(filters, stage=None, status=None, pipe=None, days_min=None, day
 
 
 def _drill_setup(kind, filters, stage=None, status=None, card=None, date_from=None, date_to=None, own_dates=0,
-                 pipe=None, days_min=None, days_max=None, step_group=None):
+                 pipe=None, days_min=None, days_max=None, step_group=None, hc=None):
     if kind not in DRILL_KINDS:
         frappe.throw("Unknown drilldown")
     if cint(own_dates):
@@ -1428,6 +1510,10 @@ def _drill_setup(kind, filters, stage=None, status=None, card=None, date_from=No
         _, classify, stages = STEP_SETS[set_key]
         for pg in progs:
             pg.rej_statuses = [r.s for r in pg.status_counts() if _stage(r.s) in stages and classify(r.s) == step]
+    if hc:
+        # One number of the Headcount Plan view: that unit, its financial year, its plan line, its measure.
+        from ms_calendar.ms_calendar.page.pathways_overall_dashboard.headcount import apply_hc
+        progs = apply_hc(progs, hc)
     today = getdate(nowdate())
     parts = []
     for pg in progs:
@@ -2091,9 +2177,10 @@ def get_drilldown(kind, stage=None, status=None, card=None, page=1, page_size=10
     queries as the summary, no cap on how many rows exist.
     """
     step_group = kw.pop("step_group", None)
+    hc = kw.pop("hc", None)
     kind, parts = _drill_setup(kind, _filters_from(kw), stage, status, card, date_from, date_to, own_dates,
-                               pipe, days_min, days_max, step_group)
-    page_size = cint(page_size) if cint(page_size) in PAGE_SIZES else 100
+                               pipe, days_min, days_max, step_group, hc)
+    page_size =cint(page_size) if cint(page_size) in PAGE_SIZES else 100
     page = max(1, cint(page) or 1)
     col, d, order = _order(kind, sort_by, sort_dir, card)
     if not parts:
@@ -2161,9 +2248,10 @@ def export_drilldown_csv(kind, stage=None, status=None, card=None, sort_by=None,
 
     date_label = (CARDS.get(card) or {}).get("date_label") if kind == "card" else None
     step_group = kw.pop("step_group", None)
+    hc = kw.pop("hc", None)
     kind, parts = _drill_setup(kind, _filters_from(kw), stage, status, card, date_from, date_to, own_dates,
-                               pipe, days_min, days_max, step_group)
-    _, _, order = _order(kind, sort_by, sort_dir)
+                               pipe, days_min, days_max, step_group, hc)
+    _, _, order =_order(kind, sort_by, sort_dir)
     cols = [c for c in _kind_cols(kind) if c != "by_"] + (["by"] if kind == "feedback" else []) + ["stage"]
     if kind == "feedback":
         cols = [c for c in cols if c != "status"] + ["status"]
